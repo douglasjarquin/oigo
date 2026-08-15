@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "OigoCore", targets: ["OigoCore"]),
         .library(name: "OigoCapture", targets: ["OigoCapture"]),
         .library(name: "OigoTranscription", targets: ["OigoTranscription"]),
+        .library(name: "OigoInsertion", targets: ["OigoInsertion"]),
         .library(name: "OigoSpike", targets: ["OigoSpike"]),
         .executable(name: "Oigo", targets: ["Oigo"]),
         .executable(name: "oigo-spike", targets: ["OigoSpikeCLI"]),
@@ -26,6 +27,10 @@ let package = Package(
         .executable(
             name: "oigo-issue5-contract-tests",
             targets: ["OigoIssue5ContractTests"]
+        ),
+        .executable(
+            name: "oigo-issue6-contract-tests",
+            targets: ["OigoIssue6ContractTests"]
         )
     ],
     targets: [
@@ -51,6 +56,16 @@ let package = Package(
             ]
         ),
         .target(
+            name: "OigoInsertion",
+            dependencies: ["OigoCore"],
+            path: "Sources/OigoInsertion",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("ApplicationServices"),
+                .linkedFramework("CoreGraphics")
+            ]
+        ),
+        .target(
             name: "OigoSpike",
             linkerSettings: [
                 .linkedFramework("AVFAudio"),
@@ -70,7 +85,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "Oigo",
-            dependencies: ["OigoCore", "OigoCapture", "OigoTranscription"],
+            dependencies: ["OigoCore", "OigoCapture", "OigoTranscription", "OigoInsertion"],
             path: "Sources/Oigo",
             linkerSettings: [
                 .linkedFramework("AppKit")
@@ -90,6 +105,11 @@ let package = Package(
             name: "OigoIssue5ContractTests",
             dependencies: ["OigoCore", "OigoTranscription"],
             path: "Tests/OigoIssue5ContractTests"
+        ),
+        .executableTarget(
+            name: "OigoIssue6ContractTests",
+            dependencies: ["OigoCore", "OigoInsertion"],
+            path: "Tests/OigoIssue6ContractTests"
         )
     ]
 )

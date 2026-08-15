@@ -1,4 +1,5 @@
 import AVFAudio
+import CoreAudio
 import Foundation
 import OigoCore
 
@@ -48,12 +49,12 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             throw AudioRecorderError.missingApplicationBundle
         }
 
-        let inputFormat = AVAudioEngine().inputNode.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+        guard let inputConfiguration = Self.inputConfiguration(),
+              inputConfiguration.channelCount == 1 else {
             throw AudioRecorderError.invalidInputFormat
         }
         return AudioCaptureFormat(
-            sampleRate: inputFormat.sampleRate,
+            sampleRate: inputConfiguration.sampleRate,
             channelCount: 1
         )
     }
@@ -122,14 +123,17 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
-        let nativeFormat = inputNode.outputFormat(forBus: 0)
-        guard nativeFormat.sampleRate > 0, nativeFormat.channelCount > 0 else {
+        guard let inputConfiguration = Self.inputConfiguration(),
+              inputConfiguration.channelCount == 1 else {
             throw AudioRecorderError.invalidInputFormat
         }
         let captureFormat = AVAudioFormat(
-            standardFormatWithSampleRate: nativeFormat.sampleRate,
-            channels: 1
-        ) ?? nativeFormat
+            standardFormatWithSampleRate: inputConfiguration.sampleRate,
+            channels: AVAudioChannelCount(inputConfiguration.channelCount)
+        )
+        guard let captureFormat else {
+            throw AudioRecorderError.invalidInputFormat
+        }
 
         let file = try AVAudioFile(
             forWriting: url,
@@ -151,7 +155,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         lock.unlock()
 
         do {
-            inputNode.installTap(onBus: 0, bufferSize: 1_024, format: captureFormat) { [weak self] buffer, _ in
+            inputNode.installTap(onBus: 0, bufferSize: 1_024, format: nil) { [weak self] buffer, _ in
                 self?.handle(buffer)
             }
             let observer = NotificationCenter.default.addObserver(
@@ -229,6 +233,92 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             return Data()
         }
         return Data(bytes: data, count: Int(audioBuffer.mDataByteSize))
+    }
+
+    private struct InputConfiguration {
+        let sampleRate: Double
+        let channelCount: UInt32
+    }
+
+    private static func inputConfiguration() -> InputConfiguration? {
+        var deviceAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var device = AudioDeviceID(kAudioObjectUnknown)
+        var deviceSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &deviceAddress,
+            0,
+            nil,
+            &deviceSize,
+            &device
+        ) == noErr,
+        device != AudioDeviceID(kAudioObjectUnknown) else {
+            return nil
+        }
+
+        var streamAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var streamSize = UInt32(0)
+        guard AudioObjectGetPropertyDataSize(
+            device,
+            &streamAddress,
+            0,
+            nil,
+            &streamSize
+        ) == noErr,
+        streamSize >= UInt32(MemoryLayout<AudioBufferList>.size) else {
+            return nil
+        }
+
+        let streamBuffer = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(streamSize),
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { streamBuffer.deallocate() }
+        guard AudioObjectGetPropertyData(
+            device,
+            &streamAddress,
+            0,
+            nil,
+            &streamSize,
+            streamBuffer
+        ) == noErr else {
+            return nil
+        }
+        let buffers = UnsafeMutableAudioBufferListPointer(
+            streamBuffer.assumingMemoryBound(to: AudioBufferList.self)
+        )
+        let channelCount = buffers.reduce(0) { $0 + $1.mNumberChannels }
+        guard channelCount > 0 else {
+            return nil
+        }
+
+        var rateAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var sampleRate = Float64(0)
+        var rateSize = UInt32(MemoryLayout<Float64>.size)
+        guard AudioObjectGetPropertyData(
+            device,
+            &rateAddress,
+            0,
+            nil,
+            &rateSize,
+            &sampleRate
+        ) == noErr,
+        sampleRate > 0 else {
+            return nil
+        }
+        return InputConfiguration(sampleRate: sampleRate, channelCount: channelCount)
     }
 
     private func beginTeardown() -> TeardownResources? {

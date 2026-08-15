@@ -78,6 +78,7 @@ public struct DictationStateMachine: Sendable {
         Transition(from: .finalizing, event: .finalized, to: .cleaning),
         Transition(from: .cleaning, event: .cleaned, to: .inserting),
         Transition(from: .inserting, event: .inserted, to: .complete),
+        Transition(from: .complete, event: .finalized, to: .cleaning),
         Transition(from: .complete, event: .reset, to: .idle),
         Transition(from: .failed, event: .reset, to: .idle),
         Transition(from: .cancelled, event: .reset, to: .idle),
@@ -155,6 +156,7 @@ public enum DictationCoordinatorError: Error, Equatable, CustomStringConvertible
     case workAlreadyActive
     case recordingNotActive
     case retryDidNotPersist
+    case rawTranscriptNotPersisted
 
     public var description: String {
         switch self {
@@ -164,6 +166,8 @@ public enum DictationCoordinatorError: Error, Equatable, CustomStringConvertible
             return "dictation recording is not active"
         case .retryDidNotPersist:
             return "saved transcription retry did not persist a completed canonical transcript"
+        case .rawTranscriptNotPersisted:
+            return "canonical raw transcript was not persisted before insertion"
         }
     }
 }
@@ -518,6 +522,73 @@ public final class DictationCoordinator {
             releaseCapture()
             throw error
         }
+    }
+
+    @discardableResult
+    public func beginInsertion(using store: SessionStore) throws -> DictationSession {
+        guard state == .complete,
+              let session = currentSession,
+              session.metadata.state == .completed,
+              session.metadata.rawTextByteCount != nil else {
+            throw DictationCoordinatorError.rawTranscriptNotPersisted
+        }
+        sessionStore = store
+        _ = try apply(.finalized)
+        _ = try apply(.cleaned)
+        return session
+    }
+
+    @discardableResult
+    public func finishInsertion(
+        outcome: InsertionOutcome,
+        reason: String? = nil,
+        at date: Date = Date()
+    ) throws -> DictationSession {
+        guard state == .inserting,
+              let session = currentSession,
+              let sessionStore else {
+            throw DictationCoordinatorError.recordingNotActive
+        }
+        let completedSession = try sessionStore.update(
+            session,
+            state: .completed,
+            at: date,
+            insertionOutcome: outcome,
+            insertionFailureReason: reason
+        )
+        _ = try apply(.inserted)
+        currentSession = completedSession
+        diagnostics.record("transcript insertion finished as " + outcome.rawValue)
+        return completedSession
+    }
+
+    @discardableResult
+    public func failInsertion(
+        reason: String,
+        at date: Date = Date()
+    ) -> DictationSession? {
+        guard state == .inserting,
+              let session = currentSession,
+              let sessionStore else {
+            return nil
+        }
+        let failedSession = try? sessionStore.update(
+            session,
+            state: .completed,
+            at: date,
+            insertionOutcome: .failed,
+            insertionFailureReason: reason
+        )
+        guard let failedSession else {
+            lastFailureReason = reason
+            _ = try? apply(.fail)
+            return nil
+        }
+        _ = try? apply(.inserted)
+        currentSession = failedSession
+        lastFailureReason = reason
+        diagnostics.record("transcript insertion failed: " + reason)
+        return failedSession
     }
 
     @discardableResult

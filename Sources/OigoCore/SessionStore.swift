@@ -20,6 +20,13 @@ public enum DictationSessionState: String, Codable, CaseIterable, Sendable {
     }
 }
 
+public enum InsertionOutcome: String, Codable, CaseIterable, Equatable, Sendable {
+    case pasted
+    case copied
+    case secureRejected
+    case failed
+}
+
 public struct SessionMetadata: Codable, Equatable, Sendable {
     public let id: UUID
     public let directoryName: String
@@ -32,6 +39,9 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
     public var failureReason: String?
     public var audioByteCount: Int64?
     public var rawTextByteCount: Int64?
+    public var insertionOutcome: InsertionOutcome?
+    public var insertionFailureReason: String?
+    public var insertionAttemptedAt: Date?
     public let audioFileName: String
     public let rawTextFileName: String
     public let cleanTextFileName: String
@@ -48,6 +58,9 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         failureReason: String? = nil,
         audioByteCount: Int64? = nil,
         rawTextByteCount: Int64? = nil,
+        insertionOutcome: InsertionOutcome? = nil,
+        insertionFailureReason: String? = nil,
+        insertionAttemptedAt: Date? = nil,
         audioFileName: String = "audio.caf",
         rawTextFileName: String = "raw.txt",
         cleanTextFileName: String = "clean.txt"
@@ -63,6 +76,9 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         self.failureReason = failureReason
         self.audioByteCount = audioByteCount
         self.rawTextByteCount = rawTextByteCount
+        self.insertionOutcome = insertionOutcome
+        self.insertionFailureReason = insertionFailureReason
+        self.insertionAttemptedAt = insertionAttemptedAt
         self.audioFileName = audioFileName
         self.rawTextFileName = rawTextFileName
         self.cleanTextFileName = cleanTextFileName
@@ -113,6 +129,7 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
     case missingSession(UUID)
     case invalidMetadata(URL)
     case invalidSessionDirectory(URL)
+    case insertionAlreadyAttempted(UUID)
 
     public var description: String {
         switch self {
@@ -122,6 +139,8 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
             "dictation session metadata is invalid: " + url.path
         case .invalidSessionDirectory(let url):
             "dictation session directory is invalid: " + url.path
+        case .insertionAlreadyAttempted(let id):
+            "dictation session insertion was already attempted: " + id.uuidString
         }
     }
 }
@@ -243,7 +262,9 @@ public final class SessionStore: @unchecked Sendable {
         at date: Date = Date(),
         failureReason: String? = nil,
         audioByteCount: Int64? = nil,
-        rawTextByteCount: Int64? = nil
+        rawTextByteCount: Int64? = nil,
+        insertionOutcome: InsertionOutcome? = nil,
+        insertionFailureReason: String? = nil
     ) throws -> DictationSession {
         lock.lock()
         defer { lock.unlock() }
@@ -273,7 +294,33 @@ public final class SessionStore: @unchecked Sendable {
             if let rawTextByteCount {
                 metadata.rawTextByteCount = rawTextByteCount
             }
+            if let insertionOutcome {
+                metadata.insertionOutcome = insertionOutcome
+                metadata.insertionFailureReason = insertionFailureReason
+            }
 
+            try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
+            return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
+        }
+    }
+
+    @discardableResult
+    public func claimInsertion(
+        for session: DictationSession,
+        at date: Date = Date()
+    ) throws -> DictationSession {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            guard current.metadata.insertionAttemptedAt == nil,
+                  current.metadata.insertionOutcome == nil else {
+                throw SessionStoreError.insertionAlreadyAttempted(current.id)
+            }
+            var metadata = current.metadata
+            metadata.updatedAt = date
+            metadata.insertionAttemptedAt = date
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
             return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
         }

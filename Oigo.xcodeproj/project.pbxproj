@@ -35,6 +35,12 @@
         A0000001000000000000001A /* SavedAudioRetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000018 /* SavedAudioRetry.swift */; };
         A0000001000000000000001B /* TranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000019 /* TranscriptStore.swift */; };
         A0000001000000000000001C /* TranscriptionStartupGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001A /* TranscriptionStartupGate.swift */; };
+        A0000001000000000000001D /* InsertionContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001C /* InsertionContracts.swift */; };
+        A0000001000000000000001E /* InsertionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001D /* InsertionService.swift */; };
+        A0000001000000000000001F /* ApplicationServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001E /* ApplicationServices.framework */; };
+        A00000010000000000000020 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001F /* CoreGraphics.framework */; };
+        A00000010000000000000021 /* libOigoInsertion.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001B /* libOigoInsertion.a */; };
+        A00000010000000000000022 /* libOigoCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000B /* libOigoCore.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -73,6 +79,13 @@
             remoteGlobalIDString = E00000010000000000000002;
             remoteInfo = OigoCore;
         };
+        K00000010000000000000006 /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = F00000010000000000000001 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = E00000010000000000000005;
+            remoteInfo = OigoInsertion;
+        };
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
@@ -102,6 +115,11 @@
         B00000010000000000000018 /* SavedAudioRetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedAudioRetry.swift; sourceTree = "<group>"; };
         B00000010000000000000019 /* TranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStore.swift; sourceTree = "<group>"; };
         B0000001000000000000001A /* TranscriptionStartupGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionStartupGate.swift; sourceTree = "<group>"; };
+        B0000001000000000000001B /* libOigoInsertion.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoInsertion.a; sourceTree = BUILT_PRODUCTS_DIR; };
+        B0000001000000000000001C /* InsertionContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertionContracts.swift; sourceTree = "<group>"; };
+        B0000001000000000000001D /* InsertionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertionService.swift; sourceTree = "<group>"; };
+        B0000001000000000000001E /* ApplicationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ApplicationServices.framework; path = System/Library/Frameworks/ApplicationServices.framework; sourceTree = SDKROOT; };
+        B0000001000000000000001F /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -116,6 +134,7 @@
                 A00000010000000000000010 /* AVFAudio.framework in Frameworks */,
                 A00000010000000000000011 /* libOigoCapture.a in Frameworks */,
                 A00000010000000000000013 /* libOigoTranscription.a in Frameworks */,
+                A00000010000000000000021 /* libOigoInsertion.a in Frameworks */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -147,6 +166,18 @@
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
+        D00000010000000000000010 /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A0000001000000000000000A /* Foundation.framework in Frameworks */,
+                A00000010000000000000008 /* AppKit.framework in Frameworks */,
+                A0000001000000000000001F /* ApplicationServices.framework in Frameworks */,
+                A00000010000000000000020 /* CoreGraphics.framework in Frameworks */,
+                A00000010000000000000022 /* libOigoCore.a in Frameworks */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -157,6 +188,7 @@
                 C00000010000000000000003 /* OigoCore */,
                 C00000010000000000000006 /* OigoCapture */,
                 C00000010000000000000007 /* OigoTranscription */,
+                C00000010000000000000008 /* OigoInsertion */,
                 B0000001000000000000000C /* Info.plist */,
                 C00000010000000000000004 /* Frameworks */,
                 C00000010000000000000005 /* Products */,
@@ -207,6 +239,15 @@
             path = Sources/OigoTranscription;
             sourceTree = "<group>";
         };
+        C00000010000000000000008 /* OigoInsertion */ = {
+            isa = PBXGroup;
+            children = (
+                B0000001000000000000001C /* InsertionContracts.swift */,
+                B0000001000000000000001D /* InsertionService.swift */,
+            );
+            path = Sources/OigoInsertion;
+            sourceTree = "<group>";
+        };
         C00000010000000000000004 /* Frameworks */ = {
             isa = PBXGroup;
             children = (
@@ -226,6 +267,7 @@
                 B0000001000000000000000B /* libOigoCore.a */,
                 B0000001000000000000000E /* libOigoCapture.a */,
                 B00000010000000000000013 /* libOigoTranscription.a */,
+                B0000001000000000000001B /* libOigoInsertion.a */,
             );
             name = Products;
             sourceTree = "<group>";
@@ -247,6 +289,7 @@
                 J00000010000000000000001 /* PBXTargetDependency */,
                 J00000010000000000000002 /* PBXTargetDependency */,
                 J00000010000000000000004 /* PBXTargetDependency */,
+                J00000010000000000000007 /* PBXTargetDependency */,
             );
             name = Oigo;
             productName = Oigo;
@@ -303,6 +346,23 @@
             productReference = B00000010000000000000013 /* libOigoTranscription.a */;
             productType = "com.apple.product-type.library.static";
         };
+        E00000010000000000000005 /* OigoInsertion */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = N00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoInsertion" */;
+            buildPhases = (
+                D00000010000000000000011 /* Sources */,
+                D00000010000000000000010 /* Frameworks */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+                J00000010000000000000006 /* PBXTargetDependency */,
+            );
+            name = OigoInsertion;
+            productName = OigoInsertion;
+            productReference = B0000001000000000000001B /* libOigoInsertion.a */;
+            productType = "com.apple.product-type.library.static";
+        };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -324,6 +384,9 @@
                     E00000010000000000000004 = {
                         CreatedOnToolsVersion = 16.0;
                     };
+                    E00000010000000000000005 = {
+                        CreatedOnToolsVersion = 16.0;
+                    };
                 };
             };
             buildConfigurationList = G00000010000000000000011 /* Build configuration list for PBXProject "Oigo" */;
@@ -343,6 +406,7 @@
                 E00000010000000000000002 /* OigoCore */,
                 E00000010000000000000003 /* OigoCapture */,
                 E00000010000000000000004 /* OigoTranscription */,
+                E00000010000000000000005 /* OigoInsertion */,
             );
         };
 /* End PBXProject section */
@@ -405,6 +469,15 @@
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
+        D00000010000000000000011 /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A0000001000000000000001D /* InsertionContracts.swift in Sources */,
+                A0000001000000000000001E /* InsertionService.swift in Sources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -432,6 +505,16 @@
             isa = PBXTargetDependency;
             target = E00000010000000000000002 /* OigoCore */;
             targetProxy = K00000010000000000000005 /* PBXContainerItemProxy */;
+        };
+        J00000010000000000000006 /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = E00000010000000000000002 /* OigoCore */;
+            targetProxy = K00000010000000000000003 /* PBXContainerItemProxy */;
+        };
+        J00000010000000000000007 /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = E00000010000000000000005 /* OigoInsertion */;
+            targetProxy = K00000010000000000000006 /* PBXContainerItemProxy */;
         };
 /* End PBXTargetDependency section */
 
@@ -546,6 +629,28 @@
             };
             name = Release;
         };
+        N00000010000000000000001 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = arm64;
+                CODE_SIGNING_ALLOWED = NO;
+                CODE_SIGN_IDENTITY = "";
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_NAME = OigoInsertion;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Debug;
+        };
+        N00000010000000000000002 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = arm64;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_NAME = OigoInsertion;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Release;
+        };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -590,6 +695,15 @@
             buildConfigurations = (
                 M00000010000000000000001 /* Debug */,
                 M00000010000000000000002 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        N00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoInsertion" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                N00000010000000000000001 /* Debug */,
+                N00000010000000000000002 /* Release */,
             );
             defaultConfigurationIsVisible = 0;
             defaultConfigurationName = Release;

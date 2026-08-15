@@ -4,12 +4,21 @@ import Foundation
 import OigoCore
 import OigoCapture
 import OigoTranscription
+import OigoInsertion
 
 @MainActor
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
+    private enum InsertionDisplayStatus: String {
+        case finalizing = "Finalizing"
+        case pasted = "Pasted"
+        case copied = "Copied"
+        case failed = "Failed"
+    }
+
     private let coordinator = DictationCoordinator()
     private let recorder = AudioRecorder()
     private let transcription = TranscriptionService()
+    private let insertion = InsertionService()
     private let playback = AudioPlayback()
     private let shortcutRegistrar = CarbonGlobalShortcutRegistrar()
     private let statusSurface = StatusSurfaceController()
@@ -23,6 +32,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var revealItem: NSMenuItem?
     private var retryItem: NSMenuItem?
     private var shortcut = OigoAppDelegate.loadShortcut()
+    private var targetSnapshot: InsertionTargetSnapshot?
+    private var insertionDisplayStatus: InsertionDisplayStatus?
+    private var toggleTaskInFlight = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
@@ -36,6 +48,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
         shortcutRegistrar.unregister()
+        statusSurface.hide()
         playback.stop()
         if coordinator.hasActiveTranscription {
             Task { @MainActor [weak self] in
@@ -147,7 +160,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleToggle() {
+        guard !toggleTaskInFlight else {
+            return
+        }
+        toggleTaskInFlight = true
         Task { @MainActor [weak self] in
+            defer { self?.toggleTaskInFlight = false }
             await self?.performToggle()
         }
     }
@@ -161,6 +179,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                         SessionStore.defaultRootDirectory()
                     )
                 }
+                insertionDisplayStatus = nil
+                targetSnapshot = insertion.captureTarget()
                 if AVAudioApplication.shared.recordPermission == .undetermined {
                     _ = await AudioRecorder.requestMicrophonePermission()
                 }
@@ -177,7 +197,26 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     }
                 )
             case .recording:
-                lastSession = try await coordinator.stopRecordingWithTranscription()
+                insertionDisplayStatus = .finalizing
+                updateSurface()
+                _ = try await coordinator.stopRecordingWithTranscription()
+                guard let snapshot = targetSnapshot,
+                      let store = sessionStore else {
+                    throw DictationCoordinatorError.recordingNotActive
+                }
+                let insertionSession = try coordinator.beginInsertion(using: store)
+                updateSurface()
+                let result = insertion.insertRawText(
+                    for: insertionSession,
+                    store: store,
+                    target: snapshot
+                )
+                lastSession = try coordinator.finishInsertion(
+                    outcome: result.outcome,
+                    reason: result.reason
+                )
+                insertionDisplayStatus = Self.displayStatus(for: result.outcome)
+                targetSnapshot = nil
                 livePreview = ""
             case .preparing, .finalizing, .cleaning, .inserting:
                 throw DictationTransitionError.illegal(
@@ -187,6 +226,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             updateSurface()
         } catch {
+            if coordinator.state == .inserting {
+                lastSession = coordinator.failInsertion(reason: String(describing: error))
+            }
+            targetSnapshot = nil
+            insertionDisplayStatus = .failed
             if let session = coordinator.currentSession,
                [.failed, .interrupted].contains(session.metadata.state) {
                 lastSession = session
@@ -257,8 +301,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         revealItem?.isEnabled = hasSession
         retryItem?.isEnabled = canRetry && !isRecording && !coordinator.hasActiveTranscription
         let previewSuffix = livePreview.isEmpty ? "" : " · " + livePreview
-        statusItem?.button?.title = "Oigo · " + coordinator.state.rawValue.capitalized + previewSuffix
-        statusSurface.show(state: coordinator.state, anchoredTo: statusItem?.button)
+        let surfaceStatus = insertionDisplayStatus?.rawValue ?? coordinator.state.rawValue.capitalized
+        statusItem?.button?.title = "Oigo · " + surfaceStatus + previewSuffix
+        statusSurface.show(message: surfaceStatus, anchoredTo: statusItem?.button)
     }
 
     @objc private func playLastRecording() {
@@ -304,5 +349,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         UserDefaults.standard.set(data, forKey: "globalToggleShortcut")
+    }
+
+    private static func displayStatus(for outcome: InsertionOutcome) -> InsertionDisplayStatus {
+        switch outcome {
+        case .pasted:
+            .pasted
+        case .copied, .secureRejected:
+            .copied
+        case .failed:
+            .failed
+        }
     }
 }

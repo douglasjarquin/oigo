@@ -12,13 +12,13 @@ Oigo does not install a global event monitor and does not implement hold-to-talk
 The explicit states are idle, preparing, recording, finalizing, cleaning, inserting, complete, failed, cancelled, and interrupted.
 The reducer publishes a finite legal-transition table and rejects every event outside that table.
 The coordinator accepts at most one active task and cancels it during application termination.
-Audio capture, speech recognition, cleanup services, and insertion are intentionally not created by this issue.
-Those services can be attached on demand by later issues without changing the shell contract.
+Audio capture, speech recognition, and cleanup services are attached on demand without changing the shell contract.
+Issue #6 attaches raw transcript insertion through a separate target-safe service.
 
 ## Status surface
 
 The status panel uses an `NSPanel` with the nonactivating-panel style.
-It reports the current coordinator state with `orderFront` and never calls `NSApp.activate`.
+It reports the current coordinator state or insertion outcome with `orderFront` and never calls `NSApp.activate`.
 The shortcut callback therefore updates the status surface without making Oigo the frontmost application.
 
 ## Idle baseline
