@@ -354,10 +354,7 @@ public final class SessionStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        let suffix = "-" + id.uuidString.lowercased()
-        guard let directoryURL = try boundedSessionDirectories(
-            maxCount: SessionRetentionPolicy.default.maxDirectoriesToInspect
-        ).first(where: { $0.lastPathComponent.hasSuffix(suffix) }) else {
+        guard let directoryURL = try sessionDirectory(for: id) else {
             throw SessionStoreError.missingSession(id)
         }
         return try readSession(at: directoryURL)
@@ -980,11 +977,10 @@ public final class SessionStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        guard let session = try tolerantSessions(
-            maxDirectories: SessionRetentionPolicy.default.maxDirectoriesToInspect
-        ).first(where: { $0.id == id }) else {
+        guard let directoryURL = try sessionDirectory(for: id) else {
             throw SessionStoreError.missingSession(id)
         }
+        let session = try readSession(at: directoryURL)
         let isEmptyPreparingPlaceholder = session.metadata.state == .preparing
             && session.metadata.startedAt == nil
             && session.metadata.audioByteCount == nil
@@ -1161,12 +1157,6 @@ public final class SessionStore: @unchecked Sendable {
         }
     }
 
-    private func tolerantSessions(maxDirectories: Int) throws -> [DictationSession] {
-        try boundedSessionDirectories(maxCount: maxDirectories).compactMap { directoryURL in
-            try? readSession(at: directoryURL)
-        }
-    }
-
     private func newestSessions(maxCount: Int) throws -> [DictationSession] {
         guard maxCount > 0 else {
             return []
@@ -1181,6 +1171,38 @@ public final class SessionStore: @unchecked Sendable {
             }
         }
         return sessions
+    }
+
+    private func sessionDirectory(for id: UUID) throws -> URL? {
+        let suffix = "-" + id.uuidString.lowercased()
+        guard let enumerator = fileManager.enumerator(
+            at: rootDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles],
+            errorHandler: { _, _ in true }
+        ) else {
+            return nil
+        }
+
+        while let value = enumerator.nextObject() {
+            guard let url = value as? URL,
+                  let values = try? url.resourceValues(
+                      forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+                  ) else {
+                continue
+            }
+            if values.isDirectory == true {
+                enumerator.skipDescendants()
+            }
+            guard values.isDirectory == true,
+                  values.isSymbolicLink != true else {
+                continue
+            }
+            if url.lastPathComponent.hasSuffix(suffix) {
+                return url
+            }
+        }
+        return nil
     }
 
     private func isNewer(_ lhs: DictationSession, than rhs: DictationSession) -> Bool {
@@ -1220,46 +1242,6 @@ public final class SessionStore: @unchecked Sendable {
             }
             try body(session)
         }
-    }
-
-    private func boundedSessionDirectories(maxCount: Int) throws -> [URL] {
-        guard maxCount > 0 else {
-            return []
-        }
-        guard let enumerator = fileManager.enumerator(
-            at: rootDirectory,
-            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
-            options: [.skipsHiddenFiles],
-            errorHandler: { _, _ in true }
-        ) else {
-            return []
-        }
-
-        var directories: [URL] = []
-        while let value = enumerator.nextObject() {
-            guard let url = value as? URL else {
-                continue
-            }
-            guard let values = try? url.resourceValues(
-                forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
-            ) else {
-                continue
-            }
-            if values.isDirectory == true {
-                enumerator.skipDescendants()
-            }
-            guard values.isDirectory == true, values.isSymbolicLink != true else {
-                continue
-            }
-            directories.append(url)
-            directories.sort { lhs, rhs in
-                lhs.lastPathComponent > rhs.lastPathComponent
-            }
-            if directories.count > maxCount {
-                directories.removeLast()
-            }
-        }
-        return directories
     }
 
     private func readFirstTranscriptLine(at directoryURL: URL) throws -> String? {
