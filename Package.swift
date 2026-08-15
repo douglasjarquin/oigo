@@ -8,11 +8,21 @@ let package = Package(
         .macOS("26.0")
     ],
     products: [
+        .library(name: "OigoCore", targets: ["OigoCore"]),
         .library(name: "OigoSpike", targets: ["OigoSpike"]),
+        .executable(name: "Oigo", targets: ["Oigo"]),
         .executable(name: "oigo-spike", targets: ["OigoSpikeCLI"]),
-        .executable(name: "oigo-spike-contract-tests", targets: ["OigoSpikeContractTests"])
+        .executable(name: "oigo-spike-contract-tests", targets: ["OigoSpikeContractTests"]),
+        .executable(
+            name: "oigo-issue3-contract-tests",
+            targets: ["OigoIssue3ContractTests"]
+        )
     ],
     targets: [
+        .target(
+            name: "OigoCore",
+            path: "Sources/OigoCore"
+        ),
         .target(
             name: "OigoSpike",
             linkerSettings: [
@@ -30,6 +40,19 @@ let package = Package(
             name: "OigoSpikeContractTests",
             dependencies: ["OigoSpike"],
             path: "Tests/OigoSpikeContractTests"
+        ),
+        .executableTarget(
+            name: "Oigo",
+            dependencies: ["OigoCore"],
+            path: "Sources/Oigo",
+            linkerSettings: [
+                .linkedFramework("AppKit")
+            ]
+        ),
+        .executableTarget(
+            name: "OigoIssue3ContractTests",
+            dependencies: ["OigoCore"],
+            path: "Tests/OigoIssue3ContractTests"
         )
     ]
 )
