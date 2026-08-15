@@ -106,7 +106,9 @@ public struct DictationStateMachine: Sendable {
         Transition(from: .failed, event: .interrupt, to: .interrupted),
         Transition(from: .idle, event: .retryCompleted, to: .complete),
         Transition(from: .failed, event: .retryCompleted, to: .complete),
-        Transition(from: .interrupted, event: .retryCompleted, to: .complete)
+        Transition(from: .interrupted, event: .retryCompleted, to: .complete),
+        Transition(from: .complete, event: .retryCompleted, to: .complete),
+        Transition(from: .cancelled, event: .retryCompleted, to: .complete)
     ]
 
     @discardableResult
@@ -394,12 +396,13 @@ public final class DictationCoordinator {
               [.failed, .interrupted].contains(session.metadata.state) else {
             throw DictationCoordinatorError.recordingNotActive
         }
-        guard [.idle, .failed, .interrupted].contains(state),
+        guard [.idle, .failed, .interrupted, .complete, .cancelled].contains(state),
               savedSession != nil || [.failed, .interrupted].contains(state) else {
             throw DictationCoordinatorError.recordingNotActive
         }
 
-        currentSession = session
+        let retryingSession = try store.beginTranscriptionRetry(for: session)
+        currentSession = retryingSession
         let operationID = UUID()
         activeOperationID = operationID
         activeTranscription = transcription
@@ -410,20 +413,46 @@ public final class DictationCoordinator {
             }
         }
 
-        let result = try await transcription.retrySavedAudio(for: session, store: store)
-        guard activeOperationID == operationID else {
-            throw DictationCoordinatorError.recordingNotActive
+        do {
+            let result = try await transcription.retrySavedAudio(for: retryingSession, store: store)
+            guard activeOperationID == operationID else {
+                throw DictationCoordinatorError.recordingNotActive
+            }
+            let completedSession = try store.load(id: retryingSession.id)
+            guard completedSession.metadata.state == .completed,
+                  completedSession.metadata.rawTextByteCount == result.rawTextByteCount else {
+                throw DictationCoordinatorError.retryDidNotPersist
+            }
+            _ = try apply(.retryCompleted)
+            currentSession = completedSession
+            lastFailureReason = nil
+            diagnostics.record("saved audio transcription retried")
+            return completedSession
+        } catch {
+            let reason = String(describing: error)
+            let persistedSession = try? store.load(id: retryingSession.id)
+            if terminalOperationInFlight
+                || pendingTranscriptionTerminalState == .interrupted
+                || persistedSession?.metadata.state == .interrupted {
+                let interruptedSession = try? store.update(
+                    retryingSession,
+                    state: .interrupted,
+                    at: Date(),
+                    failureReason: "application shutdown"
+                )
+                _ = try? apply(.interrupt)
+                currentSession = interruptedSession ?? persistedSession ?? retryingSession
+            } else {
+                lastFailureReason = reason
+                currentSession = (try? store.update(
+                    retryingSession,
+                    state: .failed,
+                    at: Date(),
+                    failureReason: reason
+                )) ?? retryingSession
+            }
+            throw error
         }
-        let completedSession = try store.load(id: session.id)
-        guard completedSession.metadata.state == .completed,
-              completedSession.metadata.rawTextByteCount == result.rawTextByteCount else {
-            throw DictationCoordinatorError.retryDidNotPersist
-        }
-        _ = try apply(.retryCompleted)
-        currentSession = completedSession
-        lastFailureReason = nil
-        diagnostics.record("saved audio transcription retried")
-        return completedSession
     }
 
     @discardableResult

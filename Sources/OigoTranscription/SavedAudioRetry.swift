@@ -28,7 +28,9 @@ public enum SavedAudioRetry {
         liveFailure: Error
     ) throws -> SecuredAudioFile {
         _ = liveFailure
-        guard session.metadata.state == .failed || session.metadata.state == .interrupted else {
+        guard session.metadata.state == .failed
+            || session.metadata.state == .interrupted
+            || session.metadata.state == .retrying else {
             throw TranscriptionError.invalidSessionState(session.metadata.state)
         }
         let url = session.audioURL
@@ -73,7 +75,9 @@ public enum SavedAudioRetry {
         transcribe: (AudioFileDescriptor) throws -> T
     ) throws -> T {
         _ = liveFailure
-        guard session.metadata.state == .failed || session.metadata.state == .interrupted else {
+        guard session.metadata.state == .failed
+            || session.metadata.state == .interrupted
+            || session.metadata.state == .retrying else {
             throw TranscriptionError.invalidSessionState(session.metadata.state)
         }
         let descriptor: AudioFileDescriptor

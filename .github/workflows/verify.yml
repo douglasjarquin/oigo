@@ -33,3 +33,5 @@ jobs:
         run: swift run oigo-issue5-contract-tests
       - name: Issue six raw insertion contract harness
         run: swift run oigo-issue6-contract-tests
+      - name: Issue seven history and recovery contract harness
+        run: swift run oigo-issue7-contract-tests

@@ -41,6 +41,7 @@
         A00000010000000000000020 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001F /* CoreGraphics.framework */; };
         A00000010000000000000021 /* libOigoInsertion.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001B /* libOigoInsertion.a */; };
         A00000010000000000000022 /* libOigoCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000B /* libOigoCore.a */; };
+        A00000010000000000000023 /* HistoryWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000020 /* HistoryWindowController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -120,6 +121,7 @@
         B0000001000000000000001D /* InsertionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertionService.swift; sourceTree = "<group>"; };
         B0000001000000000000001E /* ApplicationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ApplicationServices.framework; path = System/Library/Frameworks/ApplicationServices.framework; sourceTree = SDKROOT; };
         B0000001000000000000001F /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+        B00000010000000000000020 /* HistoryWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryWindowController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -203,6 +205,7 @@
                 B00000010000000000000003 /* StatusSurfaceController.swift */,
                 B00000010000000000000004 /* GlobalHotKeyRegistrar.swift */,
                 B00000010000000000000005 /* SettingsWindowController.swift */,
+                B00000010000000000000020 /* HistoryWindowController.swift */,
             );
             path = Sources/Oigo;
             sourceTree = "<group>";
@@ -434,6 +437,7 @@
                 A00000010000000000000003 /* StatusSurfaceController.swift in Sources */,
                 A00000010000000000000004 /* GlobalHotKeyRegistrar.swift in Sources */,
                 A00000010000000000000005 /* SettingsWindowController.swift in Sources */,
+                A00000010000000000000023 /* HistoryWindowController.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };

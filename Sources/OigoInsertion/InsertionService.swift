@@ -72,6 +72,41 @@ public final class InsertionService {
             )
         }
 
+        return performPaste(target: target)
+    }
+
+    public func pasteAgain(
+        for session: DictationSession,
+        store: SessionStore,
+        target: InsertionTargetSnapshot
+    ) -> InsertionResult {
+        let rawText: String
+        do {
+            rawText = try store.readRawText(for: session)
+        } catch {
+            return InsertionResult(
+                outcome: .failed,
+                reason: "raw transcript could not be read: " + String(describing: error)
+            )
+        }
+        guard !rawText.isEmpty else {
+            return InsertionResult(
+                outcome: .failed,
+                reason: "raw transcript was empty"
+            )
+        }
+        guard pasteboard.write(rawText) else {
+            return InsertionResult(
+                outcome: .failed,
+                reason: "raw transcript could not be written to the clipboard"
+            )
+        }
+        return performPaste(target: target)
+    }
+
+    private func performPaste(
+        target: InsertionTargetSnapshot
+    ) -> InsertionResult {
         switch targetEnvironment.validate(target) {
         case .secureTextField:
             return Self.copyOnlyResult(for: .secureTextField)

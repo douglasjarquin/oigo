@@ -59,7 +59,7 @@ public enum TranscriptionError: Error, Equatable, Sendable, CustomStringConverti
         case .invalidCaptureFormat:
             return "audio capture format is not compatible with on-device transcription"
         case .invalidSessionState(let state):
-            return "saved-audio retry requires a failed or interrupted session, not " + state.rawValue
+            return "saved-audio retry requires a failed, interrupted, or retrying session, not " + state.rawValue
         }
     }
 }
