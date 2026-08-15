@@ -8,7 +8,7 @@ public final class InsertionService {
     private let targetEnvironment: InsertionTargetEnvironment
     private let pasteboard: InsertionPasteboard
     private let eventSender: InsertionEventSender
-    private var attemptedSessionIDs = Set<UUID>()
+    private var attemptedSessionID: UUID?
 
     public init(
         targetEnvironment: InsertionTargetEnvironment = AccessibilityTargetEnvironment(),
@@ -29,12 +29,25 @@ public final class InsertionService {
         store: SessionStore,
         target: InsertionTargetSnapshot
     ) -> InsertionResult {
-        guard attemptedSessionIDs.insert(session.id).inserted else {
+        guard let persistedSession = try? store.load(id: session.id) else {
+            return InsertionResult(
+                outcome: .failed,
+                reason: "session insertion state could not be read"
+            )
+        }
+        guard persistedSession.metadata.insertionOutcome == nil else {
             return InsertionResult(
                 outcome: .failed,
                 reason: "insertion was already attempted for this session"
             )
         }
+        guard attemptedSessionID != session.id else {
+            return InsertionResult(
+                outcome: .failed,
+                reason: "insertion was already attempted for this session"
+            )
+        }
+        attemptedSessionID = session.id
 
         let rawText: String
         do {

@@ -385,6 +385,8 @@ private struct OigoIssue6ContractTests {
     private static func testOneShotInsertion() throws {
         let (store, session) = try persistedSession(rawText: "one shot transcript")
         defer { try? FileManager.default.removeItem(at: store.rootDirectory) }
+        let (secondStore, secondSession) = try persistedSession(rawText: "next session transcript")
+        defer { try? FileManager.default.removeItem(at: secondStore.rootDirectory) }
         let target = InsertionTargetSnapshot(
             frontmostProcessIdentifier: 42,
             bundleIdentifier: "com.example.editor",
@@ -402,10 +404,23 @@ private struct OigoIssue6ContractTests {
         )
         let first = service.insertRawText(for: session, store: store, target: target)
         let second = service.insertRawText(for: session, store: store, target: target)
+        _ = try store.update(
+            session,
+            state: .completed,
+            insertionOutcome: .pasted
+        )
+        let persistedRetry = InsertionService(
+            targetEnvironment: environment,
+            pasteboard: pasteboard,
+            eventSender: eventSender
+        ).insertRawText(for: session, store: store, target: target)
+        let next = service.insertRawText(for: secondSession, store: secondStore, target: target)
         guard first.outcome == .pasted,
               second.outcome == .failed,
-              pasteboard.writes == ["one shot transcript"],
-              eventSender.sendCalls == 1 else {
+              persistedRetry.outcome == .failed,
+              next.outcome == .pasted,
+              pasteboard.writes == ["one shot transcript", "next session transcript"],
+              eventSender.sendCalls == 2 else {
             throw ContractFailure(message: "duplicate completion attempted more than one insertion")
         }
     }
