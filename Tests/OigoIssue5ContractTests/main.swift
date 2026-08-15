@@ -18,6 +18,8 @@ private struct OigoIssue5ContractTests {
         let tests: [(String, () async throws -> Void)] = [
             ("live transcription lifecycle", testLiveTranscriptionLifecycle),
             ("cancellation preserves canonical data", testCancellationPreservesCanonicalData),
+            ("cancellation persistence failure", testCancellationPersistenceFailure),
+            ("startup shutdown handshake", testStartupShutdownHandshake),
             ("failure and actionable errors", testFailureAndActionableErrors),
             ("saved-file retry", testSavedFileRetry)
         ]
@@ -77,6 +79,23 @@ private struct OigoIssue5ContractTests {
               finalized.volatileText.isEmpty,
               accumulated.finalizedText == "hello world again" else {
             throw ContractFailure(message: "volatile revisions were not replaced before final accumulation")
+        }
+
+        for index in 0..<32 {
+            _ = accumulator.ingest(
+                range: TranscriptionRange(
+                    startMilliseconds: 200 + Int64(index * 100),
+                    endMilliseconds: 300 + Int64(index * 100)
+                ),
+                text: "segment-" + String(index),
+                isFinal: true
+            )
+        }
+        let bounded = accumulator.snapshot
+        guard bounded.finalizedText.contains("segment-0"),
+              bounded.finalizedText.contains("segment-31"),
+              bounded.volatileText.isEmpty else {
+            throw ContractFailure(message: "finalized transcript state did not retain ordered bounded progress")
         }
 
         let root = FileManager.default.temporaryDirectory
@@ -159,6 +178,75 @@ private struct OigoIssue5ContractTests {
     }
 
     @MainActor
+    private static func testCancellationPersistenceFailure() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-cancel-persistence-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let capture = FakeAudioCapture()
+        let transcription = FakeTranscriptionController()
+        let coordinator = DictationCoordinator()
+        let session = try await coordinator.startRecordingWithTranscription(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        capture.sendBuffer()
+        transcription.finalizedText = "must not claim persisted"
+        try FileManager.default.createDirectory(at: session.rawTextURL, withIntermediateDirectories: false)
+
+        do {
+            _ = try await coordinator.cancelRecordingWithTranscription()
+            throw ContractFailure(message: "cancellation unexpectedly succeeded through a raw.txt directory")
+        } catch let error as ContractFailure {
+            throw error
+        } catch {
+            let failed = try store.load(id: session.id)
+            guard failed.metadata.state == .failed,
+                  failed.metadata.rawTextByteCount == nil,
+                  FileManager.default.fileExists(atPath: failed.audioURL.path),
+                  !coordinator.hasActiveTranscription,
+                  coordinator.state == .failed else {
+                throw ContractFailure(message: "cancellation persistence failure claimed canonical progress or leaked resources")
+            }
+        }
+    }
+
+    @MainActor
+    private static func testStartupShutdownHandshake() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-startup-shutdown-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let capture = FakeAudioCapture()
+        let transcription = BlockingTranscriptionController()
+        let coordinator = DictationCoordinator()
+        let startTask = Task { @MainActor in
+            try await coordinator.startRecordingWithTranscription(
+                using: capture,
+                store: store,
+                transcription: transcription,
+                format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+            )
+        }
+
+        await transcription.waitUntilStarted()
+        await coordinator.shutdownWithTranscription()
+        _ = try? await startTask.value
+
+        guard let session = coordinator.currentSession,
+              session.metadata.state == .interrupted,
+              coordinator.state == .interrupted,
+              !coordinator.hasActiveTranscription,
+              !capture.isActive else {
+            throw ContractFailure(message: "shutdown completed before a pending transcription start unwound")
+        }
+    }
+
+    @MainActor
     private static func testFailureAndActionableErrors() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("oigo-issue5-failure-" + UUID().uuidString, isDirectory: true)
@@ -222,7 +310,7 @@ private struct OigoIssue5ContractTests {
     }
 
     @MainActor
-    private static func testSavedFileRetry() throws {
+    private static func testSavedFileRetry() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("oigo-issue5-retry-" + UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -256,6 +344,61 @@ private struct OigoIssue5ContractTests {
               rawText == "retried transcript",
               completed.metadata.rawTextByteCount == Int64(rawText.utf8.count) else {
             throw ContractFailure(message: "saved-file retry did not atomically persist canonical text and metadata")
+        }
+
+        let coordinatorRetrySession = try store.createSession()
+        let coordinatorRetryFailed = try store.update(
+            coordinatorRetrySession,
+            state: .failed,
+            failureReason: "coordinator retry fixture"
+        )
+        try Data([0x43, 0x41, 0x46]).write(to: coordinatorRetryFailed.audioURL, options: [.atomic])
+        let retryController = FakeTranscriptionController()
+        retryController.finalizedText = "coordinator retried transcript"
+        let retryCoordinator = DictationCoordinator()
+        let coordinatorCompleted = try await retryCoordinator.retryRecordingWithTranscription(
+            for: coordinatorRetryFailed,
+            using: retryController,
+            store: store
+        )
+        let coordinatorRawText = try String(contentsOf: coordinatorCompleted.rawTextURL, encoding: .utf8)
+        guard coordinatorCompleted.metadata.state == .completed,
+              coordinatorRawText == "coordinator retried transcript",
+              retryCoordinator.state == .complete,
+              !retryCoordinator.hasActiveTranscription else {
+            throw ContractFailure(message: "coordinator retry route did not complete the saved session")
+        }
+
+        let symlinkSession = try store.createSession()
+        let symlinkFailed = try store.update(symlinkSession, state: .failed, failureReason: "symlink fixture")
+        let outsideAudio = root.appendingPathComponent("outside.caf")
+        try Data([0x4F, 0x55, 0x54]).write(to: outsideAudio, options: [.atomic])
+        try FileManager.default.createSymbolicLink(at: symlinkFailed.audioURL, withDestinationURL: outsideAudio)
+        defer { try? FileManager.default.removeItem(at: symlinkFailed.audioURL) }
+        do {
+            _ = try SavedAudioRetry.audioURL(
+                for: symlinkFailed,
+                liveFailure: TranscriptionError.analysisFailed("symlink fixture")
+            )
+            throw ContractFailure(message: "saved retry accepted a symbolic-link audio artifact")
+        } catch let error as TranscriptionError {
+            guard case .malformedAudio = error else {
+                throw ContractFailure(message: "symlink audio returned the wrong category: " + error.description)
+            }
+        }
+
+        let rawSymlinkSession = try store.createSession()
+        let outsideRaw = root.appendingPathComponent("outside-raw.txt")
+        try Data("outside".utf8).write(to: outsideRaw, options: [.atomic])
+        try FileManager.default.createSymbolicLink(at: rawSymlinkSession.rawTextURL, withDestinationURL: outsideRaw)
+        defer { try? FileManager.default.removeItem(at: rawSymlinkSession.rawTextURL) }
+        do {
+            _ = try store.persistRawText("must not follow symlink", for: rawSymlinkSession)
+            throw ContractFailure(message: "raw.txt persistence followed a symbolic-link artifact")
+        } catch let error as SessionStoreError {
+            guard case .invalidSessionDirectory = error else {
+                throw ContractFailure(message: "raw symlink returned the wrong category: " + error.description)
+            }
         }
 
         try FileManager.default.removeItem(at: completed.audioURL)
@@ -338,13 +481,34 @@ private final class FakeTranscriptionController: TranscriptionController, @unche
         return result
     }
 
-    func cancel() async -> TranscriptionResult? {
+    func cancel() async throws -> TranscriptionResult? {
         guard isRunning else {
             return nil
         }
         isRunning = false
         defer { clearResources() }
-        return try? persist()
+        return try persist()
+    }
+
+    func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult {
+        let url = try SavedAudioRetry.audioURL(
+            for: session,
+            liveFailure: TranscriptionError.analysisFailed("fake live failure")
+        )
+        let persisted = try store.persistRawText(finalizedText, for: session)
+        _ = try store.update(
+            persisted,
+            state: .completed,
+            audioByteCount: Int64(try Data(contentsOf: url).count),
+            rawTextByteCount: Int64(finalizedText.utf8.count)
+        )
+        return TranscriptionResult(
+            finalizedText: finalizedText,
+            rawTextByteCount: Int64(finalizedText.utf8.count)
+        )
     }
 
     func emit(_ update: TranscriptionUpdate) {
@@ -367,6 +531,99 @@ private final class FakeTranscriptionController: TranscriptionController, @unche
         session = nil
         store = nil
         onUpdate = nil
+    }
+}
+
+@available(macOS 26.0, *)
+private final class BlockingTranscriptionController: TranscriptionController, @unchecked Sendable {
+    private let lock = NSLock()
+    private var started = false
+    private var cancellationRequested = false
+    private var startContinuation: CheckedContinuation<Void, Never>?
+    private var enteredWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func start(
+        session: DictationSession,
+        format: AudioCaptureFormat,
+        store: SessionStore,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+    ) async throws {
+        _ = session
+        _ = format
+        _ = store
+        _ = onUpdate
+        let waiters = withLock {
+            started = true
+            let waiters = enteredWaiters
+            enteredWaiters.removeAll(keepingCapacity: true)
+            return waiters
+        }
+        for waiter in waiters {
+            waiter.resume()
+        }
+
+        await withCheckedContinuation { continuation in
+            let resumeImmediately = withLock {
+                if cancellationRequested {
+                    return true
+                }
+                startContinuation = continuation
+                return false
+            }
+            if resumeImmediately {
+                continuation.resume()
+            }
+        }
+        throw TranscriptionError.cancelled
+    }
+
+    func append(_ buffer: AudioCaptureBuffer) {
+        _ = buffer
+    }
+
+    func finish() async throws -> TranscriptionResult {
+        throw TranscriptionError.analysisFailed("blocking fixture cannot finish")
+    }
+
+    func cancel() async throws -> TranscriptionResult? {
+        let continuation = withLock {
+            cancellationRequested = true
+            let continuation = startContinuation
+            startContinuation = nil
+            return continuation
+        }
+        continuation?.resume()
+        return nil
+    }
+
+    func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult {
+        _ = session
+        _ = store
+        throw TranscriptionError.analysisFailed("blocking fixture cannot retry")
+    }
+
+    func waitUntilStarted() async {
+        await withCheckedContinuation { continuation in
+            let resumeImmediately = withLock {
+                if started {
+                    return true
+                }
+                enteredWaiters.append(continuation)
+                return false
+            }
+            if resumeImmediately {
+                continuation.resume()
+            }
+        }
+    }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
     }
 }
 

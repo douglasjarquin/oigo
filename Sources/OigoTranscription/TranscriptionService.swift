@@ -113,8 +113,10 @@ public struct TranscriptionAccumulator: Sendable {
         let text: String
     }
 
-    private var finalized: [Segment] = []
-    private var volatile: [Segment] = []
+    private static let maxRevisionTailSegments = 8
+    private var finalizedPrefix = ""
+    private var finalizedTail: [Segment] = []
+    private var volatile: Segment?
 
     public init() {}
 
@@ -126,37 +128,64 @@ public struct TranscriptionAccumulator: Sendable {
     ) -> TranscriptionSnapshot {
         let segment = Segment(range: range, text: text)
         if isFinal {
-            finalized.removeAll { $0.range.overlaps(range) }
-            volatile.removeAll { $0.range.overlaps(range) }
-            finalized.append(segment)
+            guard range.startMilliseconds >= finalizedEndMilliseconds || finalizedTail.contains(where: {
+                $0.range.overlaps(range)
+            }) else {
+                return snapshot
+            }
+            finalizedTail.removeAll { $0.range.overlaps(range) }
+            if volatile?.range.overlaps(range) == true {
+                volatile = nil
+            }
+            finalizedTail.append(segment)
+            finalizedTail.sort { $0.range < $1.range }
+            compactFinalizedTailIfNeeded()
         } else {
-            volatile.removeAll { $0.range.overlaps(range) }
-            volatile.append(segment)
+            volatile = segment
         }
         return snapshot
     }
 
     public var snapshot: TranscriptionSnapshot {
         let visibleFinalized = finalized.filter { finalSegment in
-            !volatile.contains { finalSegment.range.overlaps($0.range) }
+            !(volatile.map { finalSegment.range.overlaps($0.range) } ?? false)
         }
         let orderedFinalized = visibleFinalized.sorted { $0.range < $1.range }
-        let orderedVolatile = volatile.sorted { $0.range < $1.range }
+        let orderedVolatile = volatile.map { [$0] } ?? []
         return TranscriptionSnapshot(
-            finalizedText: join(orderedFinalized),
-            volatileText: join(orderedVolatile),
-            displayedText: join(orderedFinalized + orderedVolatile)
+            finalizedText: join(finalizedPrefix, orderedFinalized.map { $0.text }),
+            volatileText: join("", orderedVolatile.map { $0.text }),
+            displayedText: join(
+                join(finalizedPrefix, orderedFinalized.map { $0.text }),
+                orderedVolatile.map { $0.text }
+            )
         )
     }
 
     public mutating func reset() {
-        finalized.removeAll(keepingCapacity: true)
-        volatile.removeAll(keepingCapacity: true)
+        finalizedPrefix = ""
+        finalizedTail.removeAll(keepingCapacity: true)
+        volatile = nil
     }
 
-    private func join(_ segments: [Segment]) -> String {
-        segments
-            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var finalized: [Segment] {
+        finalizedTail
+    }
+
+    private var finalizedEndMilliseconds: Int64 {
+        finalizedTail.last?.range.endMilliseconds ?? 0
+    }
+
+    private mutating func compactFinalizedTailIfNeeded() {
+        while finalizedTail.count > Self.maxRevisionTailSegments {
+            let segment = finalizedTail.removeFirst()
+            finalizedPrefix = join(finalizedPrefix, [segment.text])
+        }
+    }
+
+    private func join(_ prefix: String, _ texts: [String]) -> String {
+        ([prefix] + texts)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
     }
@@ -176,6 +205,27 @@ public enum SavedAudioRetry {
             throw TranscriptionError.malformedAudio(
                 session.audioURL,
                 "the saved CAF file does not exist"
+            )
+        }
+        do {
+            let directoryValues = try session.directoryURL.resourceValues(forKeys: [.isSymbolicLinkKey])
+            let audioValues = try session.audioURL.resourceValues(forKeys: [.isSymbolicLinkKey])
+            let canonicalDirectory = session.directoryURL.resolvingSymlinksInPath().standardizedFileURL
+            let canonicalAudio = session.audioURL.resolvingSymlinksInPath().standardizedFileURL
+            guard directoryValues.isSymbolicLink != true,
+                  audioValues.isSymbolicLink != true,
+                  canonicalAudio.deletingLastPathComponent() == canonicalDirectory else {
+                throw TranscriptionError.malformedAudio(
+                    session.audioURL,
+                    "the saved CAF path is not a regular session artifact"
+                )
+            }
+        } catch let error as TranscriptionError {
+            throw error
+        } catch {
+            throw TranscriptionError.malformedAudio(
+                session.audioURL,
+                "the saved CAF path could not be validated"
             )
         }
         return session.audioURL
@@ -209,6 +259,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private let lock = NSLock()
     private let configuredLocale: Locale
     private var lifecycle = Lifecycle.idle
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
     private var cancellationRequested = false
     private var assetState: SpeechAssetState = .unavailable("speech assets have not been checked")
     private var resolvedLocaleIdentifier: String?
@@ -373,6 +424,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 self.resultTask = resultTask
                 self.analysisTask = analysisTask
             }
+            resumeStartWaiters()
         } catch {
             preparedInputContinuation?.finish()
             if let preparedAnalyzer {
@@ -442,7 +494,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         return result
     }
 
-    public func cancel() async -> TranscriptionResult? {
+    public func cancel() async throws -> TranscriptionResult? {
         if withLock({
             if lifecycle == .starting {
                 cancellationRequested = true
@@ -450,7 +502,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             }
             return false
         }) {
-            return nil
+            await waitForStartToFinish()
         }
         guard let resources = takeResources() else {
             return nil
@@ -465,13 +517,29 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         await finishPreviewTask()
 
         let snapshot = transcriptStore.snapshot
-        try? persist(snapshot: snapshot)
+        do {
+            try persist(snapshot: snapshot)
+        } catch {
+            await releaseResources()
+            throw Self.map(error)
+        }
         let result = TranscriptionResult(
             finalizedText: snapshot.finalizedText,
             rawTextByteCount: Int64(Data(snapshot.finalizedText.utf8).count)
         )
         await releaseResources()
         return result
+    }
+
+    public func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult {
+        try await retrySavedAudio(
+            for: session,
+            store: store,
+            liveFailure: TranscriptionError.analysisFailed("live recognition failed")
+        )
     }
 
     public func retrySavedAudio(
@@ -647,6 +715,33 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 lifecycle = .idle
             }
             cancellationRequested = false
+        }
+        resumeStartWaiters()
+    }
+
+    private func waitForStartToFinish() async {
+        await withCheckedContinuation { continuation in
+            let resumeImmediately = withLock {
+                guard lifecycle == .starting else {
+                    return true
+                }
+                startWaiters.append(continuation)
+                return false
+            }
+            if resumeImmediately {
+                continuation.resume()
+            }
+        }
+    }
+
+    private func resumeStartWaiters() {
+        let waiters = withLock {
+            let waiters = startWaiters
+            startWaiters.removeAll(keepingCapacity: true)
+            return waiters
+        }
+        for waiter in waiters {
+            waiter.resume()
         }
     }
 

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public enum DictationSessionState: String, Codable, CaseIterable, Sendable {
     case preparing
@@ -259,6 +260,7 @@ public final class SessionStore: @unchecked Sendable {
         defer { lock.unlock() }
 
         let current = try readSession(at: session.directoryURL)
+        try rejectSymlink(at: current.rawTextURL)
         let data = Data(rawText.utf8)
         try data.write(to: current.rawTextURL, options: [.atomic])
 
@@ -328,7 +330,9 @@ public final class SessionStore: @unchecked Sendable {
         guard directoryPath.hasPrefix(rootPath + "/") else {
             throw SessionStoreError.invalidSessionDirectory(directoryURL)
         }
+        try rejectSymlink(at: directoryURL)
         let metadataURL = directoryURL.appendingPathComponent("session.json")
+        try rejectSymlink(at: metadataURL)
         guard fileManager.fileExists(atPath: metadataURL.path) else {
             throw SessionStoreError.invalidSessionDirectory(directoryURL)
         }
@@ -352,6 +356,19 @@ public final class SessionStore: @unchecked Sendable {
     private func writeMetadata(_ metadata: SessionMetadata, at url: URL) throws {
         let data = try encoder.encode(metadata)
         try data.write(to: url, options: [.atomic])
+    }
+
+    private func rejectSymlink(at url: URL) throws {
+        var fileInfo = stat()
+        guard lstat(url.path, &fileInfo) == 0 else {
+            guard errno == ENOENT else {
+                throw SessionStoreError.invalidSessionDirectory(url)
+            }
+            return
+        }
+        guard (fileInfo.st_mode & S_IFMT) != S_IFLNK else {
+            throw SessionStoreError.invalidSessionDirectory(url)
+        }
     }
 
     private static func directoryName(for date: Date, id: UUID) -> String {

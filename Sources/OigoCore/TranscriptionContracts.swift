@@ -38,5 +38,10 @@ public protocol TranscriptionController: AnyObject, Sendable {
 
     func finish() async throws -> TranscriptionResult
 
-    func cancel() async -> TranscriptionResult?
+    func cancel() async throws -> TranscriptionResult?
+
+    func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult
 }

@@ -15,11 +15,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let statusSurface = StatusSurfaceController()
     private var sessionStore: SessionStore?
     private var lastSession: DictationSession?
+    private var livePreview = ""
     private var settingsWindow: SettingsWindowController?
     private var statusItem: NSStatusItem?
     private var toggleItem: NSMenuItem?
     private var playItem: NSMenuItem?
     private var revealItem: NSMenuItem?
+    private var retryItem: NSMenuItem?
     private var shortcut = OigoAppDelegate.loadShortcut()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -99,6 +101,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         reveal.target = self
         menu.addItem(reveal)
 
+        let retry = NSMenuItem(
+            title: "Retry Saved Transcription",
+            action: #selector(retryLastTranscription),
+            keyEquivalent: ""
+        )
+        retry.target = self
+        menu.addItem(retry)
+
         let settings = NSMenuItem(
             title: "Settings…",
             action: #selector(openSettings),
@@ -122,6 +132,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         toggleItem = toggle
         playItem = play
         revealItem = reveal
+        retryItem = retry
     }
 
     private func registerShortcut() {
@@ -158,10 +169,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     using: recorder,
                     store: sessionStore,
                     transcription: transcription,
-                    format: format
+                    format: format,
+                    onUpdate: { [weak self] update in
+                        Task { @MainActor [weak self] in
+                            self?.applyTranscriptionUpdate(update)
+                        }
+                    }
                 )
             case .recording:
                 lastSession = try await coordinator.stopRecordingWithTranscription()
+                livePreview = ""
             case .preparing, .finalizing, .cleaning, .inserting:
                 throw DictationTransitionError.illegal(
                     from: coordinator.state,
@@ -170,9 +187,49 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             updateSurface()
         } catch {
+            if let session = coordinator.currentSession,
+               [.failed, .interrupted].contains(session.metadata.state) {
+                lastSession = session
+            }
             NSLog("Oigo rejected the toggle command: %@", String(describing: error))
             updateSurface()
         }
+    }
+
+    @objc private func retryLastTranscription() {
+        Task { @MainActor [weak self] in
+            await self?.performRetry()
+        }
+    }
+
+    private func performRetry() async {
+        guard let store = sessionStore,
+              let session = lastSession,
+              [.failed, .interrupted].contains(session.metadata.state),
+              FileManager.default.fileExists(atPath: session.audioURL.path) else {
+            updateSurface()
+            return
+        }
+
+        do {
+            livePreview = ""
+            lastSession = try await coordinator.retryRecordingWithTranscription(
+                for: session,
+                using: transcription,
+                store: store
+            )
+        } catch {
+            NSLog("Oigo could not retry the saved transcription: %@", String(describing: error))
+        }
+        updateSurface()
+    }
+
+    private func applyTranscriptionUpdate(_ update: TranscriptionUpdate) {
+        let text = update.isFinal
+            ? (update.finalizedSegment ?? update.volatilePreview)
+            : update.volatilePreview
+        livePreview = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64))
+        updateSurface()
     }
 
     private func updateSurface() {
@@ -192,9 +249,15 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             $0.metadata.state == .completed
                 && FileManager.default.fileExists(atPath: $0.audioURL.path)
         } ?? false
+        let canRetry = lastSession.map {
+            [.failed, .interrupted].contains($0.metadata.state)
+                && FileManager.default.fileExists(atPath: $0.audioURL.path)
+        } ?? false
         playItem?.isEnabled = hasPlayableRecording && !isRecording
         revealItem?.isEnabled = hasSession
-        statusItem?.button?.title = "Oigo · " + coordinator.state.rawValue.capitalized
+        retryItem?.isEnabled = canRetry && !isRecording && !coordinator.hasActiveTranscription
+        let previewSuffix = livePreview.isEmpty ? "" : " · " + livePreview
+        statusItem?.button?.title = "Oigo · " + coordinator.state.rawValue.capitalized + previewSuffix
         statusSurface.show(state: coordinator.state, anchoredTo: statusItem?.button)
     }
 
