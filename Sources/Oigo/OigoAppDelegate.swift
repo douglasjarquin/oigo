@@ -48,6 +48,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
         shortcutRegistrar.unregister()
+        statusSurface.hide()
         playback.stop()
         if coordinator.hasActiveTranscription {
             Task { @MainActor [weak self] in

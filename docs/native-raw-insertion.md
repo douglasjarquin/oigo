@@ -19,6 +19,7 @@ An unexpected application or focus change also produces copy-only behavior.
 Insertion is one-shot per session.
 Duplicate shortcut callbacks and repeated completion callbacks cannot write or paste the same session twice.
 The coordinator persists `pasted`, `copied`, `secureRejected`, or `failed` with an optional reason and exposes `Finalizing`, `Pasted`, `Copied`, or `Failed` without blocking the status surface.
+Terminal Pasted, Copied, and Failed HUD messages dismiss after a short cancellation-safe interval; a newer status cancels the older dismissal.
 
 ## Supported application matrix
 

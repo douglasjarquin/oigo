@@ -5,6 +5,10 @@ import OigoCore
 final class StatusSurfaceController {
     private let panel: NSPanel
     private let label: NSTextField
+    private var dismissalTask: Task<Void, Never>?
+    private var displayGeneration = 0
+
+    private static let briefMessages: Set<String> = ["Pasted", "Copied", "Failed"]
 
     init() {
         label = NSTextField(labelWithString: "Oigo: Idle")
@@ -38,7 +42,18 @@ final class StatusSurfaceController {
         panel.orderOut(nil)
     }
 
+    func hide() {
+        displayGeneration &+= 1
+        dismissalTask?.cancel()
+        dismissalTask = nil
+        panel.orderOut(nil)
+    }
+
     func show(message: String, anchoredTo button: NSStatusBarButton?) {
+        displayGeneration &+= 1
+        let generation = displayGeneration
+        dismissalTask?.cancel()
+        dismissalTask = nil
         label.stringValue = "Oigo: " + message
         if let button, let window = button.window {
             let buttonFrame = window.convertToScreen(button.convert(button.bounds, to: nil))
@@ -60,5 +75,20 @@ final class StatusSurfaceController {
             panel.setFrameOrigin(origin)
         }
         panel.orderFront(nil)
+        guard Self.briefMessages.contains(message) else {
+            return
+        }
+        dismissalTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 2_000_000_000)
+            } catch {
+                return
+            }
+            guard let self, self.displayGeneration == generation else {
+                return
+            }
+            self.panel.orderOut(nil)
+            self.dismissalTask = nil
+        }
     }
 }

@@ -24,6 +24,7 @@ private struct OigoIssue6ContractTests {
             ("unsafe target validation copies without paste", testUnsafeTargetValidationCopiesWithoutPaste),
             ("clipboard write follows raw persistence", testClipboardWriteFollowsRawPersistence),
             ("one-shot insertion", testOneShotInsertion),
+            ("durable insertion claim refuses restart replay", testDurableInsertionClaimRefusesRestartReplay),
             ("completion enters insertion lifecycle", testCompletionEntersInsertionLifecycle)
         ]
 
@@ -422,6 +423,31 @@ private struct OigoIssue6ContractTests {
               pasteboard.writes == ["one shot transcript", "next session transcript"],
               eventSender.sendCalls == 2 else {
             throw ContractFailure(message: "duplicate completion attempted more than one insertion")
+        }
+    }
+
+    private static func testDurableInsertionClaimRefusesRestartReplay() throws {
+        let (store, session) = try persistedSession(rawText: "claimed transcript")
+        defer { try? FileManager.default.removeItem(at: store.rootDirectory) }
+        _ = try store.claimInsertion(for: session)
+        let target = InsertionTargetSnapshot(
+            frontmostProcessIdentifier: 42,
+            bundleIdentifier: "com.example.editor",
+            focusedElementIdentifier: "field-7",
+            role: "AXTextArea",
+            isSecureTextField: false
+        )
+        let pasteboard = FakePasteboard()
+        let eventSender = FakeEventSender()
+        let result = InsertionService(
+            targetEnvironment: FakeTargetEnvironment(snapshot: target, validation: .safe),
+            pasteboard: pasteboard,
+            eventSender: eventSender
+        ).insertRawText(for: session, store: store, target: target)
+        guard result.outcome == .failed,
+              pasteboard.writes.isEmpty,
+              eventSender.sendCalls == 0 else {
+            throw ContractFailure(message: "a persisted insertion claim did not prevent a restart replay")
         }
     }
 

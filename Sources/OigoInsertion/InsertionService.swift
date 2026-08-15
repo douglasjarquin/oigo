@@ -29,25 +29,12 @@ public final class InsertionService {
         store: SessionStore,
         target: InsertionTargetSnapshot
     ) -> InsertionResult {
-        guard let persistedSession = try? store.load(id: session.id) else {
-            return InsertionResult(
-                outcome: .failed,
-                reason: "session insertion state could not be read"
-            )
-        }
-        guard persistedSession.metadata.insertionOutcome == nil else {
-            return InsertionResult(
-                outcome: .failed,
-                reason: "insertion was already attempted for this session"
-            )
-        }
         guard attemptedSessionID != session.id else {
             return InsertionResult(
                 outcome: .failed,
                 reason: "insertion was already attempted for this session"
             )
         }
-        attemptedSessionID = session.id
 
         let rawText: String
         do {
@@ -64,6 +51,20 @@ public final class InsertionService {
                 reason: "raw transcript was empty"
             )
         }
+        do {
+            _ = try store.claimInsertion(for: session)
+        } catch SessionStoreError.insertionAlreadyAttempted {
+            return InsertionResult(
+                outcome: .failed,
+                reason: "insertion was already attempted for this session"
+            )
+        } catch {
+            return InsertionResult(
+                outcome: .failed,
+                reason: "session insertion claim could not be persisted: " + String(describing: error)
+            )
+        }
+        attemptedSessionID = session.id
         guard pasteboard.write(rawText) else {
             return InsertionResult(
                 outcome: .failed,
