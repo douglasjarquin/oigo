@@ -30,6 +30,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
     public var duration: TimeInterval?
     public var failureReason: String?
     public var audioByteCount: Int64?
+    public var rawTextByteCount: Int64?
     public let audioFileName: String
     public let rawTextFileName: String
     public let cleanTextFileName: String
@@ -45,6 +46,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         duration: TimeInterval? = nil,
         failureReason: String? = nil,
         audioByteCount: Int64? = nil,
+        rawTextByteCount: Int64? = nil,
         audioFileName: String = "audio.caf",
         rawTextFileName: String = "raw.txt",
         cleanTextFileName: String = "clean.txt"
@@ -59,6 +61,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         self.duration = duration
         self.failureReason = failureReason
         self.audioByteCount = audioByteCount
+        self.rawTextByteCount = rawTextByteCount
         self.audioFileName = audioFileName
         self.rawTextFileName = rawTextFileName
         self.cleanTextFileName = cleanTextFileName
@@ -211,7 +214,8 @@ public final class SessionStore: @unchecked Sendable {
         state: DictationSessionState,
         at date: Date = Date(),
         failureReason: String? = nil,
-        audioByteCount: Int64? = nil
+        audioByteCount: Int64? = nil,
+        rawTextByteCount: Int64? = nil
     ) throws -> DictationSession {
         lock.lock()
         defer { lock.unlock() }
@@ -237,7 +241,30 @@ public final class SessionStore: @unchecked Sendable {
         if let audioByteCount {
             metadata.audioByteCount = audioByteCount
         }
+        if let rawTextByteCount {
+            metadata.rawTextByteCount = rawTextByteCount
+        }
 
+        try writeMetadata(metadata, at: current.metadataURL)
+        return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
+    }
+
+    @discardableResult
+    public func persistRawText(
+        _ rawText: String,
+        for session: DictationSession,
+        at date: Date = Date()
+    ) throws -> DictationSession {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let current = try readSession(at: session.directoryURL)
+        let data = Data(rawText.utf8)
+        try data.write(to: current.rawTextURL, options: [.atomic])
+
+        var metadata = current.metadata
+        metadata.updatedAt = date
+        metadata.rawTextByteCount = Int64(data.count)
         try writeMetadata(metadata, at: current.metadataURL)
         return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
     }

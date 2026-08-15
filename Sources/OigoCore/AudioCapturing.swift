@@ -1,5 +1,19 @@
 import Foundation
 
+public struct AudioCaptureFormat: Equatable, Sendable {
+    public let sampleRate: Double
+    public let channelCount: Int
+
+    public init(sampleRate: Double, channelCount: Int) {
+        self.sampleRate = sampleRate
+        self.channelCount = channelCount
+    }
+
+    public var isValid: Bool {
+        sampleRate.isFinite && sampleRate > 0 && channelCount > 0
+    }
+}
+
 public struct AudioCaptureBuffer: Equatable, Sendable {
     public let frameCount: Int
     public let sampleRate: Double

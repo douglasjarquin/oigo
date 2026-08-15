@@ -42,6 +42,21 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
     public init() {}
 
+    public func captureFormat() throws -> AudioCaptureFormat {
+        guard Bundle.main.bundleIdentifier != nil else {
+            throw AudioRecorderError.missingApplicationBundle
+        }
+
+        let inputFormat = AVAudioEngine().inputNode.outputFormat(forBus: 0)
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            throw AudioRecorderError.invalidInputFormat
+        }
+        return AudioCaptureFormat(
+            sampleRate: inputFormat.sampleRate,
+            channelCount: 1
+        )
+    }
+
     public var isRecording: Bool {
         lock.lock()
         defer { lock.unlock() }

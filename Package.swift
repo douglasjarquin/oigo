@@ -10,6 +10,7 @@ let package = Package(
     products: [
         .library(name: "OigoCore", targets: ["OigoCore"]),
         .library(name: "OigoCapture", targets: ["OigoCapture"]),
+        .library(name: "OigoTranscription", targets: ["OigoTranscription"]),
         .library(name: "OigoSpike", targets: ["OigoSpike"]),
         .executable(name: "Oigo", targets: ["Oigo"]),
         .executable(name: "oigo-spike", targets: ["OigoSpikeCLI"]),
@@ -21,6 +22,10 @@ let package = Package(
         .executable(
             name: "oigo-issue4-contract-tests",
             targets: ["OigoIssue4ContractTests"]
+        ),
+        .executable(
+            name: "oigo-issue5-contract-tests",
+            targets: ["OigoIssue5ContractTests"]
         )
     ],
     targets: [
@@ -37,6 +42,15 @@ let package = Package(
             ]
         ),
         .target(
+            name: "OigoTranscription",
+            dependencies: ["OigoCore"],
+            path: "Sources/OigoTranscription",
+            linkerSettings: [
+                .linkedFramework("AVFAudio"),
+                .linkedFramework("Speech")
+            ]
+        ),
+        .target(
             name: "OigoSpike",
             linkerSettings: [
                 .linkedFramework("AVFAudio"),
@@ -46,7 +60,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "OigoSpikeCLI",
-            dependencies: ["OigoSpike"],
+            dependencies: ["OigoSpike", "OigoCore", "OigoTranscription"],
             path: "Sources/oigo-spike"
         ),
         .executableTarget(
@@ -56,7 +70,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "Oigo",
-            dependencies: ["OigoCore", "OigoCapture"],
+            dependencies: ["OigoCore", "OigoCapture", "OigoTranscription"],
             path: "Sources/Oigo",
             linkerSettings: [
                 .linkedFramework("AppKit")
@@ -71,6 +85,11 @@ let package = Package(
             name: "OigoIssue4ContractTests",
             dependencies: ["OigoCore", "OigoCapture"],
             path: "Tests/OigoIssue4ContractTests"
+        ),
+        .executableTarget(
+            name: "OigoIssue5ContractTests",
+            dependencies: ["OigoCore", "OigoTranscription"],
+            path: "Tests/OigoIssue5ContractTests"
         )
     ]
 )
