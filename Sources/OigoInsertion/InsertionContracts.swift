@@ -31,6 +31,55 @@ public enum TargetValidation: Equatable, Sendable {
     case secureTextField
     case missingFocusedElement
     case nonEditableRole
+
+    public static func evaluate(
+        snapshot: InsertionTargetSnapshot,
+        currentProcessIdentifier: Int32,
+        currentBundleIdentifier: String?,
+        currentFocusedElementIdentifier: String?,
+        currentRole: String?,
+        currentIsSecureTextField: Bool,
+        accessibilityTrusted: Bool
+    ) -> TargetValidation {
+        guard !snapshot.isSecureTextField else {
+            return .secureTextField
+        }
+        guard accessibilityTrusted else {
+            return .accessibilityUnavailable
+        }
+        guard currentProcessIdentifier == snapshot.frontmostProcessIdentifier,
+              currentBundleIdentifier == snapshot.bundleIdentifier else {
+            return .applicationChanged
+        }
+        guard let expectedIdentifier = snapshot.focusedElementIdentifier,
+              let currentFocusedElementIdentifier else {
+            return .missingFocusedElement
+        }
+        guard !currentIsSecureTextField else {
+            return .secureTextField
+        }
+        guard currentFocusedElementIdentifier == expectedIdentifier,
+              currentRole == snapshot.role else {
+            return .focusedElementChanged
+        }
+        guard Self.editableRoles.contains(currentRole ?? "") else {
+            return .nonEditableRole
+        }
+        return .safe
+    }
+
+    private static let editableRoles: Set<String> = [
+        "AXTextField",
+        "AXTextArea",
+        "AXComboBox",
+        "AXSearchField"
+    ]
+}
+
+public enum InsertionEventResult: Equatable, Sendable {
+    case sent
+    case targetUnsafe(TargetValidation)
+    case failed
 }
 
 @MainActor
@@ -46,7 +95,10 @@ public protocol InsertionPasteboard: AnyObject {
 
 @MainActor
 public protocol InsertionEventSender: AnyObject {
-    func sendPaste() -> Bool
+    func sendPaste(
+        to processIdentifier: Int32,
+        revalidate: () -> TargetValidation
+    ) -> InsertionEventResult
 }
 
 public struct InsertionResult: Equatable, Sendable {

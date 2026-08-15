@@ -60,18 +60,44 @@ public final class InsertionService {
 
         switch targetEnvironment.validate(target) {
         case .secureTextField:
-            return InsertionResult(
-                outcome: .secureRejected,
-                reason: "target is a secure text field"
-            )
+            return Self.copyOnlyResult(for: .secureTextField)
         case .safe:
-            guard eventSender.sendPaste() else {
+            switch eventSender.sendPaste(
+                to: target.frontmostProcessIdentifier,
+                revalidate: { [targetEnvironment] in
+                    targetEnvironment.validate(target)
+                }
+            ) {
+            case .sent:
+                return InsertionResult(outcome: .pasted)
+            case .targetUnsafe(let validation):
+                return Self.copyOnlyResult(for: validation)
+            case .failed:
                 return InsertionResult(
                     outcome: .failed,
                     reason: "Command-V could not be synthesized"
                 )
             }
-            return InsertionResult(outcome: .pasted)
+        case .accessibilityUnavailable:
+            return Self.copyOnlyResult(for: .accessibilityUnavailable)
+        case .applicationChanged:
+            return Self.copyOnlyResult(for: .applicationChanged)
+        case .focusedElementChanged:
+            return Self.copyOnlyResult(for: .focusedElementChanged)
+        case .missingFocusedElement:
+            return Self.copyOnlyResult(for: .missingFocusedElement)
+        case .nonEditableRole:
+            return Self.copyOnlyResult(for: .nonEditableRole)
+        }
+    }
+
+    private static func copyOnlyResult(for validation: TargetValidation) -> InsertionResult {
+        switch validation {
+        case .secureTextField:
+            return InsertionResult(
+                outcome: .secureRejected,
+                reason: "target is a secure text field"
+            )
         case .accessibilityUnavailable:
             return InsertionResult(
                 outcome: .copied,
@@ -96,6 +122,11 @@ public final class InsertionService {
             return InsertionResult(
                 outcome: .copied,
                 reason: "the focused element is not a conventional editable field"
+            )
+        case .safe:
+            return InsertionResult(
+                outcome: .failed,
+                reason: "target safety changed while Command-V was being synthesized"
             )
         }
     }
@@ -143,24 +174,21 @@ public final class AccessibilityTargetEnvironment: InsertionTargetEnvironment {
               application.bundleIdentifier == snapshot.bundleIdentifier else {
             return .applicationChanged
         }
-        guard let expectedIdentifier = snapshot.focusedElementIdentifier,
-              let focused = focusedElement(for: application.processIdentifier) else {
+        guard let focused = focusedElement(for: application.processIdentifier) else {
             return .missingFocusedElement
         }
 
         let role = stringAttribute(kAXRoleAttribute, from: focused)
         let subrole = stringAttribute(kAXSubroleAttribute, from: focused)
-        if Self.isSecure(role: role, subrole: subrole) {
-            return .secureTextField
-        }
-        guard elementIdentifier(focused) == expectedIdentifier,
-              role == snapshot.role else {
-            return .focusedElementChanged
-        }
-        guard Self.editableRoles.contains(role ?? "") else {
-            return .nonEditableRole
-        }
-        return .safe
+        return TargetValidation.evaluate(
+            snapshot: snapshot,
+            currentProcessIdentifier: application.processIdentifier,
+            currentBundleIdentifier: application.bundleIdentifier,
+            currentFocusedElementIdentifier: elementIdentifier(focused),
+            currentRole: role,
+            currentIsSecureTextField: Self.isSecure(role: role, subrole: subrole),
+            accessibilityTrusted: true
+        )
     }
 
     private func focusedElement(for processIdentifier: Int32) -> AXUIElement? {
@@ -200,12 +228,6 @@ public final class AccessibilityTargetEnvironment: InsertionTargetEnvironment {
         role == String(kAXSecureTextFieldSubrole) || subrole == String(kAXSecureTextFieldSubrole)
     }
 
-    private static let editableRoles: Set<String> = [
-        String(kAXTextFieldRole),
-        String(kAXTextAreaRole),
-        String(kAXComboBoxRole),
-        "AXSearchField"
-    ]
 }
 
 @MainActor
@@ -223,7 +245,13 @@ public final class SystemInsertionPasteboard: InsertionPasteboard {
 public final class CommandVPasteEventSender: InsertionEventSender {
     public init() {}
 
-    public func sendPaste() -> Bool {
+    public func sendPaste(
+        to processIdentifier: Int32,
+        revalidate: () -> TargetValidation
+    ) -> InsertionEventResult {
+        guard processIdentifier > 0 else {
+            return .failed
+        }
         let source = CGEventSource(stateID: .combinedSessionState)
         guard let keyDown = CGEvent(
             keyboardEventSource: source,
@@ -234,12 +262,16 @@ public final class CommandVPasteEventSender: InsertionEventSender {
             virtualKey: 9,
             keyDown: false
         ) else {
-            return false
+            return .failed
         }
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
-        return true
+        let validation = revalidate()
+        guard validation == .safe else {
+            return .targetUnsafe(validation)
+        }
+        keyDown.postToPid(processIdentifier)
+        keyUp.postToPid(processIdentifier)
+        return .sent
     }
 }

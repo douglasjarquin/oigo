@@ -17,8 +17,10 @@ private struct OigoIssue6ContractTests {
         let tests: [(String, () async throws -> Void)] = [
             ("insertion metadata round trip", testInsertionMetadataRoundTrip),
             ("target snapshot captures required fields", testTargetSnapshotCapturesRequiredFields),
+            ("target validation compares live identity", testTargetValidationComparesLiveIdentity),
             ("secure field refuses automatic paste", testSecureFieldRefusesAutomaticPaste),
             ("changed application copies without paste", testChangedApplicationCopiesWithoutPaste),
+            ("focus change at event boundary copies without paste", testFocusChangeAtEventBoundaryCopiesWithoutPaste),
             ("unsafe target validation copies without paste", testUnsafeTargetValidationCopiesWithoutPaste),
             ("clipboard write follows raw persistence", testClipboardWriteFollowsRawPersistence),
             ("one-shot insertion", testOneShotInsertion),
@@ -122,6 +124,121 @@ private struct OigoIssue6ContractTests {
         }
     }
 
+    private static func testTargetValidationComparesLiveIdentity() throws {
+        let snapshot = InsertionTargetSnapshot(
+            frontmostProcessIdentifier: 42,
+            bundleIdentifier: "com.example.editor",
+            focusedElementIdentifier: "field-7",
+            role: "AXTextArea",
+            isSecureTextField: false
+        )
+        let sameTarget = TargetValidation.evaluate(
+            snapshot: snapshot,
+            currentProcessIdentifier: 42,
+            currentBundleIdentifier: "com.example.editor",
+            currentFocusedElementIdentifier: "field-7",
+            currentRole: "AXTextArea",
+            currentIsSecureTextField: false,
+            accessibilityTrusted: true
+        )
+        let changedApplication = TargetValidation.evaluate(
+            snapshot: snapshot,
+            currentProcessIdentifier: 43,
+            currentBundleIdentifier: "com.example.editor",
+            currentFocusedElementIdentifier: "field-7",
+            currentRole: "AXTextArea",
+            currentIsSecureTextField: false,
+            accessibilityTrusted: true
+        )
+        let changedBundle = TargetValidation.evaluate(
+            snapshot: snapshot,
+            currentProcessIdentifier: 42,
+            currentBundleIdentifier: "com.example.other-editor",
+            currentFocusedElementIdentifier: "field-7",
+            currentRole: "AXTextArea",
+            currentIsSecureTextField: false,
+            accessibilityTrusted: true
+        )
+        let changedFocus = TargetValidation.evaluate(
+            snapshot: snapshot,
+            currentProcessIdentifier: 42,
+            currentBundleIdentifier: "com.example.editor",
+            currentFocusedElementIdentifier: "field-8",
+            currentRole: "AXTextArea",
+            currentIsSecureTextField: false,
+            accessibilityTrusted: true
+        )
+        let secureCurrent = TargetValidation.evaluate(
+            snapshot: snapshot,
+            currentProcessIdentifier: 42,
+            currentBundleIdentifier: "com.example.editor",
+            currentFocusedElementIdentifier: "field-7",
+            currentRole: "AXTextArea",
+            currentIsSecureTextField: true,
+            accessibilityTrusted: true
+        )
+        let inaccessible = TargetValidation.evaluate(
+            snapshot: snapshot,
+            currentProcessIdentifier: 42,
+            currentBundleIdentifier: "com.example.editor",
+            currentFocusedElementIdentifier: "field-7",
+            currentRole: "AXTextArea",
+            currentIsSecureTextField: false,
+            accessibilityTrusted: false
+        )
+        let missingFocus = TargetValidation.evaluate(
+            snapshot: snapshot,
+            currentProcessIdentifier: 42,
+            currentBundleIdentifier: "com.example.editor",
+            currentFocusedElementIdentifier: nil,
+            currentRole: nil,
+            currentIsSecureTextField: false,
+            accessibilityTrusted: true
+        )
+        let nonEditable = TargetValidation.evaluate(
+            snapshot: InsertionTargetSnapshot(
+                frontmostProcessIdentifier: 42,
+                bundleIdentifier: "com.example.editor",
+                focusedElementIdentifier: "field-7",
+                role: "AXWindow",
+                isSecureTextField: false
+            ),
+            currentProcessIdentifier: 42,
+            currentBundleIdentifier: "com.example.editor",
+            currentFocusedElementIdentifier: "field-7",
+            currentRole: "AXWindow",
+            currentIsSecureTextField: false,
+            accessibilityTrusted: true
+        )
+        let secureSnapshot = InsertionTargetSnapshot(
+            frontmostProcessIdentifier: 42,
+            bundleIdentifier: "com.example.editor",
+            focusedElementIdentifier: "field-7",
+            role: "AXTextField",
+            isSecureTextField: true
+        )
+        let secureSnapshotResult = TargetValidation.evaluate(
+            snapshot: secureSnapshot,
+            currentProcessIdentifier: 42,
+            currentBundleIdentifier: "com.example.editor",
+            currentFocusedElementIdentifier: "field-7",
+            currentRole: "AXTextField",
+            currentIsSecureTextField: false,
+            accessibilityTrusted: true
+        )
+        guard sameTarget == .safe,
+              changedApplication == .applicationChanged,
+              changedBundle == .applicationChanged,
+              changedFocus == .focusedElementChanged,
+              secureCurrent == .secureTextField,
+              inaccessible == .accessibilityUnavailable,
+              missingFocus == .missingFocusedElement,
+              nonEditable == .nonEditableRole,
+              secureSnapshotResult == .secureTextField else {
+            throw ContractFailure(message: "target validation did not compare live PID, focus, secure, and Accessibility state")
+        }
+    }
+
     private static func testSecureFieldRefusesAutomaticPaste() throws {
         let (store, session) = try persistedSession(rawText: "secret transcript")
         defer { try? FileManager.default.removeItem(at: store.rootDirectory) }
@@ -169,6 +286,34 @@ private struct OigoIssue6ContractTests {
               pasteboard.writes == ["changed application transcript"],
               eventSender.sendCalls == 0 else {
             throw ContractFailure(message: "changed application did not produce copy-only fallback")
+        }
+    }
+
+    private static func testFocusChangeAtEventBoundaryCopiesWithoutPaste() throws {
+        let (store, session) = try persistedSession(rawText: "focus changed transcript")
+        defer { try? FileManager.default.removeItem(at: store.rootDirectory) }
+        let target = InsertionTargetSnapshot(
+            frontmostProcessIdentifier: 42,
+            bundleIdentifier: "com.example.editor",
+            focusedElementIdentifier: "field-7",
+            role: "AXTextArea",
+            isSecureTextField: false
+        )
+        let environment = FakeTargetEnvironment(
+            snapshot: target,
+            validations: [.safe, .focusedElementChanged]
+        )
+        let pasteboard = FakePasteboard()
+        let eventSender = FakeEventSender()
+        let result = InsertionService(
+            targetEnvironment: environment,
+            pasteboard: pasteboard,
+            eventSender: eventSender
+        ).insertRawText(for: session, store: store, target: target)
+        guard result.outcome == .copied,
+              environment.validationCalls == 2,
+              eventSender.sendCalls == 0 else {
+            throw ContractFailure(message: "focus changed after initial validation but Command-V was still sent")
         }
     }
 
@@ -278,11 +423,17 @@ private struct OigoIssue6ContractTests {
 @MainActor
 private final class FakeTargetEnvironment: InsertionTargetEnvironment {
     let snapshot: InsertionTargetSnapshot
-    var validation: TargetValidation
+    private var validations: [TargetValidation]
+    private(set) var validationCalls = 0
 
     init(snapshot: InsertionTargetSnapshot, validation: TargetValidation) {
         self.snapshot = snapshot
-        self.validation = validation
+        validations = [validation]
+    }
+
+    init(snapshot: InsertionTargetSnapshot, validations: [TargetValidation]) {
+        self.snapshot = snapshot
+        self.validations = validations
     }
 
     func capture() -> InsertionTargetSnapshot {
@@ -291,7 +442,8 @@ private final class FakeTargetEnvironment: InsertionTargetEnvironment {
 
     func validate(_ snapshot: InsertionTargetSnapshot) -> TargetValidation {
         _ = snapshot
-        return validation
+        validationCalls += 1
+        return validations[min(validationCalls - 1, validations.count - 1)]
     }
 }
 
@@ -313,9 +465,17 @@ private final class FakePasteboard: InsertionPasteboard {
 private final class FakeEventSender: InsertionEventSender {
     private(set) var sendCalls = 0
 
-    func sendPaste() -> Bool {
+    func sendPaste(
+        to processIdentifier: Int32,
+        revalidate: () -> TargetValidation
+    ) -> InsertionEventResult {
+        _ = processIdentifier
+        let validation = revalidate()
+        guard validation == .safe else {
+            return .targetUnsafe(validation)
+        }
         sendCalls += 1
-        return true
+        return .sent
     }
 }
 

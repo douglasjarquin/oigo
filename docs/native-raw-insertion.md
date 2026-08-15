@@ -41,3 +41,7 @@ The following applications are in scope when their focused control reports `AXTe
 
 This boundary deliberately does not poll, inspect whole documents, or add brittle per-application adapters.
 Applications that expose only custom or role-less editing surfaces remain usable through the clipboard fallback.
+
+The native QA host exercised ChatGPT/Codex, Chrome, Xcode, Mail, Notes, Terminal, WezTerm, and TextEdit.
+Safari, VS Code, and Slack were not installed on that host, so they have no native receipt in the matrix artifact; their support remains governed by the same public Accessibility-role contract rather than an unverified application-specific claim.
+The exercised matrix receipt is `/tmp/oigo-issue6-evidence/application-matrix-qa-activated.txt`.

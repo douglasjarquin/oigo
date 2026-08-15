@@ -49,7 +49,8 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             throw AudioRecorderError.missingApplicationBundle
         }
 
-        guard let inputConfiguration = Self.inputConfiguration() else {
+        guard let inputConfiguration = Self.inputConfiguration(),
+              inputConfiguration.channelCount == 1 else {
             throw AudioRecorderError.invalidInputFormat
         }
         return AudioCaptureFormat(
@@ -122,12 +123,13 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
-        guard let inputConfiguration = Self.inputConfiguration() else {
+        guard let inputConfiguration = Self.inputConfiguration(),
+              inputConfiguration.channelCount == 1 else {
             throw AudioRecorderError.invalidInputFormat
         }
         let captureFormat = AVAudioFormat(
             standardFormatWithSampleRate: inputConfiguration.sampleRate,
-            channels: 1
+            channels: AVAudioChannelCount(inputConfiguration.channelCount)
         )
         guard let captureFormat else {
             throw AudioRecorderError.invalidInputFormat
@@ -153,7 +155,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         lock.unlock()
 
         do {
-            inputNode.installTap(onBus: 0, bufferSize: 1_024, format: captureFormat) { [weak self] buffer, _ in
+            inputNode.installTap(onBus: 0, bufferSize: 1_024, format: nil) { [weak self] buffer, _ in
                 self?.handle(buffer)
             }
             let observer = NotificationCenter.default.addObserver(
