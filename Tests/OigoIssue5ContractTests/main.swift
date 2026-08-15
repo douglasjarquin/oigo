@@ -28,7 +28,8 @@ private struct OigoIssue5ContractTests {
             ("failure and actionable errors", testFailureAndActionableErrors),
             ("saved-file retry", testSavedFileRetry),
             ("bounded retry staging preservation", testBoundedRetryStagingPreservation),
-            ("persistence recovery fault window", testPersistenceRecoveryFaultWindow)
+            ("persistence recovery fault window", testPersistenceRecoveryFaultWindow),
+            ("canonical final replacement", testCanonicalFinalReplacement)
         ]
 
         var failures = 0
@@ -105,14 +106,12 @@ private struct OigoIssue5ContractTests {
             )
         }
         let bounded = accumulator.snapshot
-        guard bounded.finalizedText.contains("segment-0"),
+        guard !bounded.finalizedText.contains("segment-0"),
               bounded.finalizedText.contains("segment-24"),
               bounded.finalizedText.contains("segment-31"),
               !bounded.displayedText.contains("segment-0"),
-              bounded.displayedText.contains("segment-24"),
-              bounded.displayedText.contains("segment-31"),
               bounded.volatileText.isEmpty else {
-            throw ContractFailure(message: "finalized transcript state dropped canonical progress while bounding revision bookkeeping")
+            throw ContractFailure(message: "finalized transcript state exceeded its bounded revision projection")
         }
 
         let root = FileManager.default.temporaryDirectory
@@ -317,6 +316,36 @@ private struct OigoIssue5ContractTests {
         )
         guard disjointExtended.finalizedText == "hello world" else {
             throw ContractFailure(message: "overlapping final range duplicated or lost a non-prefix text tail")
+        }
+
+        var correctedText = TranscriptionAccumulator()
+        _ = correctedText.ingest(
+            range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
+            text: "hello world",
+            isFinal: true
+        )
+        let corrected = correctedText.ingest(
+            range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
+            text: "hello word",
+            isFinal: true
+        )
+        guard corrected.finalizedText == "hello word" else {
+            throw ContractFailure(message: "corrected overlapping final range duplicated the prior canonical words")
+        }
+
+        var broadCorrection = TranscriptionAccumulator()
+        _ = broadCorrection.ingest(
+            range: TranscriptionRange(startMilliseconds: 100, endMilliseconds: 200),
+            text: "world",
+            isFinal: true
+        )
+        let broadened = broadCorrection.ingest(
+            range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 200),
+            text: "hello world",
+            isFinal: true
+        )
+        guard broadened.finalizedText == "hello world" else {
+            throw ContractFailure(message: "broad corrected final range lost its leading words")
         }
     }
 
@@ -704,6 +733,39 @@ private struct OigoIssue5ContractTests {
         guard recovered.metadata.rawTextByteCount == Int64("recovered canonical".utf8.count),
               try store.readRawText(for: recovered) == "recovered canonical" else {
             throw ContractFailure(message: "pending persistence journal did not recover metadata from committed raw.txt")
+        }
+    }
+
+    @MainActor
+    private static func testCanonicalFinalReplacement() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-final-replacement-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let session = try store.createSession()
+        let persisted = try store.persistRawText("hello world", for: session)
+        let replaced = try store.replaceRawTextTail(
+            "hello world",
+            with: "hello word",
+            for: persisted
+        )
+        guard try store.readRawText(for: replaced) == "hello word",
+              replaced.metadata.rawTextByteCount == Int64("hello word".utf8.count) else {
+            throw ContractFailure(message: "canonical final replacement duplicated or lost corrected text")
+        }
+
+        let staging = try store.beginRawTextStaging(for: replaced)
+        try store.appendRawText("hello world", to: staging, for: replaced)
+        try store.replaceRawTextStagingTail(
+            "hello world",
+            with: "hello word",
+            to: staging,
+            for: replaced
+        )
+        let committed = try store.commitRawTextStaging(staging, for: replaced)
+        guard try store.readRawText(for: committed) == "hello word" else {
+            throw ContractFailure(message: "staged final replacement did not preserve corrected text")
         }
     }
 

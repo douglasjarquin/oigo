@@ -366,7 +366,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         }
         defer { finishStarting() }
 
-        let url = try SavedAudioRetry.audioURL(for: session, liveFailure: liveFailure)
+        let url = session.audioURL
         let module = try await installedTranscriber()
         try checkCancellationRequested()
         let securedAudioFile: SecuredAudioFile
@@ -426,8 +426,8 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 for try await result in module.results {
                     try Task.checkCancellation()
                     let ingested = transcriptStore.ingestAndReport(result)
-                    if let finalText = ingested.acceptedFinalText {
-                        try Self.appendStagedFinal(finalText, staging: staging, for: session, store: store)
+                    if let finalization = ingested.finalization {
+                        try Self.applyStagedFinalization(finalization, staging: staging, for: session, store: store)
                     }
                 }
             } catch is CancellationError {
@@ -694,17 +694,17 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             isFinal: result.isFinal
         )
         if result.isFinal {
-            guard let finalText = ingested.acceptedFinalText else {
+            guard let finalization = ingested.finalization else {
                 return
             }
             do {
-                try appendCanonicalFinal(finalText)
+                try applyCanonicalFinalization(finalization)
             } catch {
                 record(error: Self.map(error))
             }
             let handler = currentUpdateHandler()
             handler?(TranscriptionUpdate(
-                finalizedSegment: finalText,
+                finalizedSegment: finalization.emittedText,
                 volatilePreview: "",
                 isFinal: true
             ))
@@ -772,7 +772,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         return body()
     }
 
-    private func appendCanonicalFinal(_ text: String) throws {
+    private func applyCanonicalFinalization(_ finalization: TranscriptFinalization) throws {
         lock.lock()
         let session = self.session
         let store = sessionStore
@@ -780,37 +780,44 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         guard let session, let store else {
             throw TranscriptionError.persistenceFailed("transcription session is no longer available")
         }
-        try appendCanonicalFinal(text, for: session, store: store)
+        try applyCanonicalFinalization(finalization, for: session, store: store)
     }
 
-    private func appendCanonicalFinal(
-        _ text: String,
+    private func applyCanonicalFinalization(
+        _ finalization: TranscriptFinalization,
         for session: DictationSession,
         store: SessionStore
     ) throws {
-        let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedText.isEmpty else {
-            return
-        }
         do {
-            _ = try store.appendRawText(normalizedText, for: session)
+            switch finalization {
+            case .append(let text):
+                _ = try store.appendRawText(text, for: session)
+            case .replace(let existing, let replacement):
+                _ = try store.replaceRawTextTail(existing, with: replacement, for: session)
+            }
         } catch {
             throw TranscriptionError.persistenceFailed(String(describing: error))
         }
     }
 
-    private static func appendStagedFinal(
-        _ text: String,
+    private static func applyStagedFinalization(
+        _ finalization: TranscriptFinalization,
         staging: RawTextStaging,
         for session: DictationSession,
         store: SessionStore
     ) throws {
-        let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedText.isEmpty else {
-            return
-        }
         do {
-            try store.appendRawText(normalizedText, to: staging, for: session)
+            switch finalization {
+            case .append(let text):
+                try store.appendRawText(text, to: staging, for: session)
+            case .replace(let existing, let replacement):
+                try store.replaceRawTextStagingTail(
+                    existing,
+                    with: replacement,
+                    to: staging,
+                    for: session
+                )
+            }
         } catch {
             throw TranscriptionError.persistenceFailed(String(describing: error))
         }

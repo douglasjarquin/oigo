@@ -73,7 +73,11 @@ public enum SavedAudioRetry {
         store: SessionStore,
         liveFailure: Error
     ) throws -> SecuredAudioFile {
-        let url = try audioURL(for: session, liveFailure: liveFailure)
+        _ = liveFailure
+        guard session.metadata.state == .failed || session.metadata.state == .interrupted else {
+            throw TranscriptionError.invalidSessionState(session.metadata.state)
+        }
+        let url = session.audioURL
         let fileDescriptor: AudioFileDescriptor
         do {
             fileDescriptor = try store.openAudioFileDescriptor(for: session)

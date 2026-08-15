@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import os
 
 public enum DictationState: String, CaseIterable, Codable, Sendable {
@@ -173,6 +174,7 @@ public final class DictationCoordinator {
     private var activeTask: Task<Void, Never>?
     private let diagnostics: DictationDiagnostics
     private var activeCapture: AudioCapturing?
+    private var activeAudioDescriptor: AudioFileDescriptor?
     private var activeTranscription: TranscriptionController?
     private var sessionStore: SessionStore?
     private var pendingTranscriptionTerminalState: DictationSessionState?
@@ -242,6 +244,10 @@ public final class DictationCoordinator {
             sessionStore = store
             currentSession = preparedSession
             let audioDescriptor = try store.createAudioFileDescriptor(for: preparedSession)
+            activeAudioDescriptor = try store.duplicateAudioFileDescriptor(
+                audioDescriptor,
+                for: preparedSession
+            )
             try capture.start(
                 to: audioDescriptor,
                 url: preparedSession.audioURL,
@@ -320,6 +326,10 @@ public final class DictationCoordinator {
             _ = try apply(.prepared)
             currentSession = preparedSession
             let audioDescriptor = try store.createAudioFileDescriptor(for: preparedSession)
+            activeAudioDescriptor = try store.duplicateAudioFileDescriptor(
+                audioDescriptor,
+                for: preparedSession
+            )
             try capture.start(
                 to: audioDescriptor,
                 url: preparedSession.audioURL,
@@ -434,7 +444,7 @@ public final class DictationCoordinator {
                 stoppingSession,
                 state: .completed,
                 at: date,
-                audioByteCount: audioByteCount(at: stoppingSession.audioURL)
+                audioByteCount: audioByteCount()
             )
             _ = try apply(.captureCompleted)
             currentSession = completedSession
@@ -450,7 +460,7 @@ public final class DictationCoordinator {
                 state: .failed,
                 at: Date(),
                 failureReason: reason,
-                audioByteCount: audioByteCount(at: stoppingSession.audioURL)
+                audioByteCount: audioByteCount()
             )
             currentSession = (try? store.load(id: stoppingSession.id)) ?? stoppingSession
             _ = try? apply(.fail)
@@ -485,7 +495,7 @@ public final class DictationCoordinator {
                 stoppingSession,
                 state: .completed,
                 at: date,
-                audioByteCount: audioByteCount(at: stoppingSession.audioURL),
+                audioByteCount: audioByteCount(),
                 rawTextByteCount: result.rawTextByteCount
             )
             _ = try apply(.captureCompleted)
@@ -503,7 +513,7 @@ public final class DictationCoordinator {
                 state: .failed,
                 at: Date(),
                 failureReason: reason,
-                audioByteCount: audioByteCount(at: stoppingSession.audioURL)
+                audioByteCount: audioByteCount()
             )
             currentSession = (try? store.load(id: stoppingSession.id)) ?? stoppingSession
             _ = try? apply(.fail)
@@ -591,7 +601,7 @@ public final class DictationCoordinator {
                 state: .failed,
                 at: Date(),
                 failureReason: failureReason,
-                audioByteCount: audioByteCount(at: session.audioURL)
+                audioByteCount: audioByteCount()
             )
             if [.preparing, .recording, .finalizing, .cleaning, .inserting].contains(self.state) {
                 _ = try? apply(.fail)
@@ -606,7 +616,7 @@ public final class DictationCoordinator {
                 state: state,
                 at: date,
                 failureReason: reason,
-                audioByteCount: audioByteCount(at: session.audioURL),
+                audioByteCount: audioByteCount(),
                 rawTextByteCount: result?.rawTextByteCount
             )
             _ = try apply(event)
@@ -621,7 +631,7 @@ public final class DictationCoordinator {
                 state: .failed,
                 at: Date(),
                 failureReason: lastFailureReason,
-                audioByteCount: audioByteCount(at: session.audioURL),
+                audioByteCount: audioByteCount(),
                 rawTextByteCount: result?.rawTextByteCount
             )
             currentSession = failedSession ?? session
@@ -653,7 +663,7 @@ public final class DictationCoordinator {
                 state: state,
                 at: date,
                 failureReason: reason,
-                audioByteCount: audioByteCount(at: session.audioURL)
+                audioByteCount: audioByteCount()
             )
             _ = try apply(event)
             currentSession = finishedSession
@@ -667,7 +677,7 @@ public final class DictationCoordinator {
                 state: .failed,
                 at: Date(),
                 failureReason: lastFailureReason,
-                audioByteCount: audioByteCount(at: session.audioURL)
+                audioByteCount: audioByteCount()
             )
             currentSession = failedSession ?? session
             _ = try? apply(.fail)
@@ -690,7 +700,7 @@ public final class DictationCoordinator {
             state: .failed,
             at: Date(),
             failureReason: reason,
-            audioByteCount: audioByteCount(at: session.audioURL)
+            audioByteCount: audioByteCount()
         )
         if [.preparing, .recording, .finalizing].contains(state) {
             _ = try? apply(.fail)
@@ -717,7 +727,7 @@ public final class DictationCoordinator {
             state: .failed,
             at: Date(),
             failureReason: reason,
-            audioByteCount: audioByteCount(at: session.audioURL),
+            audioByteCount: audioByteCount(),
             rawTextByteCount: result?.rawTextByteCount
         )
         if [.preparing, .recording, .finalizing].contains(state) {
@@ -734,6 +744,7 @@ public final class DictationCoordinator {
 
     private func releaseCapture() {
         activeCapture = nil
+        activeAudioDescriptor = nil
         activeTranscription = nil
         sessionStore = nil
         pendingTranscriptionTerminalState = nil
@@ -767,12 +778,16 @@ public final class DictationCoordinator {
         }
     }
 
-    private func audioByteCount(at url: URL) -> Int64? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attributes[.size] as? NSNumber else {
+    private func audioByteCount() -> Int64? {
+        guard let descriptor = activeAudioDescriptor else {
             return nil
         }
-        return size.int64Value
+        var fileInfo = stat()
+        guard Darwin.fstat(descriptor.rawValue, &fileInfo) == 0,
+              (fileInfo.st_mode & S_IFMT) == S_IFREG else {
+            return nil
+        }
+        return Int64(fileInfo.st_size)
     }
 
     public func toggle() throws {
@@ -845,7 +860,7 @@ public final class DictationCoordinator {
                 state: terminalState,
                 at: Date(),
                 failureReason: terminalReason,
-                audioByteCount: audioByteCount(at: session.audioURL),
+                audioByteCount: audioByteCount(),
                 rawTextByteCount: result?.rawTextByteCount
             )
             _ = try? apply(terminalEvent)

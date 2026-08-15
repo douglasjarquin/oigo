@@ -411,6 +411,72 @@ public final class SessionStore: @unchecked Sendable {
         }
     }
 
+    @discardableResult
+    public func replaceRawTextTail(
+        _ existingText: String,
+        with replacementText: String,
+        for session: DictationSession,
+        at date: Date = Date()
+    ) throws -> DictationSession {
+        let rawText = try readRawText(for: session)
+        let replaced = try replaceSuffix(
+            in: rawText,
+            existing: existingText,
+            replacement: replacementText,
+            at: session.rawTextURL
+        )
+        return try persistRawText(replaced, for: session, at: date)
+    }
+
+    public func replaceRawTextStagingTail(
+        _ existingText: String,
+        with replacementText: String,
+        to staging: RawTextStaging,
+        for session: DictationSession
+    ) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            try validate(staging, for: current)
+            let stagingURL = current.directoryURL.appendingPathComponent(staging.fileName)
+            guard let data = try readDataIfPresent(
+                named: staging.fileName,
+                in: directoryFD,
+                at: stagingURL
+            ) else {
+                throw SessionStoreError.invalidSessionDirectory(stagingURL)
+            }
+            guard let rawText = String(data: data, encoding: .utf8) else {
+                throw SessionStoreError.invalidMetadata(stagingURL)
+            }
+            let replaced = try replaceSuffix(
+                in: rawText,
+                existing: existingText,
+                replacement: replacementText,
+                at: stagingURL
+            )
+            let flags = O_WRONLY | O_TRUNC | O_CLOEXEC | O_NOFOLLOW
+            let stagingFD = staging.fileName.withCString { name in
+                Darwin.openat(directoryFD, name, flags)
+            }
+            guard stagingFD >= 0 else {
+                throw SessionStoreError.invalidSessionDirectory(stagingURL)
+            }
+            defer { _ = Darwin.close(stagingFD) }
+            var fileInfo = stat()
+            guard Darwin.fstat(stagingFD, &fileInfo) == 0,
+                  (fileInfo.st_mode & S_IFMT) == S_IFREG else {
+                throw SessionStoreError.invalidSessionDirectory(stagingURL)
+            }
+            try writeData(Data(replaced.utf8), to: stagingFD, at: stagingURL)
+            guard Darwin.fsync(stagingFD) == 0 else {
+                throw SessionStoreError.invalidSessionDirectory(stagingURL)
+            }
+        }
+    }
+
     public func beginRawTextStaging(for session: DictationSession) throws -> RawTextStaging {
         lock.lock()
         defer { lock.unlock() }
@@ -594,6 +660,26 @@ public final class SessionStore: @unchecked Sendable {
             }
             return AudioFileDescriptor(rawValue: audioFD)
         }
+    }
+
+    public func duplicateAudioFileDescriptor(
+        _ descriptor: AudioFileDescriptor,
+        for session: DictationSession
+    ) throws -> AudioFileDescriptor {
+        var fileInfo = stat()
+        guard Darwin.fstat(descriptor.rawValue, &fileInfo) == 0,
+              (fileInfo.st_mode & S_IFMT) == S_IFREG else {
+            throw SessionStoreError.invalidSessionDirectory(session.audioURL)
+        }
+        let duplicateFD = Darwin.dup(descriptor.rawValue)
+        guard duplicateFD >= 0 else {
+            throw SessionStoreError.invalidSessionDirectory(session.audioURL)
+        }
+        guard Darwin.fcntl(duplicateFD, F_SETFD, FD_CLOEXEC) == 0 else {
+            _ = Darwin.close(duplicateFD)
+            throw SessionStoreError.invalidSessionDirectory(session.audioURL)
+        }
+        return AudioFileDescriptor(rawValue: duplicateFD)
     }
 
     public func openAudioFileDescriptor(for session: DictationSession) throws -> AudioFileDescriptor {
@@ -1030,6 +1116,27 @@ public final class SessionStore: @unchecked Sendable {
             try? removeEntry(named: temporaryName, in: directoryFD, at: url)
             throw error
         }
+    }
+
+    private func replaceSuffix(
+        in rawText: String,
+        existing: String,
+        replacement: String,
+        at url: URL
+    ) throws -> String {
+        let existing = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+        let replacement = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !existing.isEmpty, rawText.hasSuffix(existing) else {
+            throw SessionStoreError.invalidMetadata(url)
+        }
+        let prefix = String(rawText.dropLast(existing.count))
+        guard !replacement.isEmpty else {
+            return prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard !prefix.isEmpty else {
+            return replacement
+        }
+        return prefix.hasSuffix(" ") ? prefix + replacement : prefix + " " + replacement
     }
 
     private func writeData(_ data: Data, to fileFD: Int32, at url: URL) throws {

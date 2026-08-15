@@ -107,12 +107,12 @@ public struct TranscriptionAccumulator: Sendable {
     private struct Segment: Sendable {
         let range: TranscriptionRange
         let text: String
+        let isComplete: Bool
     }
 
     private static let maxRevisionTailSegments = 8
     private static let maxRevisionTailCharacters = 4_096
     private static let maxPreviewCharacters = 512
-    private var finalizedSegments: [Segment] = []
     private var finalizedTail: [Segment] = []
     private var volatile: Segment?
 
@@ -134,16 +134,18 @@ public struct TranscriptionAccumulator: Sendable {
         isFinal: Bool
     ) -> TranscriptIngestResult {
         if isFinal {
-            let overlapping = finalizedSegments.filter { $0.range.overlaps(range) }
-            let acceptedText: String?
+            let overlapping = finalizedTail.filter { $0.range.overlaps(range) }
+            let finalization: TranscriptFinalization?
             if overlapping.isEmpty {
                 guard range.startMilliseconds >= finalizedEndMilliseconds else {
-                    return TranscriptIngestResult(snapshot: snapshot, acceptedFinalText: nil)
+                    return TranscriptIngestResult(snapshot: snapshot, finalization: nil)
                 }
-                acceptedText = text
-                finalizedSegments.append(Segment(
+                let normalizedText = normalized(text)
+                finalization = normalizedText.isEmpty ? nil : .append(normalizedText)
+                finalizedTail.append(Segment(
                     range: range,
-                    text: text
+                    text: boundedText(normalizedText),
+                    isComplete: normalizedText.count <= Self.maxRevisionTailCharacters
                 ))
             } else {
                 let existingText = join(overlapping.map(\.text))
@@ -157,77 +159,84 @@ public struct TranscriptionAccumulator: Sendable {
                         overlapping.map { $0.range.endMilliseconds }.max() ?? range.endMilliseconds
                     )
                 )
-                acceptedText = newlyAcceptedText(existing: existingText, incoming: text)
-                finalizedSegments.removeAll { $0.range.overlaps(range) }
-                finalizedSegments.append(Segment(
+                let canReplace = overlapping.allSatisfy(\.isComplete)
+                    && range.endMilliseconds <= finalizedEndMilliseconds
+                let canAppend = range.endMilliseconds > finalizedEndMilliseconds
+                    && range.startMilliseconds > (finalizedTail.first?.range.startMilliseconds ?? range.startMilliseconds)
+                finalization = canonicalFinalization(
+                    existing: existingText,
+                    incoming: text,
+                    canReplace: canReplace,
+                    canAppend: canAppend
+                )
+                finalizedTail.removeAll { $0.range.overlaps(range) }
+                let normalizedIncoming = normalized(text)
+                let merged: String
+                if normalizedIncoming.hasPrefix(normalized(existingText)) {
+                    merged = normalizedIncoming
+                } else if canAppend {
+                    merged = join([existingText, normalizedIncoming])
+                } else {
+                    merged = mergedText(existing: existingText, incoming: normalizedIncoming)
+                }
+                finalizedTail.append(Segment(
                     range: mergedRange,
-                    text: mergedText(existing: existingText, incoming: text)
+                    text: boundedText(merged),
+                    isComplete: merged.count <= Self.maxRevisionTailCharacters
                 ))
             }
             if volatile?.range.overlaps(range) == true {
                 volatile = nil
             }
-            finalizedSegments.sort { $0.range < $1.range }
-            rebuildFinalizedTail()
-            return TranscriptIngestResult(snapshot: snapshot, acceptedFinalText: acceptedText)
+            finalizedTail.sort { $0.range < $1.range }
+            compactFinalizedTailIfNeeded()
+            return TranscriptIngestResult(snapshot: snapshot, finalization: finalization)
         } else {
             volatile = Segment(
                 range: range,
-                text: String(text.prefix(Self.maxPreviewCharacters))
+                text: String(text.prefix(Self.maxPreviewCharacters)),
+                isComplete: false
             )
         }
         return TranscriptIngestResult(
             snapshot: snapshot,
-            acceptedFinalText: nil
+            finalization: nil
         )
     }
 
     public var snapshot: TranscriptionSnapshot {
-        let visibleFinalized = finalizedSegments.filter { finalSegment in
+        let visibleFinalized = finalizedTail.filter { finalSegment in
             !(volatile.map { finalSegment.range.overlaps($0.range) } ?? false)
         }
         let orderedFinalized = visibleFinalized.sorted { $0.range < $1.range }
-        let displayedFinalized = finalizedTail.filter { finalSegment in
-            !(volatile.map { finalSegment.range.overlaps($0.range) } ?? false)
-        }
         let orderedVolatile = volatile.map { [$0] } ?? []
         return TranscriptionSnapshot(
             finalizedText: join(orderedFinalized.map { $0.text }),
             volatileText: join(orderedVolatile.map { $0.text }),
             displayedText: join(
-                displayedFinalized.map { $0.text } + orderedVolatile.map { $0.text }
+                orderedFinalized.map { $0.text } + orderedVolatile.map { $0.text }
             )
         )
     }
 
     public mutating func reset() {
-        finalizedSegments.removeAll(keepingCapacity: true)
         finalizedTail.removeAll(keepingCapacity: true)
         volatile = nil
     }
 
     private var finalizedEndMilliseconds: Int64 {
-        finalizedSegments.last?.range.endMilliseconds ?? 0
+        finalizedTail.last?.range.endMilliseconds ?? 0
     }
 
-    private mutating func rebuildFinalizedTail() {
-        var remainingCharacters = Self.maxRevisionTailCharacters
-        var rebuilt: [Segment] = []
-        for segment in finalizedSegments.reversed() {
-            guard rebuilt.count < Self.maxRevisionTailSegments,
-                  remainingCharacters > 0 else {
-                break
-            }
-            let text = String(segment.text.suffix(remainingCharacters))
-            rebuilt.append(Segment(range: segment.range, text: text))
-            remainingCharacters -= text.count
+    private mutating func compactFinalizedTailIfNeeded() {
+        while finalizedTail.count > Self.maxRevisionTailSegments {
+            finalizedTail.removeFirst()
         }
-        finalizedTail = rebuilt.reversed()
     }
 
     private func mergedText(existing: String, incoming: String) -> String {
-        let existing = existing.trimmingCharacters(in: .whitespacesAndNewlines)
-        let incoming = incoming.trimmingCharacters(in: .whitespacesAndNewlines)
+        let existing = normalized(existing)
+        let incoming = normalized(incoming)
         guard !existing.isEmpty else {
             return incoming
         }
@@ -242,30 +251,46 @@ public struct TranscriptionAccumulator: Sendable {
             let incomingWords = incoming.split(whereSeparator: { $0.isWhitespace })
             return join([existing, incomingWords.dropFirst(overlap).joined(separator: " ")])
         }
-        return join([existing, incoming])
+        return incoming
     }
 
-    private func newlyAcceptedText(existing: String, incoming: String) -> String? {
-        let existing = existing.trimmingCharacters(in: .whitespacesAndNewlines)
-        let incoming = incoming.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func canonicalFinalization(
+        existing: String,
+        incoming: String,
+        canReplace: Bool,
+        canAppend: Bool
+    ) -> TranscriptFinalization? {
+        let existing = normalized(existing)
+        let incoming = normalized(incoming)
         guard !incoming.isEmpty else {
             return nil
         }
         guard !existing.isEmpty else {
-            return incoming
+            return .append(incoming)
         }
         if incoming == existing || existing.hasPrefix(incoming) {
             return nil
         }
         if incoming.hasPrefix(existing) {
-            let suffix = String(incoming.dropFirst(existing.count))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return suffix.isEmpty ? nil : suffix
+            return appendSuffix(String(incoming.dropFirst(existing.count)))
         }
-        let overlap = wordOverlap(existing: existing, incoming: incoming)
-        let incomingWords = incoming.split(whereSeparator: { $0.isWhitespace })
-        let suffix = incomingWords.dropFirst(overlap).joined(separator: " ")
-        return suffix.isEmpty ? nil : suffix
+        guard canReplace else {
+            return canAppend ? .append(incoming) : nil
+        }
+        return .replace(existing: existing, replacement: mergedText(existing: existing, incoming: incoming))
+    }
+
+    private func appendSuffix(_ suffix: String) -> TranscriptFinalization? {
+        let suffix = normalized(suffix)
+        return suffix.isEmpty ? nil : .append(suffix)
+    }
+
+    private func normalized(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func boundedText(_ text: String) -> String {
+        String(text.suffix(Self.maxRevisionTailCharacters))
     }
 
     private func wordOverlap(existing: String, incoming: String) -> Int {
@@ -292,7 +317,22 @@ public struct TranscriptionAccumulator: Sendable {
 }
 
 @available(macOS 26.0, *)
+enum TranscriptFinalization: Sendable {
+    case append(String)
+    case replace(existing: String, replacement: String)
+
+    var emittedText: String {
+        switch self {
+        case .append(let text):
+            return text
+        case .replace(_, let replacement):
+            return replacement
+        }
+    }
+}
+
+@available(macOS 26.0, *)
 struct TranscriptIngestResult: Sendable {
     let snapshot: TranscriptionSnapshot
-    let acceptedFinalText: String?
+    let finalization: TranscriptFinalization?
 }

@@ -216,9 +216,10 @@ private struct OigoIssue4ContractTests {
         let capture = DescriptorAwareAudioCapture(outsideURL: outside)
         let coordinator = DictationCoordinator()
         let session = try coordinator.startRecording(using: capture, store: store)
-        try coordinator.stopRecording()
+        let completed = try coordinator.stopRecording()
         guard capture.secureStartCalled,
               try Data(contentsOf: outside) == Data("outside sentinel".utf8),
+              completed.metadata.audioByteCount == 0,
               (try? store.load(id: session.id).metadata.state) == .completed else {
             throw ContractFailure(message: "live capture did not use the root-bound descriptor seam")
         }
@@ -499,7 +500,7 @@ private final class DescriptorAwareAudioCapture: AudioCapturing, @unchecked Send
         _ = onInterruption
         _ = onFailure
         try FileManager.default.removeItem(at: url)
-        try FileManager.default.createSymbolicLink(at: url, withDestinationURL: outsideURL)
+        try Data(contentsOf: outsideURL).write(to: url, options: [.atomic])
         descriptor.close()
         secureStartCalled = true
         self.onFinish = onFinish
