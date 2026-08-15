@@ -19,6 +19,7 @@ public enum DictationEvent: String, CaseIterable, Codable, Sendable {
     case prepared
     case stop
     case finalized
+    case captureCompleted
     case cleaned
     case inserted
     case reset
@@ -71,6 +72,7 @@ public struct DictationStateMachine: Sendable {
         Transition(from: .idle, event: .start, to: .preparing),
         Transition(from: .preparing, event: .prepared, to: .recording),
         Transition(from: .recording, event: .stop, to: .finalizing),
+        Transition(from: .finalizing, event: .captureCompleted, to: .complete),
         Transition(from: .finalizing, event: .finalized, to: .cleaning),
         Transition(from: .cleaning, event: .cleaned, to: .inserting),
         Transition(from: .inserting, event: .inserted, to: .complete),
@@ -144,11 +146,14 @@ public final class DictationDiagnostics: @unchecked Sendable {
 
 public enum DictationCoordinatorError: Error, Equatable, CustomStringConvertible, Sendable {
     case workAlreadyActive
+    case recordingNotActive
 
     public var description: String {
         switch self {
         case .workAlreadyActive:
             return "dictation work is already active"
+        case .recordingNotActive:
+            return "dictation recording is not active"
         }
     }
 }
@@ -158,8 +163,12 @@ public final class DictationCoordinator {
     private var machine: DictationStateMachine
     private var activeTask: Task<Void, Never>?
     private let diagnostics: DictationDiagnostics
+    private var activeCapture: AudioCapturing?
+    private var sessionStore: SessionStore?
 
     public private(set) var transitionHistory: [DictationTransitionRecord] = []
+    public private(set) var currentSession: DictationSession?
+    public private(set) var lastFailureReason: String?
 
     public var state: DictationState {
         machine.state
@@ -185,6 +194,213 @@ public final class DictationCoordinator {
         transitionHistory.append(transition)
         diagnostics.record(transition)
         return next
+    }
+
+    @discardableResult
+    public func startRecording(
+        using capture: AudioCapturing,
+        store: SessionStore,
+        now: Date = Date()
+    ) throws -> DictationSession {
+        guard activeCapture == nil else {
+            throw DictationCoordinatorError.workAlreadyActive
+        }
+        guard [.idle, .complete, .failed, .cancelled, .interrupted].contains(state) else {
+            throw DictationTransitionError.illegal(from: state, event: .start)
+        }
+
+        let session = try store.createSession(now: now)
+        var preparedSession = session
+        do {
+            _ = try apply(.start)
+            preparedSession = try store.update(
+                session,
+                state: .recording,
+                at: now
+            )
+            _ = try apply(.prepared)
+            activeCapture = capture
+            sessionStore = store
+            currentSession = preparedSession
+            try capture.start(
+                to: preparedSession.audioURL,
+                onBuffer: {},
+                onFinish: {},
+                onInterruption: { [weak self] (reason: String) in
+                    Task { @MainActor [weak self] in
+                        _ = try? self?.interruptRecording(reason: reason)
+                    }
+                },
+                onFailure: { [weak self] (reason: String) in
+                    Task { @MainActor [weak self] in
+                        self?.handleCaptureFailure(reason)
+                    }
+                }
+            )
+            lastFailureReason = nil
+            diagnostics.record("audio capture started")
+            return preparedSession
+        } catch {
+            capture.cancel()
+            let reason = String(describing: error)
+            lastFailureReason = reason
+            let failedSession = try? store.update(
+                preparedSession,
+                state: .failed,
+                at: Date(),
+                failureReason: reason
+            )
+            if [.preparing, .recording].contains(state) {
+                _ = try? apply(.fail)
+            }
+            currentSession = failedSession ?? preparedSession
+            releaseCapture()
+            throw error
+        }
+    }
+
+    @discardableResult
+    public func stopRecording(at date: Date = Date()) throws -> DictationSession {
+        guard let capture = activeCapture,
+              let store = sessionStore,
+              let session = currentSession else {
+            throw DictationCoordinatorError.recordingNotActive
+        }
+
+        _ = try apply(.stop)
+        var stoppingSession = session
+        do {
+            stoppingSession = try store.update(session, state: .stopping, at: date)
+            try capture.stop()
+            let completedSession = try store.update(
+                stoppingSession,
+                state: .completed,
+                at: date,
+                audioByteCount: audioByteCount(at: stoppingSession.audioURL)
+            )
+            _ = try apply(.captureCompleted)
+            currentSession = completedSession
+            releaseCapture()
+            diagnostics.record("audio capture stopped")
+            return completedSession
+        } catch {
+            let reason = String(describing: error)
+            lastFailureReason = reason
+            capture.cancel()
+            _ = try? store.update(
+                stoppingSession,
+                state: .failed,
+                at: Date(),
+                failureReason: reason,
+                audioByteCount: audioByteCount(at: stoppingSession.audioURL)
+            )
+            currentSession = (try? store.load(id: stoppingSession.id)) ?? stoppingSession
+            _ = try? apply(.fail)
+            releaseCapture()
+            throw error
+        }
+    }
+
+    @discardableResult
+    public func cancelRecording(at date: Date = Date()) throws -> DictationSession {
+        try finishRecording(
+            state: .cancelled,
+            event: .cancel,
+            reason: nil,
+            at: date
+        )
+    }
+
+    @discardableResult
+    public func interruptRecording(
+        reason: String = "recording was interrupted",
+        at date: Date = Date()
+    ) throws -> DictationSession {
+        try finishRecording(
+            state: .interrupted,
+            event: .interrupt,
+            reason: reason,
+            at: date
+        )
+    }
+
+    private func finishRecording(
+        state: DictationSessionState,
+        event: DictationEvent,
+        reason: String?,
+        at date: Date
+    ) throws -> DictationSession {
+        guard let capture = activeCapture,
+              let store = sessionStore,
+              let session = currentSession else {
+            throw DictationCoordinatorError.recordingNotActive
+        }
+
+        capture.cancel()
+        do {
+            let finishedSession = try store.update(
+                session,
+                state: state,
+                at: date,
+                failureReason: reason,
+                audioByteCount: audioByteCount(at: session.audioURL)
+            )
+            _ = try apply(event)
+            currentSession = finishedSession
+            releaseCapture()
+            diagnostics.record("audio capture finished as " + state.rawValue)
+            return finishedSession
+        } catch {
+            lastFailureReason = String(describing: error)
+            let failedSession = try? store.update(
+                session,
+                state: .failed,
+                at: Date(),
+                failureReason: lastFailureReason,
+                audioByteCount: audioByteCount(at: session.audioURL)
+            )
+            currentSession = failedSession ?? session
+            _ = try? apply(.fail)
+            releaseCapture()
+            throw error
+        }
+    }
+
+    private func handleCaptureFailure(_ reason: String) {
+        guard let capture = activeCapture,
+              let store = sessionStore,
+              let session = currentSession else {
+            return
+        }
+
+        capture.cancel()
+        lastFailureReason = reason
+        let failedSession = try? store.update(
+            session,
+            state: .failed,
+            at: Date(),
+            failureReason: reason,
+            audioByteCount: audioByteCount(at: session.audioURL)
+        )
+        if [.preparing, .recording, .finalizing].contains(state) {
+            _ = try? apply(.fail)
+        }
+        currentSession = failedSession ?? session
+        releaseCapture()
+        diagnostics.record("audio capture failed: " + reason)
+    }
+
+    private func releaseCapture() {
+        activeCapture = nil
+        sessionStore = nil
+    }
+
+    private func audioByteCount(at url: URL) -> Int64? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber else {
+            return nil
+        }
+        return size.int64Value
     }
 
     public func toggle() throws {
@@ -213,9 +429,13 @@ public final class DictationCoordinator {
     }
 
     public func shutdown() {
+        if activeCapture != nil, currentSession != nil {
+            _ = try? interruptRecording(reason: "application shutdown")
+        }
         activeTask?.cancel()
         activeTask = nil
-        if [.preparing, .recording, .finalizing, .cleaning, .inserting].contains(state) {
+        if activeCapture == nil,
+           [.preparing, .recording, .finalizing, .cleaning, .inserting].contains(state) {
             _ = try? apply(.cancel)
         }
         diagnostics.record("coordinator shutdown")
