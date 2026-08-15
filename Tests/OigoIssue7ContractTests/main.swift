@@ -130,6 +130,28 @@ private struct OigoIssue7ContractTests {
                 throw ContractFailure(message: "preparing session deletion returned a non-active error: " + error.description)
             }
         }
+
+        let mismatched = try store.createSession(now: Date(timeIntervalSince1970: 11_003))
+        let mismatchedData = try Data(contentsOf: mismatched.metadataURL)
+        guard var mismatchedObject = try JSONSerialization.jsonObject(
+            with: mismatchedData
+        ) as? [String: Any] else {
+            throw ContractFailure(message: "could not build the mismatched metadata fixture")
+        }
+        mismatchedObject["id"] = UUID().uuidString
+        let rewrittenMetadata = try JSONSerialization.data(
+            withJSONObject: mismatchedObject,
+            options: [.sortedKeys]
+        )
+        try rewrittenMetadata.write(to: mismatched.metadataURL, options: [.atomic])
+        do {
+            _ = try store.load(id: mismatched.id)
+            throw ContractFailure(message: "session lookup accepted a directory and metadata UUID mismatch")
+        } catch let error as SessionStoreError {
+            guard case .invalidMetadata = error else {
+                throw ContractFailure(message: "UUID-mismatched session returned the wrong error: " + error.description)
+            }
+        }
     }
 
     private static func testHistoryMetadataIsBounded() throws {

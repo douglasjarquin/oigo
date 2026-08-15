@@ -1317,6 +1317,7 @@ public final class SessionStore: @unchecked Sendable {
             )
             let metadata = try decoder.decode(SessionMetadata.self, from: data)
             guard metadata.directoryName == directoryURL.standardizedFileURL.lastPathComponent,
+                  metadata.directoryName.hasSuffix("-" + metadata.id.uuidString.lowercased()),
                   metadata.audioFileName == "audio.caf",
                   metadata.rawTextFileName == "raw.txt",
                   metadata.cleanTextFileName == "clean.txt" else {
@@ -1444,6 +1445,7 @@ public final class SessionStore: @unchecked Sendable {
             throw SessionStoreError.invalidMetadata(pendingURL)
         }
         guard pending.metadata.directoryName == directoryURL.standardizedFileURL.lastPathComponent,
+              pending.metadata.directoryName.hasSuffix("-" + pending.metadata.id.uuidString.lowercased()),
               pending.metadata.audioFileName == "audio.caf",
               pending.metadata.rawTextFileName == "raw.txt",
               pending.metadata.cleanTextFileName == "clean.txt" else {
@@ -1507,6 +1509,7 @@ public final class SessionStore: @unchecked Sendable {
             throw SessionStoreError.invalidMetadata(pendingURL)
         }
         guard pending.metadata.directoryName == directoryURL.standardizedFileURL.lastPathComponent,
+              pending.metadata.directoryName.hasSuffix("-" + pending.metadata.id.uuidString.lowercased()),
               pending.metadata.audioFileName == "audio.caf",
               pending.metadata.rawTextFileName == "raw.txt",
               pending.metadata.cleanTextFileName == "clean.txt" else {
