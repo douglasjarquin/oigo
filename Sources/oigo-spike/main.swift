@@ -176,10 +176,12 @@ private struct OigoSpikeCLI {
 
         let transcript = try SavedAudioRetry.retry(
             session: failed,
+            store: store,
             liveFailure: TranscriptionError.analysisFailed("live fixture failure"),
-            transcribe: { url in
-                guard url == failed.audioURL else {
-                    throw CLIError.unknownArgument("retry source was not audio.caf")
+            transcribe: { descriptor in
+                let url = URL(fileURLWithPath: "/dev/fd/\(descriptor.rawValue)")
+                guard url.path.hasPrefix("/dev/fd/") else {
+                    throw CLIError.unknownArgument("retry source was not a retained session descriptor")
                 }
                 let rawText = "saved audio retry transcript"
                 let persisted = try store.persistRawText(rawText, for: failed)
@@ -201,10 +203,11 @@ private struct OigoSpikeCLI {
         try FileManager.default.removeItem(at: completed.audioURL)
         let interrupted = try store.update(completed, state: .interrupted, failureReason: "malformed fixture")
         do {
-            _ = try SavedAudioRetry.audioURL(
-                for: interrupted,
+            _ = try SavedAudioRetry.retry(
+                session: interrupted,
+                store: store,
                 liveFailure: TranscriptionError.analysisFailed("malformed fixture")
-            )
+            ) { _ in () }
             throw CLIError.unknownArgument("malformed saved audio unexpectedly passed validation")
         } catch let error as TranscriptionError {
             guard case .malformedAudio = error else {

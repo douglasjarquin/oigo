@@ -128,6 +128,8 @@ public struct TranscriptionAccumulator: Sendable {
     }
 
     @discardableResult
+    @_spi(Testing)
+    public
     mutating func ingestAndReport(
         range: TranscriptionRange,
         text: String,
@@ -161,20 +163,22 @@ public struct TranscriptionAccumulator: Sendable {
                 )
                 let canReplace = overlapping.allSatisfy(\.isComplete)
                     && range.endMilliseconds <= finalizedEndMilliseconds
+                    && range.startMilliseconds >= (finalizedTail.first?.range.startMilliseconds ?? range.startMilliseconds)
                 let canAppend = range.endMilliseconds > finalizedEndMilliseconds
-                    && range.startMilliseconds > (finalizedTail.first?.range.startMilliseconds ?? range.startMilliseconds)
+                    && range.startMilliseconds >= (finalizedTail.first?.range.startMilliseconds ?? range.startMilliseconds)
+                let canAppendWithoutTextOverlap = canAppend && overlapping.count == 1
                 finalization = canonicalFinalization(
                     existing: existingText,
                     incoming: text,
                     canReplace: canReplace,
-                    canAppend: canAppend
+                    canAppend: canAppend,
+                    canAppendWithoutTextOverlap: canAppendWithoutTextOverlap
                 )
                 finalizedTail.removeAll { $0.range.overlaps(range) }
                 let normalizedIncoming = normalized(text)
                 let merged: String
-                if normalizedIncoming.hasPrefix(normalized(existingText)) {
-                    merged = normalizedIncoming
-                } else if canAppend {
+                if canAppendWithoutTextOverlap,
+                   wordOverlap(existing: existingText, incoming: normalizedIncoming) == 0 {
                     merged = join([existingText, normalizedIncoming])
                 } else {
                     merged = mergedText(existing: existingText, incoming: normalizedIncoming)
@@ -258,7 +262,8 @@ public struct TranscriptionAccumulator: Sendable {
         existing: String,
         incoming: String,
         canReplace: Bool,
-        canAppend: Bool
+        canAppend: Bool,
+        canAppendWithoutTextOverlap: Bool
     ) -> TranscriptFinalization? {
         let existing = normalized(existing)
         let incoming = normalized(incoming)
@@ -274,8 +279,16 @@ public struct TranscriptionAccumulator: Sendable {
         if incoming.hasPrefix(existing) {
             return appendSuffix(String(incoming.dropFirst(existing.count)))
         }
+        if canAppend {
+            let overlap = wordOverlap(existing: existing, incoming: incoming)
+            if overlap > 0 {
+                let incomingWords = incoming.split(whereSeparator: { $0.isWhitespace })
+                return appendSuffix(incomingWords.dropFirst(overlap).joined(separator: " "))
+            }
+            return canAppendWithoutTextOverlap ? .append(incoming) : nil
+        }
         guard canReplace else {
-            return canAppend ? .append(incoming) : nil
+            return nil
         }
         return .replace(existing: existing, replacement: mergedText(existing: existing, incoming: incoming))
     }
@@ -317,11 +330,12 @@ public struct TranscriptionAccumulator: Sendable {
 }
 
 @available(macOS 26.0, *)
-enum TranscriptFinalization: Sendable {
+@_spi(Testing)
+public enum TranscriptFinalization: Sendable {
     case append(String)
     case replace(existing: String, replacement: String)
 
-    var emittedText: String {
+    public var emittedText: String {
         switch self {
         case .append(let text):
             return text
@@ -332,7 +346,8 @@ enum TranscriptFinalization: Sendable {
 }
 
 @available(macOS 26.0, *)
-struct TranscriptIngestResult: Sendable {
-    let snapshot: TranscriptionSnapshot
-    let finalization: TranscriptFinalization?
+@_spi(Testing)
+public struct TranscriptIngestResult: Sendable {
+    public let snapshot: TranscriptionSnapshot
+    public let finalization: TranscriptFinalization?
 }

@@ -525,20 +525,29 @@ private struct OigoIssue5ContractTests {
         let store = try SessionStore(rootDirectory: root)
         let created = try store.createSession()
         let failed = try store.update(created, state: .failed, failureReason: "live analysis failed")
-        try Data([0x43, 0x41, 0x46, 0x2D, 0x46, 0x49, 0x58, 0x54]).write(to: failed.audioURL, options: [.atomic])
+        let originalAudio = Data([0x43, 0x41, 0x46, 0x2D, 0x46, 0x49, 0x58, 0x54])
+        try originalAudio.write(to: failed.audioURL, options: [.atomic])
 
         let retriedText = try SavedAudioRetry.retry(
             session: failed,
+            store: store,
             liveFailure: TranscriptionError.analysisFailed("live fixture"),
-            transcribe: { url in
-                guard url == failed.audioURL else {
-                    throw ContractFailure(message: "saved retry used a path other than audio.caf")
+            transcribe: { descriptor in
+                let url = URL(fileURLWithPath: "/dev/fd/\(descriptor.rawValue)")
+                guard url.path.hasPrefix("/dev/fd/") else {
+                    throw ContractFailure(message: "saved retry handed the consumer a mutable pathname")
+                }
+                try FileManager.default.removeItem(at: failed.audioURL)
+                try Data("replacement inode".utf8).write(to: failed.audioURL, options: [.atomic])
+                let consumedAudio = try Data(contentsOf: url)
+                guard consumedAudio == originalAudio else {
+                    throw ContractFailure(message: "saved retry consumed bytes from a swapped audio inode")
                 }
                 let persisted = try store.persistRawText("retried transcript", for: failed)
                 _ = try store.update(
                     persisted,
                     state: .completed,
-                    audioByteCount: Int64(try Data(contentsOf: url).count),
+                    audioByteCount: Int64(consumedAudio.count),
                     rawTextByteCount: Int64("retried transcript".utf8.count)
                 )
                 return "retried transcript"
@@ -583,10 +592,11 @@ private struct OigoIssue5ContractTests {
         try FileManager.default.createSymbolicLink(at: symlinkFailed.audioURL, withDestinationURL: outsideAudio)
         defer { try? FileManager.default.removeItem(at: symlinkFailed.audioURL) }
         do {
-            _ = try SavedAudioRetry.audioURL(
-                for: symlinkFailed,
+            _ = try SavedAudioRetry.retry(
+                session: symlinkFailed,
+                store: store,
                 liveFailure: TranscriptionError.analysisFailed("symlink fixture")
-            )
+            ) { _ in () }
             throw ContractFailure(message: "saved retry accepted a symbolic-link audio artifact")
         } catch let error as TranscriptionError {
             guard case .malformedAudio = error else {
@@ -656,10 +666,11 @@ private struct OigoIssue5ContractTests {
 
         try FileManager.default.removeItem(at: completed.audioURL)
         do {
-            _ = try SavedAudioRetry.audioURL(
-                for: completed,
+            _ = try SavedAudioRetry.retry(
+                session: completed,
+                store: store,
                 liveFailure: TranscriptionError.analysisFailed("malformed fixture")
-            )
+            ) { _ in () }
             throw ContractFailure(message: "missing saved audio unexpectedly passed retry validation")
         } catch let error as TranscriptionError {
             guard case .invalidSessionState = error else {
@@ -669,10 +680,11 @@ private struct OigoIssue5ContractTests {
 
         let interrupted = try store.update(completed, state: .interrupted, failureReason: "interrupted")
         do {
-            _ = try SavedAudioRetry.audioURL(
-                for: interrupted,
+            _ = try SavedAudioRetry.retry(
+                session: interrupted,
+                store: store,
                 liveFailure: TranscriptionError.analysisFailed("malformed fixture")
-            )
+            ) { _ in () }
             throw ContractFailure(message: "missing saved audio unexpectedly passed malformed-audio validation")
         } catch let error as TranscriptionError {
             guard case .malformedAudio = error else {
@@ -767,6 +779,86 @@ private struct OigoIssue5ContractTests {
         guard try store.readRawText(for: committed) == "hello word" else {
             throw ContractFailure(message: "staged final replacement did not preserve corrected text")
         }
+
+        func persist(
+            _ finalization: TranscriptFinalization?,
+            for session: inout DictationSession
+        ) throws {
+            guard let finalization else {
+                return
+            }
+            switch finalization {
+            case .append(let text):
+                session = try store.appendRawText(text, for: session)
+            case .replace(let existing, let replacement):
+                session = try store.replaceRawTextTail(
+                    existing,
+                    with: replacement,
+                    for: session
+                )
+            }
+        }
+
+        var overlapSession = try store.createSession()
+        var overlapAccumulator = TranscriptionAccumulator()
+        try persist(
+            overlapAccumulator.ingestAndReport(
+                range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
+                text: "alpha",
+                isFinal: true
+            ).finalization,
+            for: &overlapSession
+        )
+        try persist(
+            overlapAccumulator.ingestAndReport(
+                range: TranscriptionRange(startMilliseconds: 100, endMilliseconds: 200),
+                text: "beta",
+                isFinal: true
+            ).finalization,
+            for: &overlapSession
+        )
+        try persist(
+            overlapAccumulator.ingestAndReport(
+                range: TranscriptionRange(startMilliseconds: 50, endMilliseconds: 250),
+                text: "beta gamma",
+                isFinal: true
+            ).finalization,
+            for: &overlapSession
+        )
+        guard try store.readRawText(for: overlapSession) == "alpha beta gamma" else {
+            throw ContractFailure(message: "extending multi-segment overlap duplicated canonical words")
+        }
+
+        var compactedSession = try store.createSession()
+        var compactedAccumulator = TranscriptionAccumulator()
+        for index in 0..<12 {
+            try persist(
+                compactedAccumulator.ingestAndReport(
+                    range: TranscriptionRange(
+                        startMilliseconds: Int64(index * 100),
+                        endMilliseconds: Int64((index + 1) * 100)
+                    ),
+                    text: "segment-" + String(index),
+                    isFinal: true
+                ).finalization,
+                for: &compactedSession
+            )
+        }
+        let canonicalBeforeBroadCorrection = try store.readRawText(for: compactedSession)
+        let broadCorrection = (0..<12)
+            .map { "segment-" + String($0) }
+            .joined(separator: " ")
+        try persist(
+            compactedAccumulator.ingestAndReport(
+                range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 1_200),
+                text: broadCorrection,
+                isFinal: true
+            ).finalization,
+            for: &compactedSession
+        )
+        guard try store.readRawText(for: compactedSession) == canonicalBeforeBroadCorrection else {
+            throw ContractFailure(message: "compacted-history correction duplicated the durable canonical prefix")
+        }
     }
 
 }
@@ -836,10 +928,9 @@ private final class FakeTranscriptionController: TranscriptionController, @unche
         for session: DictationSession,
         store: SessionStore
     ) async throws -> TranscriptionResult {
-        let url = try SavedAudioRetry.audioURL(
-            for: session,
-            liveFailure: TranscriptionError.analysisFailed("fake live failure")
-        )
+        let descriptor = try store.openAudioFileDescriptor(for: session)
+        defer { descriptor.close() }
+        let url = URL(fileURLWithPath: "/dev/fd/\(descriptor.rawValue)")
         let persisted = try store.persistRawText(finalizedText, for: session)
         _ = try store.update(
             persisted,
