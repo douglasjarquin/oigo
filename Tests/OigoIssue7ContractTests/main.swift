@@ -116,6 +116,19 @@ private struct OigoIssue7ContractTests {
         guard FileManager.default.fileExists(atPath: active.directoryURL.path) else {
             throw ContractFailure(message: "active session directory disappeared after refused deletion")
         }
+
+        let preparing = try store.createSession(now: Date(timeIntervalSince1970: 11_002))
+        try Data([0x50, 0x52, 0x45, 0x50]).write(to: preparing.audioURL, options: [.atomic])
+        do {
+            try store.remove(id: preparing.id)
+            throw ContractFailure(message: "preparing session with durable audio was deleted")
+        } catch let error as ContractFailure {
+            throw error
+        } catch let error as SessionStoreError {
+            guard error.description.contains("active") else {
+                throw ContractFailure(message: "preparing session deletion returned a non-active error: " + error.description)
+            }
+        }
     }
 
     private static func testHistoryMetadataIsBounded() throws {
@@ -170,7 +183,7 @@ private struct OigoIssue7ContractTests {
         }
     }
 
-    private static func testRetryTransitionPreservesDurableAudio() throws {
+    private static func testRetryTransitionPreservesDurableAudio() async throws {
         let root = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -233,6 +246,51 @@ private struct OigoIssue7ContractTests {
               try Data(contentsOf: completed.audioURL) == originalAudio else {
             throw ContractFailure(message: "successful retry did not complete the same session without replacing audio")
         }
+
+        let coordinatorSession = try store.createSession(now: Date(timeIntervalSince1970: 13_010))
+        let coordinatorFailed = try store.update(
+            coordinatorSession,
+            state: .failed,
+            at: Date(timeIntervalSince1970: 13_011),
+            failureReason: "coordinator fixture"
+        )
+        try originalAudio.write(to: coordinatorFailed.audioURL, options: [.atomic])
+        let coordinator = DictationCoordinator(initialState: .complete)
+        let coordinatorRetry = Issue7RetryTranscription(finalizedText: "coordinator retry")
+        let coordinatorCompleted = try await coordinator.retryRecordingWithTranscription(
+            for: coordinatorFailed,
+            using: coordinatorRetry,
+            store: store
+        )
+        guard coordinatorCompleted.metadata.state == .completed,
+              coordinator.state == .complete,
+              try Data(contentsOf: coordinatorCompleted.audioURL) == originalAudio else {
+            throw ContractFailure(message: "history retry was unavailable after a completed dictation")
+        }
+
+        let timedCreated = try store.createSession(now: Date(timeIntervalSince1970: 13_020))
+        let timedRecording = try store.update(
+            timedCreated,
+            state: .recording,
+            at: Date(timeIntervalSince1970: 13_021)
+        )
+        let timedFailed = try store.update(
+            timedRecording,
+            state: .failed,
+            at: Date(timeIntervalSince1970: 13_025),
+            failureReason: "duration fixture"
+        )
+        let timedAgain = try store.update(
+            timedFailed,
+            state: .failed,
+            at: Date(timeIntervalSince1970: 14_000),
+            insertionOutcome: .failed,
+            insertionFailureReason: "still unavailable"
+        )
+        guard timedFailed.metadata.duration == 4,
+              timedAgain.metadata.duration == timedFailed.metadata.duration else {
+            throw ContractFailure(message: "terminal metadata updates changed the recording duration")
+        }
     }
 
     private static func testRetentionBoundaries() throws {
@@ -261,10 +319,12 @@ private struct OigoIssue7ContractTests {
                 successfulAudioLifetime: 365 * 24 * 60 * 60
             )
         )
-        guard retentionResult.removedSessionIDs == [sessions[0].id],
-              (try? store.load(id: sessions[0].id)) == nil,
-              (try? store.load(id: sessions[1].id)) != nil else {
-            throw ContractFailure(message: "transcript retention did not keep exactly the newest 100 sessions")
+        guard retentionResult.removedSessionIDs.isEmpty,
+              (try? store.load(id: sessions[0].id)) != nil,
+              !FileManager.default.fileExists(atPath: sessions[0].rawTextURL.path),
+              FileManager.default.fileExists(atPath: sessions[0].audioURL.path),
+              FileManager.default.fileExists(atPath: sessions[1].rawTextURL.path) else {
+            throw ContractFailure(message: "transcript retention did not prune old text while preserving fresh successful audio")
         }
 
         let zeroRoot = temporaryDirectory()
@@ -310,6 +370,76 @@ private struct OigoIssue7ContractTests {
         guard afterBoundary.removedAudioSessionIDs == [exact.id],
               !FileManager.default.fileExists(atPath: exact.audioURL.path) else {
             throw ContractFailure(message: "successful audio older than 24 hours was not removed during idle maintenance")
+        }
+
+        let audioOnlyRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: audioOnlyRoot) }
+        let audioOnlyStore = try SessionStore(rootDirectory: audioOnlyRoot)
+        let audioOnlyCreated = try audioOnlyStore.createSession(now: base)
+        let audioOnly = try audioOnlyStore.update(
+            audioOnlyCreated,
+            state: .completed,
+            at: base
+        )
+        try Data([0x41, 0x55, 0x44, 0x49, 0x4F]).write(to: audioOnly.audioURL, options: [.atomic])
+        _ = try audioOnlyStore.performIdleMaintenance(
+            at: base.addingTimeInterval(24 * 60 * 60),
+            policy: SessionRetentionPolicy(maxTranscriptSessions: 0)
+        )
+        guard FileManager.default.fileExists(atPath: audioOnly.audioURL.path) else {
+            throw ContractFailure(message: "successful audio-only session was deleted at the exact 24-hour boundary")
+        }
+        let audioOnlyAfterBoundary = try audioOnlyStore.performIdleMaintenance(
+            at: base.addingTimeInterval(24 * 60 * 60 + 1),
+            policy: SessionRetentionPolicy(maxTranscriptSessions: 0)
+        )
+        guard audioOnlyAfterBoundary.removedSessionIDs == [audioOnly.id],
+              !FileManager.default.fileExists(atPath: audioOnly.directoryURL.path) else {
+            throw ContractFailure(message: "expired audio-only session was not removed after its retention boundary")
+        }
+
+        let prunedRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: prunedRoot) }
+        let prunedStore = try SessionStore(rootDirectory: prunedRoot)
+        let prunedCreated = try prunedStore.createSession(now: base)
+        let prunedPersisted = try prunedStore.persistRawText("prune transcript", for: prunedCreated)
+        let pruned = try prunedStore.update(prunedPersisted, state: .completed, at: base)
+        try Data([0x50, 0x52, 0x55, 0x4E, 0x45]).write(to: pruned.audioURL, options: [.atomic])
+        _ = try prunedStore.performIdleMaintenance(
+            at: base.addingTimeInterval(1),
+            policy: SessionRetentionPolicy(maxTranscriptSessions: 0)
+        )
+        guard FileManager.default.fileExists(atPath: pruned.audioURL.path),
+              !FileManager.default.fileExists(atPath: pruned.rawTextURL.path),
+              (try? prunedStore.load(id: pruned.id)) != nil else {
+            throw ContractFailure(message: "transcript pruning removed successful audio before its retention boundary")
+        }
+
+        let overflowRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: overflowRoot) }
+        let overflowStore = try SessionStore(rootDirectory: overflowRoot)
+        var oldestOverflowID: UUID?
+        for index in 0...4_096 {
+            let created = try overflowStore.createSession(
+                now: base.addingTimeInterval(Double(index))
+            )
+            let cancelled = try overflowStore.update(
+                created,
+                state: .cancelled,
+                at: base.addingTimeInterval(Double(index))
+            )
+            if index == 0 {
+                oldestOverflowID = cancelled.id
+            }
+        }
+        let overflowResult = try overflowStore.performIdleMaintenance(
+            at: base.addingTimeInterval(10_000),
+            policy: SessionRetentionPolicy(maxTranscriptSessions: 100)
+        )
+        guard let oldestOverflowID,
+              (try? overflowStore.load(id: oldestOverflowID)) == nil,
+              overflowResult.removedSessionIDs.count == 4_097 else {
+            throw ContractFailure(message: "idle retention stopped at the directory inspection bound")
         }
 
         let protectedRoot = temporaryDirectory()
@@ -489,5 +619,61 @@ private final class Issue7EventSender: InsertionEventSender {
         }
         sendCalls += 1
         return .sent
+    }
+}
+
+private final class Issue7RetryTranscription: TranscriptionController, @unchecked Sendable {
+    let finalizedText: String
+
+    init(finalizedText: String) {
+        self.finalizedText = finalizedText
+    }
+
+    func start(
+        session: DictationSession,
+        format: AudioCaptureFormat,
+        store: SessionStore,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+    ) async throws {
+        _ = session
+        _ = format
+        _ = store
+        _ = onUpdate
+    }
+
+    func append(_ buffer: AudioCaptureBuffer) {
+        _ = buffer
+    }
+
+    func finish() async throws -> TranscriptionResult {
+        TranscriptionResult(
+            finalizedText: finalizedText,
+            rawTextByteCount: Int64(finalizedText.utf8.count)
+        )
+    }
+
+    func cancel() async throws -> TranscriptionResult? {
+        nil
+    }
+
+    func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult {
+        let descriptor = try store.openAudioFileDescriptor(for: session)
+        defer { descriptor.close() }
+        let audioURL = URL(fileURLWithPath: "/dev/fd/\(descriptor.rawValue)")
+        let audioBytes = try Data(contentsOf: audioURL)
+        let persisted = try store.persistRawText(finalizedText, for: session)
+        _ = try store.update(
+            persisted,
+            state: .completed,
+            audioByteCount: Int64(audioBytes.count),
+            rawTextByteCount: Int64(finalizedText.utf8.count)
+        )
+        return TranscriptionResult(
+            finalizedText: finalizedText,
+            rawTextByteCount: Int64(finalizedText.utf8.count)
+        )
     }
 }

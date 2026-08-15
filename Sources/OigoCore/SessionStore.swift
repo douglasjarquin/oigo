@@ -275,6 +275,7 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     private static let pendingRawPersistenceName = ".raw-persistence.json"
+    private static let maxMetadataBytes = 64 * 1024
 
     public init(rootDirectory: URL? = nil, fileManager: FileManager = .default) throws {
         self.fileManager = fileManager
@@ -430,7 +431,7 @@ public final class SessionStore: @unchecked Sendable {
             }
             if state == .completed || state == .failed || state == .cancelled || state == .interrupted {
                 metadata.endedAt = date
-                if let startedAt = metadata.startedAt {
+                if metadata.duration == nil, let startedAt = metadata.startedAt {
                     metadata.duration = max(0, date.timeIntervalSince(startedAt))
                 }
             }
@@ -940,12 +941,10 @@ public final class SessionStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        let sessions = try tolerantSessions(
-            maxDirectories: SessionRetentionPolicy.default.maxDirectoriesToInspect
-        )
-        return try sessions.compactMap { session in
+        var recovered: [DictationSession] = []
+        try forEachTolerantSession { session in
             guard session.metadata.state.isUnfinished else {
-                return nil
+                return
             }
             var metadata = session.metadata
             metadata.state = .interrupted
@@ -958,8 +957,9 @@ public final class SessionStore: @unchecked Sendable {
                 ? "transcription retry was interrupted before shutdown"
                 : "recording was interrupted before shutdown"
             try writeMetadata(metadata, at: session.metadataURL)
-            return DictationSession(metadata: metadata, directoryURL: session.directoryURL)
+            recovered.append(DictationSession(metadata: metadata, directoryURL: session.directoryURL))
         }
+        return recovered
     }
 
     public func remove(id: UUID) throws {
@@ -971,9 +971,13 @@ public final class SessionStore: @unchecked Sendable {
         ).first(where: { $0.id == id }) else {
             throw SessionStoreError.missingSession(id)
         }
-        let isUnstartedPlaceholder = session.metadata.state == .preparing
+        let isEmptyPreparingPlaceholder = session.metadata.state == .preparing
             && session.metadata.startedAt == nil
-        guard !session.metadata.state.isUnfinished || isUnstartedPlaceholder else {
+            && session.metadata.audioByteCount == nil
+            && session.metadata.rawTextByteCount == nil
+            && !fileManager.fileExists(atPath: session.audioURL.path)
+            && !fileManager.fileExists(atPath: session.rawTextURL.path)
+        guard !session.metadata.state.isUnfinished || isEmptyPreparingPlaceholder else {
             throw SessionStoreError.activeSession(id)
         }
         try removeSessionDirectory(at: session.directoryURL)
@@ -986,40 +990,61 @@ public final class SessionStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        let sessions = try tolerantSessions(maxDirectories: policy.maxDirectoriesToInspect)
-        let transcriptSessions = sessions
-            .filter { sessionHasTranscript($0) }
-            .sorted { lhs, rhs in
-                lhs.metadata.createdAt > rhs.metadata.createdAt
+        var retainedTranscriptSessions: [DictationSession] = []
+        if policy.maxTranscriptSessions > 0 {
+            try forEachTolerantSession { session in
+                guard sessionHasTranscript(session) else {
+                    return
+                }
+                retainedTranscriptSessions.append(session)
+                retainedTranscriptSessions.sort { lhs, rhs in
+                    if lhs.metadata.createdAt == rhs.metadata.createdAt {
+                        return lhs.metadata.directoryName > rhs.metadata.directoryName
+                    }
+                    return lhs.metadata.createdAt > rhs.metadata.createdAt
+                }
+                if retainedTranscriptSessions.count > policy.maxTranscriptSessions {
+                    retainedTranscriptSessions.removeLast()
+                }
             }
-        let retainedTranscriptIDs = Set(
-            transcriptSessions
-                .prefix(policy.maxTranscriptSessions)
-                .map { $0.id }
-        )
+        }
+        let retainedTranscriptIDs = Set(retainedTranscriptSessions.map(\.id))
         var removedSessionIDs: [UUID] = []
         var removedAudioSessionIDs: [UUID] = []
 
-        for session in sessions {
+        try forEachTolerantSession { session in
             guard !session.metadata.state.isUnfinished else {
-                continue
+                return
+            }
+            guard session.metadata.state != .failed,
+                  session.metadata.state != .interrupted else {
+                return
             }
 
-            if !retainedTranscriptIDs.contains(session.id),
-               session.metadata.state != .failed,
-               session.metadata.state != .interrupted {
-                try removeSessionDirectory(at: session.directoryURL)
-                removedSessionIDs.append(session.id)
-                continue
+            let hasAudio = fileManager.fileExists(atPath: session.audioURL.path)
+            let referenceDate = session.metadata.endedAt ?? session.metadata.updatedAt
+            let audioIsRetained = session.metadata.state == .completed
+                && hasAudio
+                && date.timeIntervalSince(referenceDate) <= policy.successfulAudioLifetime
+
+            if !retainedTranscriptIDs.contains(session.id) {
+                if audioIsRetained {
+                    if sessionHasTranscript(session) {
+                        try removeTranscriptFiles(for: session)
+                    }
+                } else {
+                    try removeSessionDirectory(at: session.directoryURL)
+                    removedSessionIDs.append(session.id)
+                    return
+                }
             }
 
             guard session.metadata.state == .completed,
-                  fileManager.fileExists(atPath: session.audioURL.path) else {
-                continue
+                  hasAudio else {
+                return
             }
-            let referenceDate = session.metadata.endedAt ?? session.metadata.updatedAt
             guard date.timeIntervalSince(referenceDate) > policy.successfulAudioLifetime else {
-                continue
+                return
             }
             try removeAudioFile(for: session)
             removedAudioSessionIDs.append(session.id)
@@ -1061,9 +1086,63 @@ public final class SessionStore: @unchecked Sendable {
         }
     }
 
+    private func removeTranscriptFiles(for session: DictationSession) throws {
+        var metadata = session.metadata
+        metadata.rawTextByteCount = nil
+        metadata.firstTranscriptLine = nil
+        try writeMetadata(metadata, at: session.metadataURL)
+        try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            try removeEntry(
+                named: "raw.txt",
+                in: directoryFD,
+                at: session.rawTextURL,
+                allowMissing: true
+            )
+            try removeEntry(
+                named: "clean.txt",
+                in: directoryFD,
+                at: session.cleanTextURL,
+                allowMissing: true
+            )
+            _ = Darwin.fsync(directoryFD)
+        }
+    }
+
     private func tolerantSessions(maxDirectories: Int) throws -> [DictationSession] {
         try boundedSessionDirectories(maxCount: maxDirectories).compactMap { directoryURL in
             try? readSession(at: directoryURL)
+        }
+    }
+
+    private func forEachTolerantSession(
+        _ body: (DictationSession) throws -> Void
+    ) throws {
+        guard let enumerator = fileManager.enumerator(
+            at: rootDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles],
+            errorHandler: { _, _ in true }
+        ) else {
+            return
+        }
+
+        while let value = enumerator.nextObject() {
+            guard let url = value as? URL,
+                  let values = try? url.resourceValues(
+                      forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+                  ) else {
+                continue
+            }
+            if values.isDirectory == true {
+                enumerator.skipDescendants()
+            }
+            guard values.isDirectory == true, values.isSymbolicLink != true else {
+                continue
+            }
+            guard let session = try? readSession(at: url) else {
+                continue
+            }
+            try body(session)
         }
     }
 
@@ -1071,25 +1150,38 @@ public final class SessionStore: @unchecked Sendable {
         guard maxCount > 0 else {
             return []
         }
-        let urls = try fileManager.contentsOfDirectory(
+        guard let enumerator = fileManager.enumerator(
             at: rootDirectory,
             includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
-            options: [.skipsHiddenFiles]
-        )
-        return urls
-            .filter { url in
-                guard let values = try? url.resourceValues(
-                    forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
-                ) else {
-                    return false
-                }
-                return values.isDirectory == true && values.isSymbolicLink != true
+            options: [.skipsHiddenFiles],
+            errorHandler: { _, _ in true }
+        ) else {
+            return []
+        }
+
+        var directories: [URL] = []
+        var inspectedEntries = 0
+        while inspectedEntries < maxCount, let value = enumerator.nextObject() {
+            guard let url = value as? URL else {
+                continue
             }
-            .sorted { lhs, rhs in
-                lhs.lastPathComponent > rhs.lastPathComponent
+            inspectedEntries += 1
+            guard let values = try? url.resourceValues(
+                forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+            ) else {
+                continue
             }
-            .prefix(maxCount)
-            .map { $0 }
+            if values.isDirectory == true {
+                enumerator.skipDescendants()
+            }
+            guard values.isDirectory == true, values.isSymbolicLink != true else {
+                continue
+            }
+            directories.append(url)
+        }
+        return directories.sorted { lhs, rhs in
+            lhs.lastPathComponent > rhs.lastPathComponent
+        }
     }
 
     private func readFirstTranscriptLine(at directoryURL: URL) throws -> String? {
@@ -1151,7 +1243,12 @@ public final class SessionStore: @unchecked Sendable {
         try recoverPendingPersistence(at: directoryURL, directoryFD: directoryFD)
         let metadataURL = directoryURL.appendingPathComponent("session.json")
         do {
-            let data = try readData(named: "session.json", in: directoryFD, at: metadataURL)
+            let data = try readData(
+                named: "session.json",
+                in: directoryFD,
+                at: metadataURL,
+                maxBytes: Self.maxMetadataBytes
+            )
             let metadata = try decoder.decode(SessionMetadata.self, from: data)
             guard metadata.directoryName == directoryURL.standardizedFileURL.lastPathComponent,
                   metadata.audioFileName == "audio.caf",
@@ -1237,7 +1334,8 @@ public final class SessionStore: @unchecked Sendable {
         guard let data = try readDataIfPresent(
             named: Self.pendingRawPersistenceName,
             in: directoryFD,
-            at: pendingURL
+            at: pendingURL,
+            maxBytes: Self.maxMetadataBytes
         ) else {
             return
         }
@@ -1333,7 +1431,12 @@ public final class SessionStore: @unchecked Sendable {
         return directoryFD
     }
 
-    private func readData(named name: String, in directoryFD: Int32, at url: URL) throws -> Data {
+    private func readData(
+        named name: String,
+        in directoryFD: Int32,
+        at url: URL,
+        maxBytes: Int? = nil
+    ) throws -> Data {
         let flags = O_RDONLY | O_CLOEXEC | O_NOFOLLOW
         let fileFD = name.withCString { entryName in
             Darwin.openat(directoryFD, entryName, flags)
@@ -1343,13 +1446,14 @@ public final class SessionStore: @unchecked Sendable {
         }
         defer { _ = Darwin.close(fileFD) }
 
-        return try readData(from: fileFD, at: url)
+        return try readData(from: fileFD, at: url, maxBytes: maxBytes)
     }
 
     private func readDataIfPresent(
         named name: String,
         in directoryFD: Int32,
-        at url: URL
+        at url: URL,
+        maxBytes: Int? = nil
     ) throws -> Data? {
         let flags = O_RDONLY | O_CLOEXEC | O_NOFOLLOW
         let fileFD = name.withCString { entryName in
@@ -1363,15 +1467,22 @@ public final class SessionStore: @unchecked Sendable {
         }
         defer { _ = Darwin.close(fileFD) }
 
-        return try readData(from: fileFD, at: url)
+        return try readData(from: fileFD, at: url, maxBytes: maxBytes)
     }
 
-    private func readData(from fileFD: Int32, at url: URL) throws -> Data {
+    private func readData(
+        from fileFD: Int32,
+        at url: URL,
+        maxBytes: Int? = nil
+    ) throws -> Data {
 
         var fileInfo = stat()
         guard Darwin.fstat(fileFD, &fileInfo) == 0,
               (fileInfo.st_mode & S_IFMT) == S_IFREG else {
             throw SessionStoreError.invalidSessionDirectory(url)
+        }
+        if let maxBytes, fileInfo.st_size > Int64(maxBytes) {
+            throw SessionStoreError.invalidMetadata(url)
         }
 
         var data = Data()
@@ -1388,6 +1499,9 @@ public final class SessionStore: @unchecked Sendable {
                     continue
                 }
                 throw SessionStoreError.invalidSessionDirectory(url)
+            }
+            if let maxBytes, data.count + count > maxBytes {
+                throw SessionStoreError.invalidMetadata(url)
             }
             data.append(buffer, count: count)
         }

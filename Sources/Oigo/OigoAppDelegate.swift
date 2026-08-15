@@ -361,35 +361,45 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         guard let store = sessionStore else {
             return
         }
-        let target = insertion.captureTarget()
-        let result = insertion.pasteAgain(
-            for: entry.session,
-            store: store,
-            target: target
-        )
-        do {
-            let updated = try store.update(
-                entry.session,
-                state: entry.session.metadata.state,
-                at: Date(),
-                insertionOutcome: result.outcome,
-                insertionFailureReason: result.reason
-            )
-            lastSession = updated
-            insertionDisplayStatus = Self.displayStatus(for: result.outcome)
-            switch result.outcome {
-            case .pasted:
-                historyWindow?.showMessage("Pasted again.")
-            case .copied, .secureRejected:
-                historyWindow?.showMessage("Raw transcript copied. " + (result.reason ?? "Paste was not sent."))
-            case .failed:
-                historyWindow?.showMessage("Paste Again failed: " + (result.reason ?? "the paste could not be completed"))
+        historyWindow?.window?.orderOut(nil)
+        NSApp.hide(nil)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                return
             }
-            refreshHistory()
-        } catch {
-            historyWindow?.showMessage(Self.friendlyError("Paste Again failed", error))
+            defer {
+                self.historyWindow?.showAndFocus()
+                self.updateSurface()
+            }
+            let target = self.insertion.captureTarget()
+            let result = self.insertion.pasteAgain(
+                for: entry.session,
+                store: store,
+                target: target
+            )
+            do {
+                let updated = try store.update(
+                    entry.session,
+                    state: entry.session.metadata.state,
+                    at: Date(),
+                    insertionOutcome: result.outcome,
+                    insertionFailureReason: result.reason
+                )
+                self.lastSession = updated
+                self.insertionDisplayStatus = Self.displayStatus(for: result.outcome)
+                switch result.outcome {
+                case .pasted:
+                    self.historyWindow?.showMessage("Pasted again.")
+                case .copied, .secureRejected:
+                    self.historyWindow?.showMessage("Raw transcript copied. " + (result.reason ?? "Paste was not sent."))
+                case .failed:
+                    self.historyWindow?.showMessage("Paste Again failed: " + (result.reason ?? "the paste could not be completed"))
+                }
+                self.refreshHistory()
+            } catch {
+                self.historyWindow?.showMessage(Self.friendlyError("Paste Again failed", error))
+            }
         }
-        updateSurface()
     }
 
     private func playRecording(for entry: SessionHistoryEntry) {

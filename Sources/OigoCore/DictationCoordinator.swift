@@ -106,7 +106,9 @@ public struct DictationStateMachine: Sendable {
         Transition(from: .failed, event: .interrupt, to: .interrupted),
         Transition(from: .idle, event: .retryCompleted, to: .complete),
         Transition(from: .failed, event: .retryCompleted, to: .complete),
-        Transition(from: .interrupted, event: .retryCompleted, to: .complete)
+        Transition(from: .interrupted, event: .retryCompleted, to: .complete),
+        Transition(from: .complete, event: .retryCompleted, to: .complete),
+        Transition(from: .cancelled, event: .retryCompleted, to: .complete)
     ]
 
     @discardableResult
@@ -394,7 +396,7 @@ public final class DictationCoordinator {
               [.failed, .interrupted].contains(session.metadata.state) else {
             throw DictationCoordinatorError.recordingNotActive
         }
-        guard [.idle, .failed, .interrupted].contains(state),
+        guard [.idle, .failed, .interrupted, .complete, .cancelled].contains(state),
               savedSession != nil || [.failed, .interrupted].contains(state) else {
             throw DictationCoordinatorError.recordingNotActive
         }
