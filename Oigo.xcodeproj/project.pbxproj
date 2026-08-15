@@ -1,0 +1,338 @@
+// !$*UTF8*$!
+{
+    archiveVersion = 1;
+    classes = {
+    };
+    objectVersion = 77;
+    objects = {
+
+/* Begin PBXBuildFile section */
+        A00000010000000000000001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000001 /* main.swift */; };
+        A00000010000000000000002 /* OigoAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000002 /* OigoAppDelegate.swift */; };
+        A00000010000000000000003 /* StatusSurfaceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000003 /* StatusSurfaceController.swift */; };
+        A00000010000000000000004 /* GlobalHotKeyRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000004 /* GlobalHotKeyRegistrar.swift */; };
+        A00000010000000000000005 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000005 /* SettingsWindowController.swift */; };
+        A00000010000000000000006 /* DictationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000006 /* DictationCoordinator.swift */; };
+        A00000010000000000000007 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000007 /* Foundation.framework */; };
+        A00000010000000000000008 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000008 /* AppKit.framework */; };
+        A00000010000000000000009 /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000009 /* Carbon.framework */; };
+        A0000001000000000000000A /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000007 /* Foundation.framework */; };
+        A0000001000000000000000B /* libOigoCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000B /* libOigoCore.a */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+        K00000010000000000000001 /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = F00000010000000000000001 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = E00000010000000000000002;
+            remoteInfo = OigoCore;
+        };
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+        B00000010000000000000001 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+        B00000010000000000000002 /* OigoAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OigoAppDelegate.swift; sourceTree = "<group>"; };
+        B00000010000000000000003 /* StatusSurfaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusSurfaceController.swift; sourceTree = "<group>"; };
+        B00000010000000000000004 /* GlobalHotKeyRegistrar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotKeyRegistrar.swift; sourceTree = "<group>"; };
+        B00000010000000000000005 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
+        B00000010000000000000006 /* DictationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationCoordinator.swift; sourceTree = "<group>"; };
+        B00000010000000000000007 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
+        B00000010000000000000008 /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
+        B00000010000000000000009 /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Carbon.framework; path = System/Library/Frameworks/Carbon.framework; sourceTree = SDKROOT; };
+        B0000001000000000000000A /* Oigo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Oigo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+        B0000001000000000000000B /* libOigoCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
+        B0000001000000000000000C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Oigo/Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+        D00000010000000000000002 /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A00000010000000000000007 /* Foundation.framework in Frameworks */,
+                A00000010000000000000008 /* AppKit.framework in Frameworks */,
+                A00000010000000000000009 /* Carbon.framework in Frameworks */,
+                A0000001000000000000000B /* libOigoCore.a in Frameworks */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        D00000010000000000000004 /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A0000001000000000000000A /* Foundation.framework in Frameworks */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+        C00000010000000000000001 = {
+            isa = PBXGroup;
+            children = (
+                C00000010000000000000002 /* Oigo */,
+                C00000010000000000000003 /* OigoCore */,
+                B0000001000000000000000C /* Info.plist */,
+                C00000010000000000000004 /* Frameworks */,
+                C00000010000000000000005 /* Products */,
+            );
+            sourceTree = "<group>";
+        };
+        C00000010000000000000002 /* Oigo */ = {
+            isa = PBXGroup;
+            children = (
+                B00000010000000000000001 /* main.swift */,
+                B00000010000000000000002 /* OigoAppDelegate.swift */,
+                B00000010000000000000003 /* StatusSurfaceController.swift */,
+                B00000010000000000000004 /* GlobalHotKeyRegistrar.swift */,
+                B00000010000000000000005 /* SettingsWindowController.swift */,
+            );
+            path = Sources/Oigo;
+            sourceTree = "<group>";
+        };
+        C00000010000000000000003 /* OigoCore */ = {
+            isa = PBXGroup;
+            children = (
+                B00000010000000000000006 /* DictationCoordinator.swift */,
+            );
+            path = Sources/OigoCore;
+            sourceTree = "<group>";
+        };
+        C00000010000000000000004 /* Frameworks */ = {
+            isa = PBXGroup;
+            children = (
+                B00000010000000000000007 /* Foundation.framework */,
+                B00000010000000000000008 /* AppKit.framework */,
+                B00000010000000000000009 /* Carbon.framework */,
+            );
+            name = Frameworks;
+            sourceTree = "<group>";
+        };
+        C00000010000000000000005 /* Products */ = {
+            isa = PBXGroup;
+            children = (
+                B0000001000000000000000A /* Oigo.app */,
+                B0000001000000000000000B /* libOigoCore.a */,
+            );
+            name = Products;
+            sourceTree = "<group>";
+        };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+        E00000010000000000000001 /* Oigo */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = H00000010000000000000011 /* Build configuration list for PBXNativeTarget "Oigo" */;
+            buildPhases = (
+                D00000010000000000000001 /* Sources */,
+                D00000010000000000000002 /* Frameworks */,
+                D00000010000000000000005 /* Resources */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+                J00000010000000000000001 /* PBXTargetDependency */,
+            );
+            name = Oigo;
+            productName = Oigo;
+            productReference = B0000001000000000000000A /* Oigo.app */;
+            productType = "com.apple.product-type.application";
+        };
+        E00000010000000000000002 /* OigoCore */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = I00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoCore" */;
+            buildPhases = (
+                D00000010000000000000003 /* Sources */,
+                D00000010000000000000004 /* Frameworks */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+            );
+            name = OigoCore;
+            productName = OigoCore;
+            productReference = B0000001000000000000000B /* libOigoCore.a */;
+            productType = "com.apple.product-type.library.static";
+        };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+        F00000010000000000000001 /* Project object */ = {
+            isa = PBXProject;
+            attributes = {
+                LastSwiftUpdateCheck = 1600;
+                ORGANIZATIONNAME = Oigo;
+                TargetAttributes = {
+                    E00000010000000000000001 = {
+                        CreatedOnToolsVersion = 16.0;
+                    };
+                    E00000010000000000000002 = {
+                        CreatedOnToolsVersion = 16.0;
+                    };
+                };
+            };
+            buildConfigurationList = G00000010000000000000011 /* Build configuration list for PBXProject "Oigo" */;
+            compatibilityVersion = "Xcode 16.0";
+            developmentRegion = en;
+            hasScannedForEncodings = 0;
+            knownRegions = (
+                en,
+                Base,
+            );
+            mainGroup = C00000010000000000000001;
+            productRefGroup = C00000010000000000000005 /* Products */;
+            projectDirPath = "";
+            projectRoot = "";
+            targets = (
+                E00000010000000000000001 /* Oigo */,
+                E00000010000000000000002 /* OigoCore */,
+            );
+        };
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+        D00000010000000000000005 /* Resources */ = {
+            isa = PBXResourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+        D00000010000000000000001 /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A00000010000000000000001 /* main.swift in Sources */,
+                A00000010000000000000002 /* OigoAppDelegate.swift in Sources */,
+                A00000010000000000000003 /* StatusSurfaceController.swift in Sources */,
+                A00000010000000000000004 /* GlobalHotKeyRegistrar.swift in Sources */,
+                A00000010000000000000005 /* SettingsWindowController.swift in Sources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        D00000010000000000000003 /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A00000010000000000000006 /* DictationCoordinator.swift in Sources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+        J00000010000000000000001 /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = E00000010000000000000002 /* OigoCore */;
+            targetProxy = K00000010000000000000001 /* PBXContainerItemProxy */;
+        };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+        G00000010000000000000001 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                SWIFT_VERSION = 6.0;
+            };
+            name = Debug;
+        };
+        G00000010000000000000002 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                SWIFT_VERSION = 6.0;
+            };
+            name = Release;
+        };
+        H00000010000000000000001 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = arm64;
+                CODE_SIGNING_ALLOWED = NO;
+                CODE_SIGN_IDENTITY = "";
+                INFOPLIST_FILE = Oigo/Info.plist;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_BUNDLE_IDENTIFIER = com.oigo.app;
+                PRODUCT_NAME = Oigo;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Debug;
+        };
+        H00000010000000000000002 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = arm64;
+                CODE_SIGNING_ALLOWED = NO;
+                CODE_SIGN_IDENTITY = "";
+                INFOPLIST_FILE = Oigo/Info.plist;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_BUNDLE_IDENTIFIER = com.oigo.app;
+                PRODUCT_NAME = Oigo;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Release;
+        };
+        I00000010000000000000001 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = arm64;
+                CODE_SIGNING_ALLOWED = NO;
+                CODE_SIGN_IDENTITY = "";
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_NAME = OigoCore;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Debug;
+        };
+        I00000010000000000000002 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = arm64;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_NAME = OigoCore;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Release;
+        };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+        G00000010000000000000011 /* Build configuration list for PBXProject "Oigo" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                G00000010000000000000001 /* Debug */,
+                G00000010000000000000002 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        H00000010000000000000011 /* Build configuration list for PBXNativeTarget "Oigo" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                H00000010000000000000001 /* Debug */,
+                H00000010000000000000002 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        I00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoCore" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                I00000010000000000000001 /* Debug */,
+                I00000010000000000000002 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+/* End XCConfigurationList section */
+    };
+    rootObject = F00000010000000000000001 /* Project object */;
+}

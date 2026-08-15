@@ -21,5 +21,9 @@ jobs:
           xcode-select -p
       - name: Swift build
         run: swift build
+      - name: Menu-bar app product build
+        run: swift build --product Oigo
       - name: Dependency-free contract harness
         run: swift run oigo-spike-contract-tests
+      - name: Issue three contract harness
+        run: swift run oigo-issue3-contract-tests
