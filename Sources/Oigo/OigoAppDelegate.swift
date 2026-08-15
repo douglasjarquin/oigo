@@ -26,6 +26,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var lastSession: DictationSession?
     private var livePreview = ""
     private var settingsWindow: SettingsWindowController?
+    private var historyWindow: HistoryWindowController?
     private var statusItem: NSStatusItem?
     private var toggleItem: NSMenuItem?
     private var playItem: NSMenuItem?
@@ -80,6 +81,40 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         window.window?.makeKeyAndOrderFront(nil)
     }
 
+    @objc private func openHistory() {
+        if historyWindow == nil {
+            historyWindow = HistoryWindowController(
+                loadTranscript: { [weak self] entry in
+                    self?.loadTranscript(for: entry)
+                        ?? .failure(SessionStoreError.missingSession(entry.id))
+                },
+                copyRawTranscript: { [weak self] entry in
+                    self?.copyRawTranscript(for: entry)
+                },
+                pasteAgain: { [weak self] entry in
+                    self?.pasteAgain(for: entry)
+                },
+                playRecording: { [weak self] entry in
+                    self?.playRecording(for: entry)
+                },
+                retryTranscription: { [weak self] entry in
+                    self?.retryTranscription(for: entry)
+                },
+                revealRecording: { [weak self] entry in
+                    self?.revealRecording(for: entry)
+                },
+                deleteSession: { [weak self] entry in
+                    self?.confirmDelete(entry)
+                },
+                runIdleMaintenance: { [weak self] in
+                    self?.runIdleMaintenance()
+                }
+            )
+        }
+        refreshHistory()
+        historyWindow?.showAndFocus()
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
     }
@@ -113,6 +148,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         )
         reveal.target = self
         menu.addItem(reveal)
+
+        let history = NSMenuItem(
+            title: "History…",
+            action: #selector(openHistory),
+            keyEquivalent: ""
+        )
+        history.target = self
+        menu.addItem(history)
 
         let retry = NSMenuItem(
             title: "Retry Saved Transcription",
@@ -224,6 +267,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     event: .start
                 )
             }
+            if historyWindow != nil {
+                refreshHistory()
+            }
             updateSurface()
         } catch {
             if coordinator.state == .inserting {
@@ -235,6 +281,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                [.failed, .interrupted].contains(session.metadata.state) {
                 lastSession = session
             }
+            historyWindow?.showMessage(Self.friendlyError("Dictation failed", error))
             NSLog("Oigo rejected the toggle command: %@", String(describing: error))
             updateSurface()
         }
@@ -242,13 +289,21 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func retryLastTranscription() {
         Task { @MainActor [weak self] in
-            await self?.performRetry()
+            guard let self, let session = self.lastSession else {
+                return
+            }
+            await self.performRetry(for: session)
         }
     }
 
-    private func performRetry() async {
+    private func retryTranscription(for entry: SessionHistoryEntry) {
+        Task { @MainActor [weak self] in
+            await self?.performRetry(for: entry.session)
+        }
+    }
+
+    private func performRetry(for session: DictationSession) async {
         guard let store = sessionStore,
-              let session = lastSession,
               [.failed, .interrupted].contains(session.metadata.state),
               FileManager.default.fileExists(atPath: session.audioURL.path) else {
             updateSurface()
@@ -257,15 +312,172 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             livePreview = ""
+            historyWindow?.showMessage("Retrying transcription from the saved recording…")
             lastSession = try await coordinator.retryRecordingWithTranscription(
                 for: session,
                 using: transcription,
                 store: store
             )
+            historyWindow?.showMessage("Transcription retry completed.")
         } catch {
-            NSLog("Oigo could not retry the saved transcription: %@", String(describing: error))
+            lastSession = try? store.load(id: session.id)
+            historyWindow?.showMessage(Self.friendlyError("Retry failed", error))
+            NSLog("Oigo could not retry the saved transcription: %@", Self.friendlyError("Retry failed", error))
+        }
+        refreshHistory()
+        updateSurface()
+    }
+
+    private func loadTranscript(for entry: SessionHistoryEntry) -> Result<String, Error> {
+        guard let store = sessionStore else {
+            return .failure(SessionStoreError.missingSession(entry.id))
+        }
+        do {
+            return .success(try store.readRawText(for: entry.session))
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    private func copyRawTranscript(for entry: SessionHistoryEntry) {
+        guard let store = sessionStore else {
+            return
+        }
+        do {
+            let rawText = try store.readRawText(for: entry.session)
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            guard pasteboard.setString(rawText, forType: .string) else {
+                historyWindow?.showMessage("Copy failed: the raw transcript could not be placed on the clipboard.")
+                return
+            }
+            historyWindow?.showMessage("Raw transcript copied to the clipboard.")
+        } catch {
+            historyWindow?.showMessage(Self.friendlyError("Copy failed", error))
+        }
+    }
+
+    private func pasteAgain(for entry: SessionHistoryEntry) {
+        guard let store = sessionStore else {
+            return
+        }
+        let target = insertion.captureTarget()
+        let result = insertion.pasteAgain(
+            for: entry.session,
+            store: store,
+            target: target
+        )
+        do {
+            let updated = try store.update(
+                entry.session,
+                state: entry.session.metadata.state,
+                at: Date(),
+                insertionOutcome: result.outcome,
+                insertionFailureReason: result.reason
+            )
+            lastSession = updated
+            insertionDisplayStatus = Self.displayStatus(for: result.outcome)
+            switch result.outcome {
+            case .pasted:
+                historyWindow?.showMessage("Pasted again.")
+            case .copied, .secureRejected:
+                historyWindow?.showMessage("Raw transcript copied. " + (result.reason ?? "Paste was not sent."))
+            case .failed:
+                historyWindow?.showMessage("Paste Again failed: " + (result.reason ?? "the paste could not be completed"))
+            }
+            refreshHistory()
+        } catch {
+            historyWindow?.showMessage(Self.friendlyError("Paste Again failed", error))
         }
         updateSurface()
+    }
+
+    private func playRecording(for entry: SessionHistoryEntry) {
+        do {
+            _ = try playback.play(url: entry.session.audioURL)
+            historyWindow?.showMessage("Playing the saved recording.")
+        } catch {
+            historyWindow?.showMessage(Self.friendlyError("Playback failed", error))
+        }
+    }
+
+    private func revealRecording(for entry: SessionHistoryEntry) {
+        NSWorkspace.shared.activateFileViewerSelecting([entry.session.directoryURL])
+        historyWindow?.showMessage("Revealed the session folder in Finder.")
+    }
+
+    private func confirmDelete(_ entry: SessionHistoryEntry) {
+        guard !entry.session.metadata.state.isUnfinished else {
+            historyWindow?.showMessage("Active sessions cannot be deleted.")
+            return
+        }
+        guard let window = historyWindow?.window else {
+            delete(entry)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Delete this session?"
+        alert.informativeText = "The recording and transcript files will be removed from Oigo."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                self?.delete(entry)
+            }
+        }
+    }
+
+    private func delete(_ entry: SessionHistoryEntry) {
+        guard let store = sessionStore else {
+            return
+        }
+        do {
+            try store.remove(id: entry.id)
+            if lastSession?.id == entry.id {
+                lastSession = nil
+            }
+            historyWindow?.showMessage("Session deleted.")
+            refreshHistory()
+        } catch {
+            historyWindow?.showMessage(Self.friendlyError("Delete failed", error))
+        }
+        updateSurface()
+    }
+
+    private func refreshHistory() {
+        guard let store = sessionStore else {
+            return
+        }
+        do {
+            let entries = try store.listHistory()
+            lastSession = entries.first?.session
+            historyWindow?.reload(entries: entries)
+        } catch {
+            historyWindow?.showMessage(Self.friendlyError("History unavailable", error))
+        }
+        updateSurface()
+    }
+
+    private func runIdleMaintenance() {
+        guard let store = sessionStore else {
+            return
+        }
+        do {
+            let result = try store.performIdleMaintenance()
+            refreshHistory()
+            let removed = result.removedSessionIDs.count + result.removedAudioSessionIDs.count
+            historyWindow?.showMessage(
+                removed == 0
+                    ? "Idle maintenance found nothing to remove."
+                    : "Idle maintenance removed \(removed) expired artifact set\(removed == 1 ? "" : "s")."
+            )
+        } catch {
+            historyWindow?.showMessage(Self.friendlyError("Maintenance failed", error))
+        }
     }
 
     private func applyTranscriptionUpdate(_ update: TranscriptionUpdate) {
@@ -329,7 +541,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             let store = try SessionStore()
             sessionStore = store
             _ = try store.recoverUnfinishedSessions()
-            lastSession = try store.listSessions().first
+            lastSession = try store.listHistory(limit: 1).first?.session
         } catch {
             NSLog("Oigo could not prepare durable sessions: %@", String(describing: error))
         }
@@ -349,6 +561,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         UserDefaults.standard.set(data, forKey: "globalToggleShortcut")
+    }
+
+    private static func friendlyError(_ prefix: String, _ error: Error) -> String {
+        if let transcriptionError = error as? TranscriptionError {
+            return prefix + ": " + transcriptionError.description
+        }
+        return prefix + ": " + String(describing: error)
     }
 
     private static func displayStatus(for outcome: InsertionOutcome) -> InsertionDisplayStatus {

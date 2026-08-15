@@ -5,6 +5,7 @@ public enum DictationSessionState: String, Codable, CaseIterable, Sendable {
     case preparing
     case recording
     case stopping
+    case retrying
     case completed
     case failed
     case cancelled
@@ -12,7 +13,7 @@ public enum DictationSessionState: String, Codable, CaseIterable, Sendable {
 
     public var isUnfinished: Bool {
         switch self {
-        case .preparing, .recording, .stopping:
+        case .preparing, .recording, .stopping, .retrying:
             true
         case .completed, .failed, .cancelled, .interrupted:
             false
@@ -27,7 +28,52 @@ public enum InsertionOutcome: String, Codable, CaseIterable, Equatable, Sendable
     case failed
 }
 
+public enum SessionTextSource: String, Codable, CaseIterable, Equatable, Sendable {
+    case raw
+    case processed
+}
+
+public struct SessionRetentionPolicy: Equatable, Sendable {
+    public static let `default` = SessionRetentionPolicy()
+
+    public let maxTranscriptSessions: Int
+    public let successfulAudioLifetime: TimeInterval
+    public let maxDirectoriesToInspect: Int
+
+    public init(
+        maxTranscriptSessions: Int = 100,
+        successfulAudioLifetime: TimeInterval = 24 * 60 * 60,
+        maxDirectoriesToInspect: Int = 4_096
+    ) {
+        self.maxTranscriptSessions = max(0, maxTranscriptSessions)
+        self.successfulAudioLifetime = max(0, successfulAudioLifetime)
+        self.maxDirectoriesToInspect = max(1, maxDirectoriesToInspect)
+    }
+}
+
 public struct SessionMetadata: Codable, Equatable, Sendable {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case directoryName
+        case createdAt
+        case updatedAt
+        case state
+        case startedAt
+        case endedAt
+        case duration
+        case failureReason
+        case audioByteCount
+        case rawTextByteCount
+        case insertionOutcome
+        case insertionFailureReason
+        case insertionAttemptedAt
+        case firstTranscriptLine
+        case transcriptionAttemptCount
+        case audioFileName
+        case rawTextFileName
+        case cleanTextFileName
+    }
+
     public let id: UUID
     public let directoryName: String
     public let createdAt: Date
@@ -42,6 +88,8 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
     public var insertionOutcome: InsertionOutcome?
     public var insertionFailureReason: String?
     public var insertionAttemptedAt: Date?
+    public var firstTranscriptLine: String?
+    public var transcriptionAttemptCount: Int
     public let audioFileName: String
     public let rawTextFileName: String
     public let cleanTextFileName: String
@@ -61,6 +109,8 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         insertionOutcome: InsertionOutcome? = nil,
         insertionFailureReason: String? = nil,
         insertionAttemptedAt: Date? = nil,
+        firstTranscriptLine: String? = nil,
+        transcriptionAttemptCount: Int = 0,
         audioFileName: String = "audio.caf",
         rawTextFileName: String = "raw.txt",
         cleanTextFileName: String = "clean.txt"
@@ -79,9 +129,36 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         self.insertionOutcome = insertionOutcome
         self.insertionFailureReason = insertionFailureReason
         self.insertionAttemptedAt = insertionAttemptedAt
+        self.firstTranscriptLine = firstTranscriptLine
+        self.transcriptionAttemptCount = max(0, transcriptionAttemptCount)
         self.audioFileName = audioFileName
         self.rawTextFileName = rawTextFileName
         self.cleanTextFileName = cleanTextFileName
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            id: container.decode(UUID.self, forKey: .id),
+            directoryName: container.decode(String.self, forKey: .directoryName),
+            createdAt: container.decode(Date.self, forKey: .createdAt),
+            updatedAt: container.decode(Date.self, forKey: .updatedAt),
+            state: container.decode(DictationSessionState.self, forKey: .state),
+            startedAt: container.decodeIfPresent(Date.self, forKey: .startedAt),
+            endedAt: container.decodeIfPresent(Date.self, forKey: .endedAt),
+            duration: container.decodeIfPresent(TimeInterval.self, forKey: .duration),
+            failureReason: container.decodeIfPresent(String.self, forKey: .failureReason),
+            audioByteCount: container.decodeIfPresent(Int64.self, forKey: .audioByteCount),
+            rawTextByteCount: container.decodeIfPresent(Int64.self, forKey: .rawTextByteCount),
+            insertionOutcome: container.decodeIfPresent(InsertionOutcome.self, forKey: .insertionOutcome),
+            insertionFailureReason: container.decodeIfPresent(String.self, forKey: .insertionFailureReason),
+            insertionAttemptedAt: container.decodeIfPresent(Date.self, forKey: .insertionAttemptedAt),
+            firstTranscriptLine: container.decodeIfPresent(String.self, forKey: .firstTranscriptLine),
+            transcriptionAttemptCount: container.decodeIfPresent(Int.self, forKey: .transcriptionAttemptCount) ?? 0,
+            audioFileName: container.decode(String.self, forKey: .audioFileName),
+            rawTextFileName: container.decode(String.self, forKey: .rawTextFileName),
+            cleanTextFileName: container.decode(String.self, forKey: .cleanTextFileName)
+        )
     }
 }
 
@@ -115,6 +192,39 @@ public struct DictationSession: Equatable, Identifiable, Sendable {
     }
 }
 
+public struct SessionHistoryEntry: Equatable, Identifiable, Sendable {
+    public let session: DictationSession
+    public let firstTranscriptLine: String?
+    public let textSource: SessionTextSource
+
+    public var id: UUID {
+        session.id
+    }
+
+    public init(
+        session: DictationSession,
+        firstTranscriptLine: String?,
+        textSource: SessionTextSource
+    ) {
+        self.session = session
+        self.firstTranscriptLine = firstTranscriptLine
+        self.textSource = textSource
+    }
+}
+
+public struct SessionMaintenanceResult: Equatable, Sendable {
+    public let removedSessionIDs: [UUID]
+    public let removedAudioSessionIDs: [UUID]
+
+    public init(
+        removedSessionIDs: [UUID] = [],
+        removedAudioSessionIDs: [UUID] = []
+    ) {
+        self.removedSessionIDs = removedSessionIDs
+        self.removedAudioSessionIDs = removedAudioSessionIDs
+    }
+}
+
 public struct RawTextStaging: Equatable, Sendable {
     fileprivate let sessionID: UUID
     fileprivate let fileName: String
@@ -130,6 +240,7 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
     case invalidMetadata(URL)
     case invalidSessionDirectory(URL)
     case insertionAlreadyAttempted(UUID)
+    case activeSession(UUID)
 
     public var description: String {
         switch self {
@@ -141,6 +252,8 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
             "dictation session directory is invalid: " + url.path
         case .insertionAlreadyAttempted(let id):
             "dictation session insertion was already attempted: " + id.uuidString
+        case .activeSession(let id):
+            "dictation session is active and cannot be deleted: " + id.uuidString
         }
     }
 }
@@ -229,7 +342,10 @@ public final class SessionStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        guard let directoryURL = try sessionDirectory(for: id) else {
+        let suffix = "-" + id.uuidString.lowercased()
+        guard let directoryURL = try boundedSessionDirectories(
+            maxCount: SessionRetentionPolicy.default.maxDirectoriesToInspect
+        ).first(where: { $0.lastPathComponent.hasSuffix(suffix) }) else {
             throw SessionStoreError.missingSession(id)
         }
         return try readSession(at: directoryURL)
@@ -252,6 +368,41 @@ public final class SessionStore: @unchecked Sendable {
             .map { try readSession(at: $0) }
             .sorted { lhs, rhs in
                 lhs.metadata.createdAt > rhs.metadata.createdAt
+            }
+    }
+
+    public func listHistory(
+        limit: Int = SessionRetentionPolicy.default.maxTranscriptSessions
+    ) throws -> [SessionHistoryEntry] {
+        guard limit > 0 else {
+            return []
+        }
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        let maxDirectories = SessionRetentionPolicy.default.maxDirectoriesToInspect
+        let doubledLimit = limit > maxDirectories / 2 ? maxDirectories : limit * 2
+        let candidateLimit = min(maxDirectories, max(doubledLimit, 128))
+        let sessions = try boundedSessionDirectories(maxCount: candidateLimit).compactMap { directoryURL -> DictationSession? in
+            try? readSession(at: directoryURL)
+        }
+        return sessions
+            .sorted { lhs, rhs in
+                lhs.metadata.createdAt > rhs.metadata.createdAt
+            }
+            .prefix(limit)
+            .map { session in
+                let firstLine = session.metadata.firstTranscriptLine
+                    ?? (try? readFirstTranscriptLine(at: session.directoryURL))
+                let source: SessionTextSource = fileManager.fileExists(atPath: session.cleanTextURL.path)
+                    ? .processed
+                    : .raw
+                return SessionHistoryEntry(
+                    session: session,
+                    firstTranscriptLine: firstLine,
+                    textSource: source
+                )
             }
     }
 
@@ -305,6 +456,28 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     @discardableResult
+    public func beginTranscriptionRetry(
+        for session: DictationSession,
+        at date: Date = Date()
+    ) throws -> DictationSession {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            guard current.metadata.state == .failed || current.metadata.state == .interrupted else {
+                throw SessionStoreError.invalidMetadata(current.metadataURL)
+            }
+            var metadata = current.metadata
+            metadata.state = .retrying
+            metadata.updatedAt = date
+            metadata.transcriptionAttemptCount += 1
+            try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
+            return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
+        }
+    }
+
+    @discardableResult
     public func claimInsertion(
         for session: DictationSession,
         at date: Date = Date()
@@ -347,6 +520,7 @@ public final class SessionStore: @unchecked Sendable {
             var metadata = current.metadata
             metadata.updatedAt = date
             metadata.rawTextByteCount = Int64(data.count)
+            metadata.firstTranscriptLine = Self.firstTranscriptLine(from: rawText)
 
             let temporaryName = try prepareAtomicWrite(
                 data,
@@ -412,6 +586,12 @@ public final class SessionStore: @unchecked Sendable {
             var metadata = current.metadata
             metadata.updatedAt = date
             metadata.rawTextByteCount = targetRawTextByteCount
+            if metadata.firstTranscriptLine == nil {
+                let existingText = String(decoding: existingData, as: UTF8.self)
+                metadata.firstTranscriptLine = Self.firstTranscriptLine(
+                    from: existingText.isEmpty ? rawText : existingText
+                )
+            }
             try writePendingPersistence(
                 PendingRawPersistence(
                     metadata: metadata,
@@ -620,6 +800,10 @@ public final class SessionStore: @unchecked Sendable {
             var metadata = current.metadata
             metadata.updatedAt = date
             metadata.rawTextByteCount = Int64(fileInfo.st_size)
+            metadata.firstTranscriptLine = try readFirstTranscriptLine(
+                from: stagingFD,
+                at: stagingURL
+            )
             try writePendingPersistence(
                 PendingRawPersistence(
                     metadata: metadata,
@@ -756,7 +940,9 @@ public final class SessionStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        let sessions = try listSessionsUnlocked()
+        let sessions = try tolerantSessions(
+            maxDirectories: SessionRetentionPolicy.default.maxDirectoriesToInspect
+        )
         return try sessions.compactMap { session in
             guard session.metadata.state.isUnfinished else {
                 return nil
@@ -768,7 +954,9 @@ public final class SessionStore: @unchecked Sendable {
             if let startedAt = metadata.startedAt {
                 metadata.duration = max(0, date.timeIntervalSince(startedAt))
             }
-            metadata.failureReason = "recording was interrupted before shutdown"
+            metadata.failureReason = session.metadata.state == .retrying
+                ? "transcription retry was interrupted before shutdown"
+                : "recording was interrupted before shutdown"
             try writeMetadata(metadata, at: session.metadataURL)
             return DictationSession(metadata: metadata, directoryURL: session.directoryURL)
         }
@@ -778,31 +966,179 @@ public final class SessionStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        guard let directoryURL = try sessionDirectory(for: id) else {
+        guard let session = try tolerantSessions(
+            maxDirectories: SessionRetentionPolicy.default.maxDirectoriesToInspect
+        ).first(where: { $0.id == id }) else {
             throw SessionStoreError.missingSession(id)
         }
-        try fileManager.removeItem(at: directoryURL)
+        let isUnstartedPlaceholder = session.metadata.state == .preparing
+            && session.metadata.startedAt == nil
+        guard !session.metadata.state.isUnfinished || isUnstartedPlaceholder else {
+            throw SessionStoreError.activeSession(id)
+        }
+        try removeSessionDirectory(at: session.directoryURL)
     }
 
-    private func listSessionsUnlocked() throws -> [DictationSession] {
-        let urls = try fileManager.contentsOfDirectory(
-            at: rootDirectory,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )
-        return try urls
-            .filter { url in
-                let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-                return values.isDirectory == true || values.isSymbolicLink == true
-            }
-            .map { try readSession(at: $0) }
+    public func performIdleMaintenance(
+        at date: Date = Date(),
+        policy: SessionRetentionPolicy = .default
+    ) throws -> SessionMaintenanceResult {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let sessions = try tolerantSessions(maxDirectories: policy.maxDirectoriesToInspect)
+        let transcriptSessions = sessions
+            .filter { sessionHasTranscript($0) }
             .sorted { lhs, rhs in
                 lhs.metadata.createdAt > rhs.metadata.createdAt
             }
+        let retainedTranscriptIDs = Set(
+            transcriptSessions
+                .prefix(policy.maxTranscriptSessions)
+                .map { $0.id }
+        )
+        var removedSessionIDs: [UUID] = []
+        var removedAudioSessionIDs: [UUID] = []
+
+        for session in sessions {
+            guard !session.metadata.state.isUnfinished else {
+                continue
+            }
+
+            if !retainedTranscriptIDs.contains(session.id),
+               session.metadata.state != .failed,
+               session.metadata.state != .interrupted {
+                try removeSessionDirectory(at: session.directoryURL)
+                removedSessionIDs.append(session.id)
+                continue
+            }
+
+            guard session.metadata.state == .completed,
+                  fileManager.fileExists(atPath: session.audioURL.path) else {
+                continue
+            }
+            let referenceDate = session.metadata.endedAt ?? session.metadata.updatedAt
+            guard date.timeIntervalSince(referenceDate) > policy.successfulAudioLifetime else {
+                continue
+            }
+            try removeAudioFile(for: session)
+            removedAudioSessionIDs.append(session.id)
+        }
+
+        return SessionMaintenanceResult(
+            removedSessionIDs: removedSessionIDs,
+            removedAudioSessionIDs: removedAudioSessionIDs
+        )
     }
 
-    private func sessionDirectory(for id: UUID) throws -> URL? {
-        try listSessionsUnlocked().first { $0.id == id }?.directoryURL
+    private func sessionHasTranscript(_ session: DictationSession) -> Bool {
+        session.metadata.rawTextByteCount != nil
+            || fileManager.fileExists(atPath: session.rawTextURL.path)
+    }
+
+    private func removeSessionDirectory(at directoryURL: URL) throws {
+        let tombstone = rootDirectory.appendingPathComponent(
+            ".deleting-" + UUID().uuidString,
+            isDirectory: true
+        )
+        do {
+            try fileManager.moveItem(at: directoryURL, to: tombstone)
+            try fileManager.removeItem(at: tombstone)
+        } catch {
+            throw SessionStoreError.invalidSessionDirectory(tombstone)
+        }
+    }
+
+    private func removeAudioFile(for session: DictationSession) throws {
+        try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            try removeEntry(
+                named: "audio.caf",
+                in: directoryFD,
+                at: session.audioURL,
+                allowMissing: true
+            )
+            _ = Darwin.fsync(directoryFD)
+        }
+    }
+
+    private func tolerantSessions(maxDirectories: Int) throws -> [DictationSession] {
+        try boundedSessionDirectories(maxCount: maxDirectories).compactMap { directoryURL in
+            try? readSession(at: directoryURL)
+        }
+    }
+
+    private func boundedSessionDirectories(maxCount: Int) throws -> [URL] {
+        guard maxCount > 0 else {
+            return []
+        }
+        let urls = try fileManager.contentsOfDirectory(
+            at: rootDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        )
+        return urls
+            .filter { url in
+                guard let values = try? url.resourceValues(
+                    forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+                ) else {
+                    return false
+                }
+                return values.isDirectory == true && values.isSymbolicLink != true
+            }
+            .sorted { lhs, rhs in
+                lhs.lastPathComponent > rhs.lastPathComponent
+            }
+            .prefix(maxCount)
+            .map { $0 }
+    }
+
+    private func readFirstTranscriptLine(at directoryURL: URL) throws -> String? {
+        let directoryFD = try openSessionDirectory(at: directoryURL)
+        defer { _ = Darwin.close(directoryFD) }
+
+        let fileURL = directoryURL.appendingPathComponent("raw.txt")
+        let fileFD = "raw.txt".withCString { name in
+            Darwin.openat(directoryFD, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard fileFD >= 0 else {
+            guard errno == ENOENT else {
+                throw SessionStoreError.invalidSessionDirectory(fileURL)
+            }
+            return nil
+        }
+        defer { _ = Darwin.close(fileFD) }
+
+        return try readFirstTranscriptLine(from: fileFD, at: fileURL)
+    }
+
+    private func readFirstTranscriptLine(
+        from fileFD: Int32,
+        at url: URL
+    ) throws -> String? {
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        let count = buffer.withUnsafeMutableBytes { bytes in
+            Darwin.read(fileFD, bytes.baseAddress, bytes.count)
+        }
+        guard count >= 0 else {
+            throw SessionStoreError.invalidSessionDirectory(url)
+        }
+        return Self.firstTranscriptLine(from: Data(buffer.prefix(Int(count))))
+    }
+
+    private static func firstTranscriptLine(from rawText: String) -> String? {
+        let line = rawText
+            .split(maxSplits: 1, omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !line.isEmpty else {
+            return nil
+        }
+        return String(line.prefix(512))
+    }
+
+    private static func firstTranscriptLine(from data: Data) -> String? {
+        firstTranscriptLine(from: String(decoding: data, as: UTF8.self))
     }
 
     private func readSession(at directoryURL: URL) throws -> DictationSession {
