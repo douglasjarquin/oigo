@@ -34,6 +34,7 @@
         A00000010000000000000019 /* TranscriptionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000017 /* TranscriptionModels.swift */; };
         A0000001000000000000001A /* SavedAudioRetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000018 /* SavedAudioRetry.swift */; };
         A0000001000000000000001B /* TranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000019 /* TranscriptStore.swift */; };
+        A0000001000000000000001C /* TranscriptionStartupGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001A /* TranscriptionStartupGate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -100,6 +101,7 @@
         B00000010000000000000017 /* TranscriptionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionModels.swift; sourceTree = "<group>"; };
         B00000010000000000000018 /* SavedAudioRetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedAudioRetry.swift; sourceTree = "<group>"; };
         B00000010000000000000019 /* TranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStore.swift; sourceTree = "<group>"; };
+        B0000001000000000000001A /* TranscriptionStartupGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionStartupGate.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -199,6 +201,7 @@
                 B00000010000000000000017 /* TranscriptionModels.swift */,
                 B00000010000000000000018 /* SavedAudioRetry.swift */,
                 B00000010000000000000019 /* TranscriptStore.swift */,
+                B0000001000000000000001A /* TranscriptionStartupGate.swift */,
                 B00000010000000000000014 /* TranscriptionService.swift */,
             );
             path = Sources/OigoTranscription;
@@ -397,6 +400,7 @@
                 A00000010000000000000019 /* TranscriptionModels.swift in Sources */,
                 A0000001000000000000001A /* SavedAudioRetry.swift in Sources */,
                 A0000001000000000000001B /* TranscriptStore.swift in Sources */,
+                A0000001000000000000001C /* TranscriptionStartupGate.swift in Sources */,
                 A00000010000000000000015 /* TranscriptionService.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;

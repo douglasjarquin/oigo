@@ -110,7 +110,8 @@ public struct TranscriptionAccumulator: Sendable {
     }
 
     private static let maxRevisionTailSegments = 8
-    private var finalizedPrefix = ""
+    private static let maxRevisionTailCharacters = 4_096
+    private static let maxPreviewCharacters = 512
     private var finalizedTail: [Segment] = []
     private var volatile: Segment?
 
@@ -122,24 +123,40 @@ public struct TranscriptionAccumulator: Sendable {
         text: String,
         isFinal: Bool
     ) -> TranscriptionSnapshot {
-        let segment = Segment(range: range, text: text)
+        ingestAndReport(range: range, text: text, isFinal: isFinal).snapshot
+    }
+
+    @discardableResult
+    mutating func ingestAndReport(
+        range: TranscriptionRange,
+        text: String,
+        isFinal: Bool
+    ) -> TranscriptIngestResult {
         if isFinal {
-            guard range.startMilliseconds >= finalizedEndMilliseconds || finalizedTail.contains(where: {
-                $0.range.overlaps(range)
-            }) else {
-                return snapshot
+            guard !finalizedTail.contains(where: { $0.range.overlaps(range) }),
+                  range.startMilliseconds >= finalizedEndMilliseconds else {
+                return TranscriptIngestResult(snapshot: snapshot, acceptedFinalText: nil)
             }
             finalizedTail.removeAll { $0.range.overlaps(range) }
             if volatile?.range.overlaps(range) == true {
                 volatile = nil
             }
-            finalizedTail.append(segment)
+            finalizedTail.append(Segment(
+                range: range,
+                text: String(text.prefix(Self.maxRevisionTailCharacters))
+            ))
             finalizedTail.sort { $0.range < $1.range }
             compactFinalizedTailIfNeeded()
         } else {
-            volatile = segment
+            volatile = Segment(
+                range: range,
+                text: String(text.prefix(Self.maxPreviewCharacters))
+            )
         }
-        return snapshot
+        return TranscriptIngestResult(
+            snapshot: snapshot,
+            acceptedFinalText: isFinal ? text : nil
+        )
     }
 
     public var snapshot: TranscriptionSnapshot {
@@ -149,17 +166,15 @@ public struct TranscriptionAccumulator: Sendable {
         let orderedFinalized = visibleFinalized.sorted { $0.range < $1.range }
         let orderedVolatile = volatile.map { [$0] } ?? []
         return TranscriptionSnapshot(
-            finalizedText: join(finalizedPrefix, orderedFinalized.map { $0.text }),
-            volatileText: join("", orderedVolatile.map { $0.text }),
+            finalizedText: join(orderedFinalized.map { $0.text }),
+            volatileText: join(orderedVolatile.map { $0.text }),
             displayedText: join(
-                join(finalizedPrefix, orderedFinalized.map { $0.text }),
-                orderedVolatile.map { $0.text }
+                orderedFinalized.map { $0.text } + orderedVolatile.map { $0.text }
             )
         )
     }
 
     public mutating func reset() {
-        finalizedPrefix = ""
         finalizedTail.removeAll(keepingCapacity: true)
         volatile = nil
     }
@@ -174,15 +189,20 @@ public struct TranscriptionAccumulator: Sendable {
 
     private mutating func compactFinalizedTailIfNeeded() {
         while finalizedTail.count > Self.maxRevisionTailSegments {
-            let segment = finalizedTail.removeFirst()
-            finalizedPrefix = join(finalizedPrefix, [segment.text])
+            finalizedTail.removeFirst()
         }
     }
 
-    private func join(_ prefix: String, _ texts: [String]) -> String {
-        ([prefix] + texts)
+    private func join(_ texts: [String]) -> String {
+        texts
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
     }
+}
+
+@available(macOS 26.0, *)
+struct TranscriptIngestResult: Sendable {
+    let snapshot: TranscriptionSnapshot
+    let acceptedFinalText: String?
 }

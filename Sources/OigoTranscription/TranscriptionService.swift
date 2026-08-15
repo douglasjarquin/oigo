@@ -7,6 +7,8 @@ import Speech
 
 @available(macOS 26.0, *)
 public final class TranscriptionService: TranscriptionController, @unchecked Sendable {
+    private static let maxPreviewCharacters = 512
+
     private enum Lifecycle {
         case idle
         case starting
@@ -130,7 +132,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
 
         var preparedAnalyzer: SpeechAnalyzer?
         var preparedInputContinuation: AsyncStream<AnalyzerInput>.Continuation?
-        var startupGateContinuation: AsyncStream<Void>.Continuation?
+        var startupGate: TranscriptionStartupGate?
         var startupResultTask: Task<Void, Never>?
         var startupAnalysisTask: Task<Void, Never>?
         do {
@@ -157,9 +159,14 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
 
             try await analyzer.prepareToAnalyze(in: audioFormat)
             try checkCancellationRequested()
-            let startupGate = AsyncStream<Void>.makeStream()
-            startupGateContinuation = startupGate.continuation
-            let resultTask = Task { [weak self, module, startupStream = startupGate.stream] in
+            do {
+                _ = try store.persistRawText("", for: session)
+            } catch {
+                throw TranscriptionError.persistenceFailed(String(describing: error))
+            }
+            let gate = TranscriptionStartupGate()
+            startupGate = gate
+            let resultTask = Task { [weak self, module, startupStream = gate.resultStream] in
                 for await _ in startupStream {
                     break
                 }
@@ -173,7 +180,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                     self?.record(error: Self.map(error))
                 }
             }
-            let analysisTask = Task { [weak self, analyzer, stream = streamPair.stream, startupStream = startupGate.stream] in
+            let analysisTask = Task { [weak self, analyzer, stream = streamPair.stream, startupStream = gate.analysisStream] in
                 for await _ in startupStream {
                     break
                 }
@@ -207,15 +214,14 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 return true
             }
             guard published else {
-                startupGateContinuation?.finish()
+                gate.finish()
                 throw TranscriptionError.cancelled
             }
-            startupGateContinuation?.yield(())
-            startupGateContinuation?.finish()
-            startupGateContinuation = nil
+            gate.release()
+            startupGate = nil
             resumeStartWaiters()
         } catch {
-            startupGateContinuation?.finish()
+            startupGate?.finish()
             startupResultTask?.cancel()
             startupAnalysisTask?.cancel()
             if let startupResultTask {
@@ -275,15 +281,19 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         }
 
         let snapshot = transcriptStore.snapshot
+        var finalizedText = snapshot.finalizedText
+        var rawTextByteCount = Int64(Data(snapshot.finalizedText.utf8).count)
         do {
-            try persist(snapshot: snapshot)
+            let persisted = try persistCanonicalRawText()
+            finalizedText = persisted.text
+            rawTextByteCount = persisted.rawTextByteCount
         } catch {
             finalError = Self.map(error)
             record(error: finalError ?? .persistenceFailed(String(describing: error)))
         }
         let result = TranscriptionResult(
-            finalizedText: snapshot.finalizedText,
-            rawTextByteCount: Int64(Data(snapshot.finalizedText.utf8).count)
+            finalizedText: finalizedText,
+            rawTextByteCount: rawTextByteCount
         )
         await releaseResources()
         if let finalError {
@@ -314,16 +324,16 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         _ = await resources.resultTask.value
         await finishPreviewTask()
 
-        let snapshot = transcriptStore.snapshot
+        let persisted: (text: String, rawTextByteCount: Int64)
         do {
-            try persist(snapshot: snapshot)
+            persisted = try persistCanonicalRawText()
         } catch {
             await releaseResources()
             throw Self.map(error)
         }
         let result = TranscriptionResult(
-            finalizedText: snapshot.finalizedText,
-            rawTextByteCount: Int64(Data(snapshot.finalizedText.utf8).count)
+            finalizedText: persisted.text,
+            rawTextByteCount: persisted.rawTextByteCount
         )
         await releaseResources()
         return result
@@ -353,11 +363,24 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         let url = try SavedAudioRetry.audioURL(for: session, liveFailure: liveFailure)
         let module = try await installedTranscriber()
         try checkCancellationRequested()
-        let audioFile: AVAudioFile
+        let securedAudioFile: SecuredAudioFile
         do {
-            audioFile = try AVAudioFile(forReading: url)
+            securedAudioFile = try SavedAudioRetry.openAudioFile(
+                for: session,
+                store: store,
+                liveFailure: liveFailure
+            )
+        } catch let error as TranscriptionError {
+            throw remember(error)
         } catch {
             throw remember(.malformedAudio(url, String(describing: error)))
+        }
+        let audioFile = securedAudioFile.file
+        do {
+            _ = try store.persistRawText("", for: session)
+        } catch {
+            await SpeechModels.endRetention()
+            throw remember(.persistenceFailed(String(describing: error)))
         }
 
         var createdAnalyzer: SpeechAnalyzer?
@@ -388,7 +411,14 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             do {
                 for try await result in module.results {
                     try Task.checkCancellation()
-                    transcriptStore.ingest(result)
+                    let ingested = transcriptStore.ingestAndReport(result)
+                    if let finalText = ingested.acceptedFinalText {
+                        try appendCanonicalFinal(
+                            finalText,
+                            for: session,
+                            store: store
+                        )
+                    }
                 }
             } catch is CancellationError {
             } catch {
@@ -418,24 +448,23 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             throw remember(Self.map(error))
         }
 
-        let snapshot = transcriptStore.snapshot
         do {
-            let persisted = try store.persistRawText(snapshot.finalizedText, for: session)
+            let persisted = try persistCanonicalRawText(for: session, store: store)
             _ = try store.update(
-                persisted,
+                session,
                 state: .completed,
-                audioByteCount: audioByteCount(at: url),
-                rawTextByteCount: Int64(Data(snapshot.finalizedText.utf8).count)
+                audioByteCount: securedAudioFile.byteCount,
+                rawTextByteCount: persisted.rawTextByteCount
+            )
+            await SpeechModels.endRetention()
+            return TranscriptionResult(
+                finalizedText: persisted.text,
+                rawTextByteCount: persisted.rawTextByteCount
             )
         } catch {
             await SpeechModels.endRetention()
             throw remember(.persistenceFailed(String(describing: error)))
         }
-        await SpeechModels.endRetention()
-        return TranscriptionResult(
-            finalizedText: snapshot.finalizedText,
-            rawTextByteCount: Int64(Data(snapshot.finalizedText.utf8).count)
-        )
     }
 
     private func inspectAssets() async throws -> (module: DictationTranscriber, locale: Locale, status: AssetInventory.Status) {
@@ -611,20 +640,23 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             endMilliseconds: Int64(end * 1_000)
         )
         let text = String(result.text.characters)
-        let snapshot = transcriptStore.ingest(
+        let ingested = transcriptStore.ingestAndReport(
             range: range,
             text: text,
             isFinal: result.isFinal
         )
         if result.isFinal {
+            guard let finalText = ingested.acceptedFinalText else {
+                return
+            }
             do {
-                try persist(snapshot: snapshot)
+                try appendCanonicalFinal(finalText)
             } catch {
-            record(error: Self.map(error))
+                record(error: Self.map(error))
             }
             let handler = currentUpdateHandler()
             handler?(TranscriptionUpdate(
-                finalizedSegment: text,
+                finalizedSegment: finalText,
                 volatilePreview: "",
                 isFinal: true
             ))
@@ -634,8 +666,9 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     }
 
     private func schedulePreview(_ text: String) {
+        let preview = String(text.prefix(Self.maxPreviewCharacters))
         lock.lock()
-        pendingPreview = text
+        pendingPreview = preview
         guard previewTask == nil else {
             lock.unlock()
             return
@@ -691,7 +724,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         return body()
     }
 
-    private func persist(snapshot: TranscriptionSnapshot) throws {
+    private func appendCanonicalFinal(_ text: String) throws {
         lock.lock()
         let session = self.session
         let store = sessionStore
@@ -699,8 +732,44 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         guard let session, let store else {
             throw TranscriptionError.persistenceFailed("transcription session is no longer available")
         }
+        try appendCanonicalFinal(text, for: session, store: store)
+    }
+
+    private func appendCanonicalFinal(
+        _ text: String,
+        for session: DictationSession,
+        store: SessionStore
+    ) throws {
+        let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedText.isEmpty else {
+            return
+        }
         do {
-            _ = try store.persistRawText(snapshot.finalizedText, for: session)
+            _ = try store.appendRawText(normalizedText, for: session)
+        } catch {
+            throw TranscriptionError.persistenceFailed(String(describing: error))
+        }
+    }
+
+    private func persistCanonicalRawText() throws -> (text: String, rawTextByteCount: Int64) {
+        lock.lock()
+        let session = self.session
+        let store = sessionStore
+        lock.unlock()
+        guard let session, let store else {
+            throw TranscriptionError.persistenceFailed("transcription session is no longer available")
+        }
+        return try persistCanonicalRawText(for: session, store: store)
+    }
+
+    private func persistCanonicalRawText(
+        for session: DictationSession,
+        store: SessionStore
+    ) throws -> (text: String, rawTextByteCount: Int64) {
+        do {
+            let rawText = try store.readRawText(for: session)
+            _ = try store.persistRawText(rawText, for: session)
+            return (rawText, Int64(Data(rawText.utf8).count))
         } catch {
             throw TranscriptionError.persistenceFailed(String(describing: error))
         }
@@ -765,11 +834,4 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         return pcmBuffer
     }
 
-    private func audioByteCount(at url: URL) -> Int64? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attributes[.size] as? NSNumber else {
-            return nil
-        }
-        return size.int64Value
-    }
 }

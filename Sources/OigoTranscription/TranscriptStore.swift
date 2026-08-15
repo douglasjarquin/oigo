@@ -7,9 +7,14 @@ final class TranscriptStore: @unchecked Sendable {
     private var accumulator = TranscriptionAccumulator()
 
     func ingest(_ result: DictationTranscriber.Result) {
+        _ = ingestAndReport(result)
+    }
+
+    @discardableResult
+    func ingestAndReport(_ result: DictationTranscriber.Result) -> TranscriptIngestResult {
         let start = max(0, result.range.start.seconds)
         let end = max(start, result.range.end.seconds)
-        _ = ingest(
+        return ingestAndReport(
             range: TranscriptionRange(
                 startMilliseconds: Int64(start * 1_000),
                 endMilliseconds: Int64(end * 1_000)
@@ -25,9 +30,18 @@ final class TranscriptStore: @unchecked Sendable {
         text: String,
         isFinal: Bool
     ) -> TranscriptionSnapshot {
+        ingestAndReport(range: range, text: text, isFinal: isFinal).snapshot
+    }
+
+    @discardableResult
+    func ingestAndReport(
+        range: TranscriptionRange,
+        text: String,
+        isFinal: Bool
+    ) -> TranscriptIngestResult {
         lock.lock()
         defer { lock.unlock() }
-        return accumulator.ingest(range: range, text: text, isFinal: isFinal)
+        return accumulator.ingestAndReport(range: range, text: text, isFinal: isFinal)
     }
 
     var snapshot: TranscriptionSnapshot {

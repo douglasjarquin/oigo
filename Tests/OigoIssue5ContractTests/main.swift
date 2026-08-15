@@ -1,6 +1,6 @@
 import Foundation
 import OigoCore
-import OigoTranscription
+@_spi(Testing) import OigoTranscription
 
 private struct ContractFailure: Error, CustomStringConvertible {
     let message: String
@@ -20,6 +20,7 @@ private struct OigoIssue5ContractTests {
             ("cancellation preserves canonical data", testCancellationPreservesCanonicalData),
             ("cancellation persistence failure", testCancellationPersistenceFailure),
             ("startup shutdown handshake", testStartupShutdownHandshake),
+            ("startup gate releases both tasks", testStartupGateReleasesBothTasks),
             ("early-final publication", testEarlyFinalPublication),
             ("terminal operation serialization", testTerminalOperationSerialization),
             ("retry shutdown tracking", testRetryShutdownTracking),
@@ -65,6 +66,11 @@ private struct OigoIssue5ContractTests {
             text: "hello world",
             isFinal: false
         )
+        let oversizedPreview = accumulator.ingest(
+            range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
+            text: String(repeating: "p", count: 1_024),
+            isFinal: false
+        )
         let finalized = accumulator.ingest(
             range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
             text: "hello world",
@@ -78,6 +84,7 @@ private struct OigoIssue5ContractTests {
         guard firstPreview.finalizedText.isEmpty,
               firstPreview.volatileText == "hello",
               replacementPreview.volatileText == "hello world",
+              oversizedPreview.volatileText.count == 512,
               finalized.finalizedText == "hello world",
               finalized.volatileText.isEmpty,
               accumulated.finalizedText == "hello world again" else {
@@ -95,7 +102,8 @@ private struct OigoIssue5ContractTests {
             )
         }
         let bounded = accumulator.snapshot
-        guard bounded.finalizedText.contains("segment-0"),
+        guard !bounded.finalizedText.contains("segment-0"),
+              bounded.finalizedText.contains("segment-24"),
               bounded.finalizedText.contains("segment-31"),
               bounded.volatileText.isEmpty else {
             throw ContractFailure(message: "finalized transcript state did not retain ordered bounded progress")
@@ -106,6 +114,12 @@ private struct OigoIssue5ContractTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let store = try SessionStore(rootDirectory: root)
+        let appendSession = try store.createSession()
+        _ = try store.appendRawText("one", for: appendSession)
+        _ = try store.appendRawText("two", for: appendSession)
+        guard try store.readRawText(for: appendSession) == "one two" else {
+            throw ContractFailure(message: "descriptor-backed canonical append did not preserve ordered raw text")
+        }
         let capture = FakeAudioCapture()
         let transcription = FakeTranscriptionController()
         let updates = UpdateCollector()
@@ -264,6 +278,29 @@ private struct OigoIssue5ContractTests {
               snapshot.volatileText.isEmpty,
               snapshot.displayedText == snapshot.finalizedText else {
             throw ContractFailure(message: "an immediate final result was not retained after startup publication")
+        }
+    }
+
+    @MainActor
+    private static func testStartupGateReleasesBothTasks() async throws {
+        let gate = TranscriptionStartupGate()
+        let resultTask = Task {
+            for await _ in gate.resultStream {
+                return true
+            }
+            return false
+        }
+        let analysisTask = Task {
+            for await _ in gate.analysisStream {
+                return true
+            }
+            return false
+        }
+
+        await Task.yield()
+        gate.release()
+        guard await resultTask.value, await analysisTask.value else {
+            throw ContractFailure(message: "startup gate did not release both transcription tasks")
         }
     }
 
@@ -500,6 +537,52 @@ private struct OigoIssue5ContractTests {
         } catch let error as SessionStoreError {
             guard case .invalidSessionDirectory = error else {
                 throw ContractFailure(message: "raw symlink returned the wrong category: " + error.description)
+            }
+        }
+
+        let descriptorSymlinkSession = try store.createSession()
+        let descriptorSymlinkFailed = try store.update(
+            descriptorSymlinkSession,
+            state: .failed,
+            failureReason: "descriptor symlink fixture"
+        )
+        let outsideDescriptorAudio = root.appendingPathComponent("outside-descriptor.caf")
+        try Data([0x44, 0x45, 0x53]).write(to: outsideDescriptorAudio, options: [.atomic])
+        try FileManager.default.createSymbolicLink(
+            at: descriptorSymlinkFailed.audioURL,
+            withDestinationURL: outsideDescriptorAudio
+        )
+        defer { try? FileManager.default.removeItem(at: descriptorSymlinkFailed.audioURL) }
+        do {
+            _ = try store.openAudioFileDescriptor(for: descriptorSymlinkFailed)
+            throw ContractFailure(message: "audio descriptor followed a symbolic-link artifact")
+        } catch let error as SessionStoreError {
+            guard case .invalidSessionDirectory = error else {
+                throw ContractFailure(message: "audio descriptor symlink returned the wrong category: " + error.description)
+            }
+        }
+
+        let outsideSessionDirectory = root.deletingLastPathComponent()
+            .appendingPathComponent("oigo-issue5-outside-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: outsideSessionDirectory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: outsideSessionDirectory) }
+        let outsideMetadata = SessionMetadata(
+            id: UUID(),
+            directoryName: outsideSessionDirectory.lastPathComponent,
+            createdAt: Date(),
+            updatedAt: Date(),
+            state: .failed
+        )
+        let outsideSession = DictationSession(
+            metadata: outsideMetadata,
+            directoryURL: outsideSessionDirectory
+        )
+        do {
+            _ = try store.openAudioFileDescriptor(for: outsideSession)
+            throw ContractFailure(message: "audio descriptor accepted a session outside the store root")
+        } catch let error as SessionStoreError {
+            guard case .invalidSessionDirectory = error else {
+                throw ContractFailure(message: "outside-root audio descriptor returned the wrong category: " + error.description)
             }
         }
 

@@ -1,6 +1,24 @@
 import Darwin
+import AVFAudio
 import Foundation
 import OigoCore
+
+@available(macOS 26.0, *)
+final class SecuredAudioFile: @unchecked Sendable {
+    let file: AVAudioFile
+    let byteCount: Int64
+    private let fileDescriptor: Int32
+
+    init(file: AVAudioFile, byteCount: Int64, fileDescriptor: Int32) {
+        self.file = file
+        self.byteCount = byteCount
+        self.fileDescriptor = fileDescriptor
+    }
+
+    deinit {
+        _ = Darwin.close(fileDescriptor)
+    }
+}
 
 @available(macOS 26.0, *)
 public enum SavedAudioRetry {
@@ -48,6 +66,45 @@ public enum SavedAudioRetry {
             )
         }
         return session.audioURL
+    }
+
+    static func openAudioFile(
+        for session: DictationSession,
+        store: SessionStore,
+        liveFailure: Error
+    ) throws -> SecuredAudioFile {
+        let url = try audioURL(for: session, liveFailure: liveFailure)
+        let fileDescriptor: Int32
+        do {
+            fileDescriptor = try store.openAudioFileDescriptor(for: session)
+        } catch {
+            throw TranscriptionError.malformedAudio(
+                url,
+                "the saved CAF file could not be opened as a session artifact"
+            )
+        }
+
+        var fileInfo = stat()
+        guard Darwin.fstat(fileDescriptor, &fileInfo) == 0,
+              (fileInfo.st_mode & S_IFMT) == S_IFREG else {
+            _ = Darwin.close(fileDescriptor)
+            throw TranscriptionError.malformedAudio(
+                url,
+                "the saved CAF file is not a regular file"
+            )
+        }
+        do {
+            let descriptorURL = URL(fileURLWithPath: "/dev/fd/\(fileDescriptor)")
+            let file = try AVAudioFile(forReading: descriptorURL)
+            return SecuredAudioFile(
+                file: file,
+                byteCount: Int64(fileInfo.st_size),
+                fileDescriptor: fileDescriptor
+            )
+        } catch {
+            _ = Darwin.close(fileDescriptor)
+            throw TranscriptionError.malformedAudio(url, String(describing: error))
+        }
     }
 
     public static func retry<T>(
