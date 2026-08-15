@@ -112,6 +112,7 @@ public struct TranscriptionAccumulator: Sendable {
     private static let maxRevisionTailSegments = 8
     private static let maxRevisionTailCharacters = 4_096
     private static let maxPreviewCharacters = 512
+    private var finalizedSegments: [Segment] = []
     private var finalizedTail: [Segment] = []
     private var volatile: Segment?
 
@@ -133,16 +134,16 @@ public struct TranscriptionAccumulator: Sendable {
         isFinal: Bool
     ) -> TranscriptIngestResult {
         if isFinal {
-            let overlapping = finalizedTail.filter { $0.range.overlaps(range) }
+            let overlapping = finalizedSegments.filter { $0.range.overlaps(range) }
             let acceptedText: String?
             if overlapping.isEmpty {
                 guard range.startMilliseconds >= finalizedEndMilliseconds else {
                     return TranscriptIngestResult(snapshot: snapshot, acceptedFinalText: nil)
                 }
                 acceptedText = text
-                finalizedTail.append(Segment(
+                finalizedSegments.append(Segment(
                     range: range,
-                    text: String(text.prefix(Self.maxRevisionTailCharacters))
+                    text: text
                 ))
             } else {
                 let existingText = join(overlapping.map(\.text))
@@ -157,17 +158,17 @@ public struct TranscriptionAccumulator: Sendable {
                     )
                 )
                 acceptedText = newlyAcceptedText(existing: existingText, incoming: text)
-                finalizedTail.removeAll { $0.range.overlaps(range) }
-                finalizedTail.append(Segment(
+                finalizedSegments.removeAll { $0.range.overlaps(range) }
+                finalizedSegments.append(Segment(
                     range: mergedRange,
-                    text: String(mergedText(existing: existingText, incoming: text).prefix(Self.maxRevisionTailCharacters))
+                    text: mergedText(existing: existingText, incoming: text)
                 ))
             }
             if volatile?.range.overlaps(range) == true {
                 volatile = nil
             }
-            finalizedTail.sort { $0.range < $1.range }
-            compactFinalizedTailIfNeeded()
+            finalizedSegments.sort { $0.range < $1.range }
+            rebuildFinalizedTail()
             return TranscriptIngestResult(snapshot: snapshot, acceptedFinalText: acceptedText)
         } else {
             volatile = Segment(
@@ -182,37 +183,46 @@ public struct TranscriptionAccumulator: Sendable {
     }
 
     public var snapshot: TranscriptionSnapshot {
-        let visibleFinalized = finalized.filter { finalSegment in
+        let visibleFinalized = finalizedSegments.filter { finalSegment in
             !(volatile.map { finalSegment.range.overlaps($0.range) } ?? false)
         }
         let orderedFinalized = visibleFinalized.sorted { $0.range < $1.range }
+        let displayedFinalized = finalizedTail.filter { finalSegment in
+            !(volatile.map { finalSegment.range.overlaps($0.range) } ?? false)
+        }
         let orderedVolatile = volatile.map { [$0] } ?? []
         return TranscriptionSnapshot(
             finalizedText: join(orderedFinalized.map { $0.text }),
             volatileText: join(orderedVolatile.map { $0.text }),
             displayedText: join(
-                orderedFinalized.map { $0.text } + orderedVolatile.map { $0.text }
+                displayedFinalized.map { $0.text } + orderedVolatile.map { $0.text }
             )
         )
     }
 
     public mutating func reset() {
+        finalizedSegments.removeAll(keepingCapacity: true)
         finalizedTail.removeAll(keepingCapacity: true)
         volatile = nil
     }
 
-    private var finalized: [Segment] {
-        finalizedTail
-    }
-
     private var finalizedEndMilliseconds: Int64 {
-        finalizedTail.last?.range.endMilliseconds ?? 0
+        finalizedSegments.last?.range.endMilliseconds ?? 0
     }
 
-    private mutating func compactFinalizedTailIfNeeded() {
-        while finalizedTail.count > Self.maxRevisionTailSegments {
-            finalizedTail.removeFirst()
+    private mutating func rebuildFinalizedTail() {
+        var remainingCharacters = Self.maxRevisionTailCharacters
+        var rebuilt: [Segment] = []
+        for segment in finalizedSegments.reversed() {
+            guard rebuilt.count < Self.maxRevisionTailSegments,
+                  remainingCharacters > 0 else {
+                break
+            }
+            let text = String(segment.text.suffix(remainingCharacters))
+            rebuilt.append(Segment(range: segment.range, text: text))
+            remainingCharacters -= text.count
         }
+        finalizedTail = rebuilt.reversed()
     }
 
     private func mergedText(existing: String, incoming: String) -> String {

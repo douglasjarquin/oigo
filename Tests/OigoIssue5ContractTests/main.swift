@@ -105,11 +105,14 @@ private struct OigoIssue5ContractTests {
             )
         }
         let bounded = accumulator.snapshot
-        guard !bounded.finalizedText.contains("segment-0"),
+        guard bounded.finalizedText.contains("segment-0"),
               bounded.finalizedText.contains("segment-24"),
               bounded.finalizedText.contains("segment-31"),
+              !bounded.displayedText.contains("segment-0"),
+              bounded.displayedText.contains("segment-24"),
+              bounded.displayedText.contains("segment-31"),
               bounded.volatileText.isEmpty else {
-            throw ContractFailure(message: "finalized transcript state did not retain ordered bounded progress")
+            throw ContractFailure(message: "finalized transcript state dropped canonical progress while bounding revision bookkeeping")
         }
 
         let root = FileManager.default.temporaryDirectory
