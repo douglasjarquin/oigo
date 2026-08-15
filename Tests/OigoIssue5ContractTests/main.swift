@@ -20,6 +20,9 @@ private struct OigoIssue5ContractTests {
             ("cancellation preserves canonical data", testCancellationPreservesCanonicalData),
             ("cancellation persistence failure", testCancellationPersistenceFailure),
             ("startup shutdown handshake", testStartupShutdownHandshake),
+            ("early-final publication", testEarlyFinalPublication),
+            ("terminal operation serialization", testTerminalOperationSerialization),
+            ("retry shutdown tracking", testRetryShutdownTracking),
             ("failure and actionable errors", testFailureAndActionableErrors),
             ("saved-file retry", testSavedFileRetry)
         ]
@@ -243,6 +246,105 @@ private struct OigoIssue5ContractTests {
               !coordinator.hasActiveTranscription,
               !capture.isActive else {
             throw ContractFailure(message: "shutdown completed before a pending transcription start unwound")
+        }
+    }
+
+    @MainActor
+    private static func testEarlyFinalPublication() async throws {
+        let immediateResult = Task {
+            var accumulator = TranscriptionAccumulator()
+            return accumulator.ingest(
+                range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
+                text: "published before analysis work",
+                isFinal: true
+            )
+        }
+        let snapshot = await immediateResult.value
+        guard snapshot.finalizedText == "published before analysis work",
+              snapshot.volatileText.isEmpty,
+              snapshot.displayedText == snapshot.finalizedText else {
+            throw ContractFailure(message: "an immediate final result was not retained after startup publication")
+        }
+    }
+
+    @MainActor
+    private static func testTerminalOperationSerialization() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-terminal-serialization-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let capture = FakeAudioCapture()
+        let transcription = BlockingFinishTranscriptionController()
+        let coordinator = DictationCoordinator()
+        let session = try await coordinator.startRecordingWithTranscription(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        capture.sendBuffer()
+        transcription.finalizedText = "serialized terminal result"
+        let stopTask = Task { @MainActor in
+            try await coordinator.stopRecordingWithTranscription()
+        }
+        await transcription.waitUntilFinishStarted()
+        let cancelTask = Task { @MainActor in
+            do {
+                _ = try await coordinator.cancelRecordingWithTranscription()
+                return true
+            } catch {
+                return false
+            }
+        }
+        await Task.yield()
+        transcription.releaseFinish()
+        let completed = try await stopTask.value
+        let cancelSucceeded = await cancelTask.value
+        let stored = try store.load(id: session.id)
+        let terminalEvents = coordinator.transitionHistory.filter {
+            [.captureCompleted, .cancel, .fail, .interrupt].contains($0.event)
+        }
+        guard !cancelSucceeded,
+              completed.metadata.state == .completed,
+              stored.metadata.state == .completed,
+              coordinator.state == .complete,
+              terminalEvents.map(\.event).filter({ $0 == .captureCompleted }).count == 1,
+              terminalEvents.map(\.event).filter({ $0 == .cancel }).isEmpty,
+              transcription.cancelCalls == 0 else {
+            throw ContractFailure(message: "overlapping terminal operations did not preserve one consistent completion")
+        }
+    }
+
+    @MainActor
+    private static func testRetryShutdownTracking() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-retry-shutdown-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let created = try store.createSession()
+        let failed = try store.update(created, state: .failed, failureReason: "retry shutdown fixture")
+        try Data([0x43, 0x41, 0x46]).write(to: failed.audioURL, options: [.atomic])
+        let transcription = BlockingRetryTranscriptionController()
+        let coordinator = DictationCoordinator()
+        let retryTask = Task { @MainActor in
+            try? await coordinator.retryRecordingWithTranscription(
+                for: failed,
+                using: transcription,
+                store: store
+            )
+        }
+
+        await transcription.waitUntilRetryStarted()
+        await coordinator.shutdownWithTranscription()
+        _ = await retryTask.value
+        let interrupted = try store.load(id: failed.id)
+        guard transcription.cancelCalls == 1,
+              interrupted.metadata.state == .interrupted,
+              coordinator.state == .interrupted,
+              !coordinator.hasActiveTranscription else {
+            throw ContractFailure(message: "shutdown did not cancel and persist the tracked saved retry")
         }
     }
 
@@ -612,6 +714,209 @@ private final class BlockingTranscriptionController: TranscriptionController, @u
                     return true
                 }
                 enteredWaiters.append(continuation)
+                return false
+            }
+            if resumeImmediately {
+                continuation.resume()
+            }
+        }
+    }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+}
+
+@available(macOS 26.0, *)
+private final class BlockingFinishTranscriptionController: TranscriptionController, @unchecked Sendable {
+    private let lock = NSLock()
+    private var session: DictationSession?
+    private var store: SessionStore?
+    private var finishContinuation: CheckedContinuation<Void, Never>?
+    private var finishStarted = false
+    private var finishWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var cancelCalls = 0
+    private(set) var isRunning = false
+    var finalizedText = ""
+
+    func start(
+        session: DictationSession,
+        format: AudioCaptureFormat,
+        store: SessionStore,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+    ) async throws {
+        guard format.isValid, format.channelCount == 1 else {
+            throw TranscriptionError.invalidCaptureFormat
+        }
+        self.session = session
+        self.store = store
+        _ = onUpdate
+        withLock { isRunning = true }
+    }
+
+    func append(_ buffer: AudioCaptureBuffer) {
+        _ = buffer
+    }
+
+    func finish() async throws -> TranscriptionResult {
+        await withCheckedContinuation { continuation in
+            let waiters = withLock {
+                finishStarted = true
+                finishContinuation = continuation
+                let waiters = finishWaiters
+                finishWaiters.removeAll(keepingCapacity: true)
+                return waiters
+            }
+            for waiter in waiters {
+                waiter.resume()
+            }
+        }
+        guard let session, let store else {
+            throw ContractFailure(message: "blocking finish fixture lost its session")
+        }
+        withLock { isRunning = false }
+        defer { clearResources() }
+        _ = try store.persistRawText(finalizedText, for: session)
+        return TranscriptionResult(
+            finalizedText: finalizedText,
+            rawTextByteCount: Int64(finalizedText.utf8.count)
+        )
+    }
+
+    func cancel() async throws -> TranscriptionResult? {
+        let continuation = withLock {
+            cancelCalls += 1
+            let continuation = finishContinuation
+            finishContinuation = nil
+            return continuation
+        }
+        continuation?.resume()
+        return nil
+    }
+
+    func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult {
+        _ = session
+        _ = store
+        throw TranscriptionError.analysisFailed("blocking finish fixture cannot retry")
+    }
+
+    func waitUntilFinishStarted() async {
+        await withCheckedContinuation { continuation in
+            let resumeImmediately = withLock {
+                if finishStarted {
+                    return true
+                }
+                finishWaiters.append(continuation)
+                return false
+            }
+            if resumeImmediately {
+                continuation.resume()
+            }
+        }
+    }
+
+    func releaseFinish() {
+        let continuation = withLock {
+            let continuation = finishContinuation
+            finishContinuation = nil
+            return continuation
+        }
+        continuation?.resume()
+    }
+
+    private func clearResources() {
+        session = nil
+        store = nil
+    }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+}
+
+@available(macOS 26.0, *)
+private final class BlockingRetryTranscriptionController: TranscriptionController, @unchecked Sendable {
+    private let lock = NSLock()
+    private var retryContinuation: CheckedContinuation<Void, Never>?
+    private var retryStarted = false
+    private var cancellationRequested = false
+    private var retryWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var cancelCalls = 0
+
+    func start(
+        session: DictationSession,
+        format: AudioCaptureFormat,
+        store: SessionStore,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+    ) async throws {
+        _ = session
+        _ = format
+        _ = store
+        _ = onUpdate
+        throw TranscriptionError.analysisFailed("blocking retry fixture cannot start live capture")
+    }
+
+    func append(_ buffer: AudioCaptureBuffer) {
+        _ = buffer
+    }
+
+    func finish() async throws -> TranscriptionResult {
+        throw TranscriptionError.analysisFailed("blocking retry fixture cannot finish")
+    }
+
+    func cancel() async throws -> TranscriptionResult? {
+        let continuation = withLock {
+            cancelCalls += 1
+            cancellationRequested = true
+            let continuation = retryContinuation
+            retryContinuation = nil
+            return continuation
+        }
+        continuation?.resume()
+        return nil
+    }
+
+    func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult {
+        _ = session
+        _ = store
+        await withCheckedContinuation { continuation in
+            let state = withLock {
+                retryStarted = true
+                let waiters = retryWaiters
+                retryWaiters.removeAll(keepingCapacity: true)
+                if cancellationRequested {
+                    return (true, waiters)
+                }
+                retryContinuation = continuation
+                return (false, waiters)
+            }
+            for waiter in state.1 {
+                waiter.resume()
+            }
+            if state.0 {
+                continuation.resume()
+            }
+        }
+        throw TranscriptionError.cancelled
+    }
+
+    func waitUntilRetryStarted() async {
+        await withCheckedContinuation { continuation in
+            let resumeImmediately = withLock {
+                if retryStarted {
+                    return true
+                }
+                retryWaiters.append(continuation)
                 return false
             }
             if resumeImmediately {

@@ -100,6 +100,8 @@ public struct DictationStateMachine: Sendable {
         Transition(from: .finalizing, event: .interrupt, to: .interrupted),
         Transition(from: .cleaning, event: .interrupt, to: .interrupted),
         Transition(from: .inserting, event: .interrupt, to: .interrupted),
+        Transition(from: .idle, event: .interrupt, to: .interrupted),
+        Transition(from: .failed, event: .interrupt, to: .interrupted),
         Transition(from: .idle, event: .retryCompleted, to: .complete),
         Transition(from: .failed, event: .retryCompleted, to: .complete),
         Transition(from: .interrupted, event: .retryCompleted, to: .complete)
@@ -174,6 +176,9 @@ public final class DictationCoordinator {
     private var activeTranscription: TranscriptionController?
     private var sessionStore: SessionStore?
     private var pendingTranscriptionTerminalState: DictationSessionState?
+    private var activeOperationID: UUID?
+    private var terminalOperationInFlight = false
+    private var terminalOperationWaiters: [CheckedContinuation<Void, Never>] = []
 
     public private(set) var transitionHistory: [DictationTransitionRecord] = []
     public private(set) var currentSession: DictationSession?
@@ -365,6 +370,7 @@ public final class DictationCoordinator {
         using transcription: TranscriptionController,
         store: SessionStore
     ) async throws -> DictationSession {
+        await waitForTerminalOperationIfNeeded()
         guard activeCapture == nil, activeTranscription == nil else {
             throw DictationCoordinatorError.workAlreadyActive
         }
@@ -378,7 +384,20 @@ public final class DictationCoordinator {
         }
 
         currentSession = session
+        let operationID = UUID()
+        activeOperationID = operationID
+        activeTranscription = transcription
+        sessionStore = store
+        defer {
+            if activeOperationID == operationID {
+                releaseCapture()
+            }
+        }
+
         let result = try await transcription.retrySavedAudio(for: session, store: store)
+        guard activeOperationID == operationID else {
+            throw DictationCoordinatorError.recordingNotActive
+        }
         let completedSession = try store.load(id: session.id)
         guard completedSession.metadata.state == .completed,
               completedSession.metadata.rawTextByteCount == result.rawTextByteCount else {
@@ -393,6 +412,9 @@ public final class DictationCoordinator {
 
     @discardableResult
     public func stopRecording(at date: Date = Date()) throws -> DictationSession {
+        guard !terminalOperationInFlight else {
+            throw DictationCoordinatorError.workAlreadyActive
+        }
         guard let capture = activeCapture,
               let store = sessionStore,
               let session = currentSession else {
@@ -437,6 +459,11 @@ public final class DictationCoordinator {
     public func stopRecordingWithTranscription(
         at date: Date = Date()
     ) async throws -> DictationSession {
+        await waitForTerminalOperationIfNeeded()
+        guard beginTerminalOperation() else {
+            throw DictationCoordinatorError.workAlreadyActive
+        }
+        defer { finishTerminalOperation() }
         guard let capture = activeCapture,
               let transcription = activeTranscription,
               let store = sessionStore,
@@ -535,6 +562,11 @@ public final class DictationCoordinator {
         reason: String?,
         at date: Date
     ) async throws -> DictationSession {
+        await waitForTerminalOperationIfNeeded()
+        guard beginTerminalOperation() else {
+            throw DictationCoordinatorError.workAlreadyActive
+        }
+        defer { finishTerminalOperation() }
         guard let capture = activeCapture,
               let transcription = activeTranscription,
               let store = sessionStore,
@@ -601,6 +633,9 @@ public final class DictationCoordinator {
         reason: String?,
         at date: Date
     ) throws -> DictationSession {
+        guard !terminalOperationInFlight else {
+            throw DictationCoordinatorError.workAlreadyActive
+        }
         guard let capture = activeCapture,
               let store = sessionStore,
               let session = currentSession else {
@@ -662,6 +697,7 @@ public final class DictationCoordinator {
     }
 
     private func handleTranscriptionCaptureFailure(_ reason: String) async {
+        await waitForTerminalOperationIfNeeded()
         guard let capture = activeCapture,
               let transcription = activeTranscription,
               let store = sessionStore,
@@ -697,6 +733,34 @@ public final class DictationCoordinator {
         activeTranscription = nil
         sessionStore = nil
         pendingTranscriptionTerminalState = nil
+        activeOperationID = nil
+    }
+
+    private func beginTerminalOperation() -> Bool {
+        guard !terminalOperationInFlight else {
+            return false
+        }
+        terminalOperationInFlight = true
+        return true
+    }
+
+    private func finishTerminalOperation() {
+        terminalOperationInFlight = false
+        let waiters = terminalOperationWaiters
+        terminalOperationWaiters.removeAll(keepingCapacity: true)
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    private func waitForTerminalOperationIfNeeded() async {
+        await withCheckedContinuation { continuation in
+            guard terminalOperationInFlight else {
+                continuation.resume()
+                return
+            }
+            terminalOperationWaiters.append(continuation)
+        }
     }
 
     private func audioByteCount(at url: URL) -> Int64? {
@@ -746,12 +810,16 @@ public final class DictationCoordinator {
     }
 
     public func shutdownWithTranscription() async {
+        await waitForTerminalOperationIfNeeded()
+        guard beginTerminalOperation() else {
+            return
+        }
+        defer { finishTerminalOperation() }
         if let activeTranscription,
-           let capture = activeCapture,
            let store = sessionStore,
            let session = currentSession {
             pendingTranscriptionTerminalState = .interrupted
-            capture.cancel()
+            activeCapture?.cancel()
             let result: TranscriptionResult?
             let terminalState: DictationSessionState
             let terminalEvent: DictationEvent

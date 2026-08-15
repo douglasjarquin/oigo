@@ -221,33 +221,35 @@ public final class SessionStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        let current = try readSession(at: session.directoryURL)
-        var metadata = current.metadata
-        metadata.state = state
-        metadata.updatedAt = date
-        if state == .recording, metadata.startedAt == nil {
-            metadata.startedAt = date
-        }
-        if state == .completed || state == .failed || state == .cancelled || state == .interrupted {
-            metadata.endedAt = date
-            if let startedAt = metadata.startedAt {
-                metadata.duration = max(0, date.timeIntervalSince(startedAt))
+        return try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            var metadata = current.metadata
+            metadata.state = state
+            metadata.updatedAt = date
+            if state == .recording, metadata.startedAt == nil {
+                metadata.startedAt = date
             }
-        }
-        if state == .failed {
-            metadata.failureReason = failureReason ?? metadata.failureReason ?? "capture failed"
-        } else if let failureReason {
-            metadata.failureReason = failureReason
-        }
-        if let audioByteCount {
-            metadata.audioByteCount = audioByteCount
-        }
-        if let rawTextByteCount {
-            metadata.rawTextByteCount = rawTextByteCount
-        }
+            if state == .completed || state == .failed || state == .cancelled || state == .interrupted {
+                metadata.endedAt = date
+                if let startedAt = metadata.startedAt {
+                    metadata.duration = max(0, date.timeIntervalSince(startedAt))
+                }
+            }
+            if state == .failed {
+                metadata.failureReason = failureReason ?? metadata.failureReason ?? "capture failed"
+            } else if let failureReason {
+                metadata.failureReason = failureReason
+            }
+            if let audioByteCount {
+                metadata.audioByteCount = audioByteCount
+            }
+            if let rawTextByteCount {
+                metadata.rawTextByteCount = rawTextByteCount
+            }
 
-        try writeMetadata(metadata, at: current.metadataURL)
-        return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
+            try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
+            return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
+        }
     }
 
     @discardableResult
@@ -259,16 +261,18 @@ public final class SessionStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        let current = try readSession(at: session.directoryURL)
-        try rejectSymlink(at: current.rawTextURL)
-        let data = Data(rawText.utf8)
-        try data.write(to: current.rawTextURL, options: [.atomic])
+        return try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            let data = Data(rawText.utf8)
+            try rejectSymlink(named: "raw.txt", in: directoryFD, at: current.rawTextURL, allowMissing: true)
+            try atomicWrite(data, named: "raw.txt", in: directoryFD, at: current.rawTextURL)
 
-        var metadata = current.metadata
-        metadata.updatedAt = date
-        metadata.rawTextByteCount = Int64(data.count)
-        try writeMetadata(metadata, at: current.metadataURL)
-        return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
+            var metadata = current.metadata
+            metadata.updatedAt = date
+            metadata.rawTextByteCount = Int64(data.count)
+            try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
+            return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
+        }
     }
 
     public func recoverUnfinishedSessions(at date: Date = Date()) throws -> [DictationSession] {
@@ -325,21 +329,17 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     private func readSession(at directoryURL: URL) throws -> DictationSession {
-        let rootPath = rootDirectory.resolvingSymlinksInPath().standardizedFileURL.path
-        let directoryPath = directoryURL.resolvingSymlinksInPath().standardizedFileURL.path
-        guard directoryPath.hasPrefix(rootPath + "/") else {
-            throw SessionStoreError.invalidSessionDirectory(directoryURL)
+        try withSessionDirectory(at: directoryURL) { directoryFD in
+            try readSession(at: directoryURL, directoryFD: directoryFD)
         }
-        try rejectSymlink(at: directoryURL)
+    }
+
+    private func readSession(at directoryURL: URL, directoryFD: Int32) throws -> DictationSession {
         let metadataURL = directoryURL.appendingPathComponent("session.json")
-        try rejectSymlink(at: metadataURL)
-        guard fileManager.fileExists(atPath: metadataURL.path) else {
-            throw SessionStoreError.invalidSessionDirectory(directoryURL)
-        }
         do {
-            let data = try Data(contentsOf: metadataURL)
+            let data = try readData(named: "session.json", in: directoryFD, at: metadataURL)
             let metadata = try decoder.decode(SessionMetadata.self, from: data)
-            guard metadata.directoryName == directoryURL.lastPathComponent,
+            guard metadata.directoryName == directoryURL.standardizedFileURL.lastPathComponent,
                   metadata.audioFileName == "audio.caf",
                   metadata.rawTextFileName == "raw.txt",
                   metadata.cleanTextFileName == "clean.txt" else {
@@ -354,14 +354,105 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     private func writeMetadata(_ metadata: SessionMetadata, at url: URL) throws {
-        let data = try encoder.encode(metadata)
-        try data.write(to: url, options: [.atomic])
+        try withSessionDirectory(at: url.deletingLastPathComponent()) { directoryFD in
+            try writeMetadata(metadata, at: url, directoryFD: directoryFD)
+        }
     }
 
-    private func rejectSymlink(at url: URL) throws {
+    private func writeMetadata(_ metadata: SessionMetadata, at url: URL, directoryFD: Int32) throws {
+        let data = try encoder.encode(metadata)
+        try rejectSymlink(named: url.lastPathComponent, in: directoryFD, at: url, allowMissing: true)
+        try atomicWrite(data, named: url.lastPathComponent, in: directoryFD, at: url)
+    }
+
+    private func withSessionDirectory<T>(
+        at directoryURL: URL,
+        _ body: (Int32) throws -> T
+    ) throws -> T {
+        let directoryFD = try openSessionDirectory(at: directoryURL)
+        defer { _ = Darwin.close(directoryFD) }
+        return try body(directoryFD)
+    }
+
+    private func openSessionDirectory(at directoryURL: URL) throws -> Int32 {
+        let rootURL = rootDirectory.standardizedFileURL
+        let directoryURL = directoryURL.standardizedFileURL
+        guard directoryURL.deletingLastPathComponent().path == rootURL.path,
+              !directoryURL.lastPathComponent.isEmpty,
+              directoryURL.lastPathComponent != ".",
+              directoryURL.lastPathComponent != "..",
+              !directoryURL.lastPathComponent.contains("/") else {
+            throw SessionStoreError.invalidSessionDirectory(directoryURL)
+        }
+        let directoryName = directoryURL.lastPathComponent
+
+        let flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
+        let rootFD = rootURL.path.withCString { path in
+            Darwin.open(path, flags)
+        }
+        guard rootFD >= 0 else {
+            throw SessionStoreError.invalidSessionDirectory(directoryURL)
+        }
+        defer { _ = Darwin.close(rootFD) }
+
+        let directoryFD = directoryName.withCString { name in
+            Darwin.openat(rootFD, name, flags)
+        }
+        guard directoryFD >= 0 else {
+            throw SessionStoreError.invalidSessionDirectory(directoryURL)
+        }
+        return directoryFD
+    }
+
+    private func readData(named name: String, in directoryFD: Int32, at url: URL) throws -> Data {
+        let flags = O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+        let fileFD = name.withCString { entryName in
+            Darwin.openat(directoryFD, entryName, flags)
+        }
+        guard fileFD >= 0 else {
+            throw SessionStoreError.invalidSessionDirectory(url)
+        }
+        defer { _ = Darwin.close(fileFD) }
+
         var fileInfo = stat()
-        guard lstat(url.path, &fileInfo) == 0 else {
-            guard errno == ENOENT else {
+        guard Darwin.fstat(fileFD, &fileInfo) == 0,
+              (fileInfo.st_mode & S_IFMT) == S_IFREG else {
+            throw SessionStoreError.invalidSessionDirectory(url)
+        }
+
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 8_192)
+        while true {
+            let count = buffer.withUnsafeMutableBytes { bytes in
+                Darwin.read(fileFD, bytes.baseAddress, bytes.count)
+            }
+            if count == 0 {
+                break
+            }
+            guard count > 0 else {
+                if errno == EINTR {
+                    continue
+                }
+                throw SessionStoreError.invalidSessionDirectory(url)
+            }
+            data.append(buffer, count: count)
+        }
+
+        return data
+    }
+
+    private func rejectSymlink(
+        named name: String,
+        in directoryFD: Int32,
+        at url: URL,
+        allowMissing: Bool
+    ) throws {
+        var fileInfo = stat()
+        let result = name.withCString { entryName in
+            Darwin.fstatat(directoryFD, entryName, &fileInfo, AT_SYMLINK_NOFOLLOW)
+        }
+        guard result == 0 else {
+            guard allowMissing, errno == ENOENT else {
                 throw SessionStoreError.invalidSessionDirectory(url)
             }
             return
@@ -369,6 +460,68 @@ public final class SessionStore: @unchecked Sendable {
         guard (fileInfo.st_mode & S_IFMT) != S_IFLNK else {
             throw SessionStoreError.invalidSessionDirectory(url)
         }
+    }
+
+    private func atomicWrite(
+        _ data: Data,
+        named name: String,
+        in directoryFD: Int32,
+        at url: URL
+    ) throws {
+        let temporaryName = "." + name + "." + UUID().uuidString + ".tmp"
+        let flags = O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW
+        let temporaryFD = temporaryName.withCString { temporaryName in
+            Darwin.openat(directoryFD, temporaryName, flags, mode_t(0o600))
+        }
+        guard temporaryFD >= 0 else {
+            throw SessionStoreError.invalidSessionDirectory(url)
+        }
+        var committed = false
+        defer {
+            _ = Darwin.close(temporaryFD)
+            if !committed {
+                _ = temporaryName.withCString { name in
+                    Darwin.unlinkat(directoryFD, name, 0)
+                }
+            }
+        }
+
+        try data.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else {
+                return
+            }
+            var offset = 0
+            while offset < bytes.count {
+                let count = Darwin.write(
+                    temporaryFD,
+                    baseAddress.advanced(by: offset),
+                    bytes.count - offset
+                )
+                if count < 0 {
+                    if errno == EINTR {
+                        continue
+                    }
+                    throw SessionStoreError.invalidSessionDirectory(url)
+                }
+                guard count > 0 else {
+                    throw SessionStoreError.invalidSessionDirectory(url)
+                }
+                offset += count
+            }
+        }
+        guard Darwin.fsync(temporaryFD) == 0 else {
+            throw SessionStoreError.invalidSessionDirectory(url)
+        }
+        let renamed = temporaryName.withCString { sourceName in
+            name.withCString { destinationName in
+                Darwin.renameat(directoryFD, sourceName, directoryFD, destinationName)
+            }
+        }
+        guard renamed == 0 else {
+            throw SessionStoreError.invalidSessionDirectory(url)
+        }
+        committed = true
+        _ = Darwin.fsync(directoryFD)
     }
 
     private static func directoryName(for date: Date, id: UUID) -> String {

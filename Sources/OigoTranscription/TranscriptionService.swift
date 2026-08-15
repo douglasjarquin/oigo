@@ -6,241 +6,6 @@ import OigoCore
 import Speech
 
 @available(macOS 26.0, *)
-public enum SpeechAssetState: Equatable, Sendable, CustomStringConvertible {
-    case unavailable(String)
-    case installing(String)
-    case ready(String)
-
-    public var description: String {
-        switch self {
-        case .unavailable(let reason):
-            return "unavailable: " + reason
-        case .installing(let localeIdentifier):
-            return "installing: " + localeIdentifier
-        case .ready(let localeIdentifier):
-            return "ready: " + localeIdentifier
-        }
-    }
-}
-
-@available(macOS 26.0, *)
-public enum TranscriptionError: Error, Equatable, Sendable, CustomStringConvertible {
-    case unsupportedLocale(String)
-    case speechAssetsUnavailable(String)
-    case speechAssetsInstalling(String)
-    case recognitionUnavailable(String)
-    case malformedAudio(URL, String)
-    case cancelled
-    case analysisFailed(String)
-    case persistenceFailed(String)
-    case notRunning
-    case alreadyRunning
-    case invalidCaptureFormat
-    case invalidSessionState(DictationSessionState)
-
-    public var description: String {
-        switch self {
-        case .unsupportedLocale(let identifier):
-            return "speech transcription does not support locale " + identifier
-        case .speechAssetsUnavailable(let reason):
-            return "speech assets are unavailable: " + reason
-        case .speechAssetsInstalling(let identifier):
-            return "speech assets are still installing for " + identifier
-        case .recognitionUnavailable(let reason):
-            return "on-device speech recognition is unavailable: " + reason
-        case .malformedAudio(let url, let reason):
-            return "saved audio is malformed at " + url.path + ": " + reason
-        case .cancelled:
-            return "speech transcription was cancelled"
-        case .analysisFailed(let reason):
-            return "speech analysis failed: " + reason
-        case .persistenceFailed(let reason):
-            return "canonical raw transcript could not be persisted: " + reason
-        case .notRunning:
-            return "speech transcription is not running"
-        case .alreadyRunning:
-            return "speech transcription is already running"
-        case .invalidCaptureFormat:
-            return "audio capture format is not compatible with on-device transcription"
-        case .invalidSessionState(let state):
-            return "saved-audio retry requires a failed or interrupted session, not " + state.rawValue
-        }
-    }
-}
-
-@available(macOS 26.0, *)
-public struct TranscriptionRange: Hashable, Sendable, Comparable {
-    public let startMilliseconds: Int64
-    public let endMilliseconds: Int64
-
-    public init(startMilliseconds: Int64, endMilliseconds: Int64) {
-        self.startMilliseconds = startMilliseconds
-        self.endMilliseconds = endMilliseconds
-    }
-
-    public static func < (lhs: TranscriptionRange, rhs: TranscriptionRange) -> Bool {
-        if lhs.startMilliseconds != rhs.startMilliseconds {
-            return lhs.startMilliseconds < rhs.startMilliseconds
-        }
-        return lhs.endMilliseconds < rhs.endMilliseconds
-    }
-
-    fileprivate func overlaps(_ other: TranscriptionRange) -> Bool {
-        if startMilliseconds == other.startMilliseconds && endMilliseconds == other.endMilliseconds {
-            return true
-        }
-        return max(startMilliseconds, other.startMilliseconds) < min(endMilliseconds, other.endMilliseconds)
-    }
-}
-
-@available(macOS 26.0, *)
-public struct TranscriptionSnapshot: Equatable, Sendable {
-    public let finalizedText: String
-    public let volatileText: String
-    public let displayedText: String
-
-    public init(finalizedText: String, volatileText: String, displayedText: String) {
-        self.finalizedText = finalizedText
-        self.volatileText = volatileText
-        self.displayedText = displayedText
-    }
-}
-
-@available(macOS 26.0, *)
-public struct TranscriptionAccumulator: Sendable {
-    private struct Segment: Sendable {
-        let range: TranscriptionRange
-        let text: String
-    }
-
-    private static let maxRevisionTailSegments = 8
-    private var finalizedPrefix = ""
-    private var finalizedTail: [Segment] = []
-    private var volatile: Segment?
-
-    public init() {}
-
-    @discardableResult
-    public mutating func ingest(
-        range: TranscriptionRange,
-        text: String,
-        isFinal: Bool
-    ) -> TranscriptionSnapshot {
-        let segment = Segment(range: range, text: text)
-        if isFinal {
-            guard range.startMilliseconds >= finalizedEndMilliseconds || finalizedTail.contains(where: {
-                $0.range.overlaps(range)
-            }) else {
-                return snapshot
-            }
-            finalizedTail.removeAll { $0.range.overlaps(range) }
-            if volatile?.range.overlaps(range) == true {
-                volatile = nil
-            }
-            finalizedTail.append(segment)
-            finalizedTail.sort { $0.range < $1.range }
-            compactFinalizedTailIfNeeded()
-        } else {
-            volatile = segment
-        }
-        return snapshot
-    }
-
-    public var snapshot: TranscriptionSnapshot {
-        let visibleFinalized = finalized.filter { finalSegment in
-            !(volatile.map { finalSegment.range.overlaps($0.range) } ?? false)
-        }
-        let orderedFinalized = visibleFinalized.sorted { $0.range < $1.range }
-        let orderedVolatile = volatile.map { [$0] } ?? []
-        return TranscriptionSnapshot(
-            finalizedText: join(finalizedPrefix, orderedFinalized.map { $0.text }),
-            volatileText: join("", orderedVolatile.map { $0.text }),
-            displayedText: join(
-                join(finalizedPrefix, orderedFinalized.map { $0.text }),
-                orderedVolatile.map { $0.text }
-            )
-        )
-    }
-
-    public mutating func reset() {
-        finalizedPrefix = ""
-        finalizedTail.removeAll(keepingCapacity: true)
-        volatile = nil
-    }
-
-    private var finalized: [Segment] {
-        finalizedTail
-    }
-
-    private var finalizedEndMilliseconds: Int64 {
-        finalizedTail.last?.range.endMilliseconds ?? 0
-    }
-
-    private mutating func compactFinalizedTailIfNeeded() {
-        while finalizedTail.count > Self.maxRevisionTailSegments {
-            let segment = finalizedTail.removeFirst()
-            finalizedPrefix = join(finalizedPrefix, [segment.text])
-        }
-    }
-
-    private func join(_ prefix: String, _ texts: [String]) -> String {
-        ([prefix] + texts)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-    }
-}
-
-@available(macOS 26.0, *)
-public enum SavedAudioRetry {
-    public static func audioURL(
-        for session: DictationSession,
-        liveFailure: Error
-    ) throws -> URL {
-        _ = liveFailure
-        guard session.metadata.state == .failed || session.metadata.state == .interrupted else {
-            throw TranscriptionError.invalidSessionState(session.metadata.state)
-        }
-        guard FileManager.default.fileExists(atPath: session.audioURL.path) else {
-            throw TranscriptionError.malformedAudio(
-                session.audioURL,
-                "the saved CAF file does not exist"
-            )
-        }
-        do {
-            let directoryValues = try session.directoryURL.resourceValues(forKeys: [.isSymbolicLinkKey])
-            let audioValues = try session.audioURL.resourceValues(forKeys: [.isSymbolicLinkKey])
-            let canonicalDirectory = session.directoryURL.resolvingSymlinksInPath().standardizedFileURL
-            let canonicalAudio = session.audioURL.resolvingSymlinksInPath().standardizedFileURL
-            guard directoryValues.isSymbolicLink != true,
-                  audioValues.isSymbolicLink != true,
-                  canonicalAudio.deletingLastPathComponent() == canonicalDirectory else {
-                throw TranscriptionError.malformedAudio(
-                    session.audioURL,
-                    "the saved CAF path is not a regular session artifact"
-                )
-            }
-        } catch let error as TranscriptionError {
-            throw error
-        } catch {
-            throw TranscriptionError.malformedAudio(
-                session.audioURL,
-                "the saved CAF path could not be validated"
-            )
-        }
-        return session.audioURL
-    }
-
-    public static func retry<T>(
-        session: DictationSession,
-        liveFailure: Error,
-        transcribe: (URL) throws -> T
-    ) throws -> T {
-        try transcribe(audioURL(for: session, liveFailure: liveFailure))
-    }
-}
-
-@available(macOS 26.0, *)
 public final class TranscriptionService: TranscriptionController, @unchecked Sendable {
     private enum Lifecycle {
         case idle
@@ -365,6 +130,9 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
 
         var preparedAnalyzer: SpeechAnalyzer?
         var preparedInputContinuation: AsyncStream<AnalyzerInput>.Continuation?
+        var startupGateContinuation: AsyncStream<Void>.Continuation?
+        var startupResultTask: Task<Void, Never>?
+        var startupAnalysisTask: Task<Void, Never>?
         do {
             let module = try await installedTranscriber()
             try checkCancellationRequested()
@@ -389,7 +157,12 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
 
             try await analyzer.prepareToAnalyze(in: audioFormat)
             try checkCancellationRequested()
-            let resultTask = Task { [weak self, module] in
+            let startupGate = AsyncStream<Void>.makeStream()
+            startupGateContinuation = startupGate.continuation
+            let resultTask = Task { [weak self, module, startupStream = startupGate.stream] in
+                for await _ in startupStream {
+                    break
+                }
                 do {
                     for try await result in module.results {
                         try Task.checkCancellation()
@@ -400,7 +173,10 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                     self?.record(error: Self.map(error))
                 }
             }
-            let analysisTask = Task { [weak self, analyzer, stream = streamPair.stream] in
+            let analysisTask = Task { [weak self, analyzer, stream = streamPair.stream, startupStream = startupGate.stream] in
+                for await _ in startupStream {
+                    break
+                }
                 do {
                     try await analyzer.start(inputSequence: stream)
                 } catch is CancellationError {
@@ -408,8 +184,13 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                     self?.record(error: Self.map(error))
                 }
             }
+            startupResultTask = resultTask
+            startupAnalysisTask = analysisTask
 
-            withLock {
+            let published = withLock {
+                guard lifecycle == .starting, !cancellationRequested else {
+                    return false
+                }
                 lifecycle = .running
                 transcriber = module
                 self.analyzer = analyzer
@@ -423,9 +204,26 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 lastError = nil
                 self.resultTask = resultTask
                 self.analysisTask = analysisTask
+                return true
             }
+            guard published else {
+                startupGateContinuation?.finish()
+                throw TranscriptionError.cancelled
+            }
+            startupGateContinuation?.yield(())
+            startupGateContinuation?.finish()
+            startupGateContinuation = nil
             resumeStartWaiters()
         } catch {
+            startupGateContinuation?.finish()
+            startupResultTask?.cancel()
+            startupAnalysisTask?.cancel()
+            if let startupResultTask {
+                _ = await startupResultTask.value
+            }
+            if let startupAnalysisTask {
+                _ = await startupAnalysisTask.value
+            }
             preparedInputContinuation?.finish()
             if let preparedAnalyzer {
                 await preparedAnalyzer.cancelAndFinishNow()
@@ -973,41 +771,5 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             return nil
         }
         return size.int64Value
-    }
-}
-
-@available(macOS 26.0, *)
-private final class TranscriptStore: @unchecked Sendable {
-    private let lock = NSLock()
-    private var accumulator = TranscriptionAccumulator()
-
-    func ingest(_ result: DictationTranscriber.Result) {
-        let start = max(0, result.range.start.seconds)
-        let end = max(start, result.range.end.seconds)
-        _ = ingest(
-            range: TranscriptionRange(
-                startMilliseconds: Int64(start * 1_000),
-                endMilliseconds: Int64(end * 1_000)
-            ),
-            text: String(result.text.characters),
-            isFinal: result.isFinal
-        )
-    }
-
-    @discardableResult
-    func ingest(
-        range: TranscriptionRange,
-        text: String,
-        isFinal: Bool
-    ) -> TranscriptionSnapshot {
-        lock.lock()
-        defer { lock.unlock() }
-        return accumulator.ingest(range: range, text: text, isFinal: isFinal)
-    }
-
-    var snapshot: TranscriptionSnapshot {
-        lock.lock()
-        defer { lock.unlock() }
-        return accumulator.snapshot
     }
 }
