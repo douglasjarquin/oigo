@@ -150,8 +150,8 @@ private struct OigoSpikeCLI {
         let retryResult = try SavedAudioRetry.retryAfterFailure(
             url: url,
             liveFailure: ForcedRecognitionFailure()
-        ) { savedURL in
-            let savedFrames = try CAFRecorder.playableFrameLength(at: savedURL)
+        ) { savedDescriptor in
+            let savedFrames = try CAFRecorder.playableFrameLength(descriptor: savedDescriptor)
             return "retry-ready frames=" + String(savedFrames)
         }
         print("audio_path=" + url.path)

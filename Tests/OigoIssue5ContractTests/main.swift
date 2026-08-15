@@ -845,19 +845,31 @@ private struct OigoIssue5ContractTests {
             )
         }
         let canonicalBeforeBroadCorrection = try store.readRawText(for: compactedSession)
+        let snapshotBeforeBroadCorrection = compactedAccumulator.snapshot
         let broadCorrection = (0..<12)
             .map { "segment-" + String($0) }
             .joined(separator: " ")
+        let rejectedBroadCorrection = compactedAccumulator.ingestAndReport(
+            range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 1_200),
+            text: broadCorrection,
+            isFinal: true
+        )
+        guard rejectedBroadCorrection.finalization == nil,
+              compactedAccumulator.snapshot == snapshotBeforeBroadCorrection,
+              try store.readRawText(for: compactedSession) == canonicalBeforeBroadCorrection else {
+            throw ContractFailure(message: "compacted-history correction duplicated the durable canonical prefix")
+        }
+
         try persist(
             compactedAccumulator.ingestAndReport(
-                range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 1_200),
-                text: broadCorrection,
+                range: TranscriptionRange(startMilliseconds: 1_100, endMilliseconds: 1_200),
+                text: "segment-11 revised",
                 isFinal: true
             ).finalization,
             for: &compactedSession
         )
-        guard try store.readRawText(for: compactedSession) == canonicalBeforeBroadCorrection else {
-            throw ContractFailure(message: "compacted-history correction duplicated the durable canonical prefix")
+        guard try store.readRawText(for: compactedSession) == "segment-0 segment-1 segment-2 segment-3 segment-4 segment-5 segment-6 segment-7 segment-8 segment-9 segment-10 segment-11 revised" else {
+            throw ContractFailure(message: "a final after rejected compacted-history correction failed or duplicated canonical text")
         }
     }
 

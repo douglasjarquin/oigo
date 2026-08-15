@@ -114,6 +114,7 @@ public struct TranscriptionAccumulator: Sendable {
     private static let maxRevisionTailCharacters = 4_096
     private static let maxPreviewCharacters = 512
     private var finalizedTail: [Segment] = []
+    private var hasCompactedHistory = false
     private var volatile: Segment?
 
     public init() {}
@@ -163,9 +164,11 @@ public struct TranscriptionAccumulator: Sendable {
                 )
                 let canReplace = overlapping.allSatisfy(\.isComplete)
                     && range.endMilliseconds <= finalizedEndMilliseconds
-                    && range.startMilliseconds >= (finalizedTail.first?.range.startMilliseconds ?? range.startMilliseconds)
+                    && (!hasCompactedHistory
+                        || range.startMilliseconds >= (finalizedTail.first?.range.startMilliseconds ?? range.startMilliseconds))
                 let canAppend = range.endMilliseconds > finalizedEndMilliseconds
-                    && range.startMilliseconds >= (finalizedTail.first?.range.startMilliseconds ?? range.startMilliseconds)
+                    && (!hasCompactedHistory
+                        || range.startMilliseconds >= (finalizedTail.first?.range.startMilliseconds ?? range.startMilliseconds))
                 let canAppendWithoutTextOverlap = canAppend && overlapping.count == 1
                 finalization = canonicalFinalization(
                     existing: existingText,
@@ -174,20 +177,22 @@ public struct TranscriptionAccumulator: Sendable {
                     canAppend: canAppend,
                     canAppendWithoutTextOverlap: canAppendWithoutTextOverlap
                 )
-                finalizedTail.removeAll { $0.range.overlaps(range) }
-                let normalizedIncoming = normalized(text)
-                let merged: String
-                if canAppendWithoutTextOverlap,
-                   wordOverlap(existing: existingText, incoming: normalizedIncoming) == 0 {
-                    merged = join([existingText, normalizedIncoming])
-                } else {
-                    merged = mergedText(existing: existingText, incoming: normalizedIncoming)
+                if case .some = finalization {
+                    finalizedTail.removeAll { $0.range.overlaps(range) }
+                    let normalizedIncoming = normalized(text)
+                    let merged: String
+                    if canAppendWithoutTextOverlap,
+                       wordOverlap(existing: existingText, incoming: normalizedIncoming) == 0 {
+                        merged = join([existingText, normalizedIncoming])
+                    } else {
+                        merged = mergedText(existing: existingText, incoming: normalizedIncoming)
+                    }
+                    finalizedTail.append(Segment(
+                        range: mergedRange,
+                        text: boundedText(merged),
+                        isComplete: merged.count <= Self.maxRevisionTailCharacters
+                    ))
                 }
-                finalizedTail.append(Segment(
-                    range: mergedRange,
-                    text: boundedText(merged),
-                    isComplete: merged.count <= Self.maxRevisionTailCharacters
-                ))
             }
             if volatile?.range.overlaps(range) == true {
                 volatile = nil
@@ -225,6 +230,7 @@ public struct TranscriptionAccumulator: Sendable {
 
     public mutating func reset() {
         finalizedTail.removeAll(keepingCapacity: true)
+        hasCompactedHistory = false
         volatile = nil
     }
 
@@ -235,6 +241,7 @@ public struct TranscriptionAccumulator: Sendable {
     private mutating func compactFinalizedTailIfNeeded() {
         while finalizedTail.count > Self.maxRevisionTailSegments {
             finalizedTail.removeFirst()
+            hasCompactedHistory = true
         }
     }
 
