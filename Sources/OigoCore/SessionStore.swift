@@ -239,6 +239,7 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
     case missingSession(UUID)
     case invalidMetadata(URL)
     case invalidSessionDirectory(URL)
+    case transcriptTooLarge(URL)
     case insertionAlreadyAttempted(UUID)
     case activeSession(UUID)
 
@@ -250,6 +251,8 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
             "dictation session metadata is invalid: " + url.path
         case .invalidSessionDirectory(let url):
             "dictation session directory is invalid: " + url.path
+        case .transcriptTooLarge(let url):
+            "raw transcript is too large to load safely: " + url.path
         case .insertionAlreadyAttempted(let id):
             "dictation session insertion was already attempted: " + id.uuidString
         case .activeSession(let id):
@@ -274,8 +277,16 @@ public final class SessionStore: @unchecked Sendable {
         let targetRawTextByteCount: Int64
     }
 
+    private struct PendingTranscriptPrune: Codable {
+        let metadata: SessionMetadata
+        let rawTombstoneName: String?
+        let cleanTombstoneName: String?
+    }
+
     private static let pendingRawPersistenceName = ".raw-persistence.json"
+    private static let pendingTranscriptPruneName = ".transcript-prune.json"
     private static let maxMetadataBytes = 64 * 1024
+    private static let maxTranscriptBytes = 4 * 1024 * 1024
 
     public init(rootDirectory: URL? = nil, fileManager: FileManager = .default) throws {
         self.fileManager = fileManager
@@ -383,14 +394,10 @@ public final class SessionStore: @unchecked Sendable {
         defer { lock.unlock() }
 
         let maxDirectories = SessionRetentionPolicy.default.maxDirectoriesToInspect
-        let doubledLimit = limit > maxDirectories / 2 ? maxDirectories : limit * 2
-        let candidateLimit = min(maxDirectories, max(doubledLimit, 128))
-        let sessions = try boundedSessionDirectories(maxCount: candidateLimit).compactMap { directoryURL -> DictationSession? in
-            try? readSession(at: directoryURL)
-        }
+        let sessions = try newestSessions(maxCount: maxDirectories)
         return sessions
             .sorted { lhs, rhs in
-                lhs.metadata.createdAt > rhs.metadata.createdAt
+                isNewer(lhs, than: rhs)
             }
             .prefix(limit)
             .map { session in
@@ -856,11 +863,18 @@ public final class SessionStore: @unchecked Sendable {
 
         return try withSessionDirectory(at: session.directoryURL) { directoryFD in
             let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
-            guard let data = try readDataIfPresent(
-                named: "raw.txt",
-                in: directoryFD,
-                at: current.rawTextURL
-            ) else {
+            let data: Data?
+            do {
+                data = try readDataIfPresent(
+                    named: "raw.txt",
+                    in: directoryFD,
+                    at: current.rawTextURL,
+                    maxBytes: Self.maxTranscriptBytes
+                )
+            } catch SessionStoreError.invalidMetadata {
+                throw SessionStoreError.transcriptTooLarge(current.rawTextURL)
+            }
+            guard let data else {
                 return ""
             }
             guard let rawText = String(data: data, encoding: .utf8) else {
@@ -990,29 +1004,13 @@ public final class SessionStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        var retainedTranscriptSessions: [DictationSession] = []
-        if policy.maxTranscriptSessions > 0 {
-            try forEachTolerantSession { session in
-                guard sessionHasTranscript(session) else {
-                    return
-                }
-                retainedTranscriptSessions.append(session)
-                retainedTranscriptSessions.sort { lhs, rhs in
-                    if lhs.metadata.createdAt == rhs.metadata.createdAt {
-                        return lhs.metadata.directoryName > rhs.metadata.directoryName
-                    }
-                    return lhs.metadata.createdAt > rhs.metadata.createdAt
-                }
-                if retainedTranscriptSessions.count > policy.maxTranscriptSessions {
-                    retainedTranscriptSessions.removeLast()
-                }
-            }
-        }
-        let retainedTranscriptIDs = Set(retainedTranscriptSessions.map(\.id))
         var removedSessionIDs: [UUID] = []
         var removedAudioSessionIDs: [UUID] = []
 
-        try forEachTolerantSession { session in
+        func applyMaintenance(
+            to session: DictationSession,
+            retainsTranscript: Bool
+        ) throws {
             guard !session.metadata.state.isUnfinished else {
                 return
             }
@@ -1027,7 +1025,7 @@ public final class SessionStore: @unchecked Sendable {
                 && hasAudio
                 && date.timeIntervalSince(referenceDate) <= policy.successfulAudioLifetime
 
-            if !retainedTranscriptIDs.contains(session.id) {
+            if !retainsTranscript {
                 if audioIsRetained {
                     if sessionHasTranscript(session) {
                         try removeTranscriptFiles(for: session)
@@ -1048,6 +1046,23 @@ public final class SessionStore: @unchecked Sendable {
             }
             try removeAudioFile(for: session)
             removedAudioSessionIDs.append(session.id)
+        }
+
+        var retainedTranscriptSessions: [DictationSession] = []
+        try forEachTolerantSession { session in
+            if sessionHasTranscript(session) {
+                retainedTranscriptSessions.append(session)
+                retainedTranscriptSessions.sort { isNewer($0, than: $1) }
+                if retainedTranscriptSessions.count > policy.maxTranscriptSessions {
+                    let evicted = retainedTranscriptSessions.removeLast()
+                    try applyMaintenance(to: evicted, retainsTranscript: false)
+                    if evicted.id == session.id {
+                        return
+                    }
+                }
+            }
+            let retainsTranscript = retainedTranscriptSessions.contains { $0.id == session.id }
+            try applyMaintenance(to: session, retainsTranscript: retainsTranscript)
         }
 
         return SessionMaintenanceResult(
@@ -1087,23 +1102,61 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     private func removeTranscriptFiles(for session: DictationSession) throws {
-        var metadata = session.metadata
-        metadata.rawTextByteCount = nil
-        metadata.firstTranscriptLine = nil
-        try writeMetadata(metadata, at: session.metadataURL)
         try withSessionDirectory(at: session.directoryURL) { directoryFD in
-            try removeEntry(
-                named: "raw.txt",
-                in: directoryFD,
-                at: session.rawTextURL,
-                allowMissing: true
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            var metadata = current.metadata
+            metadata.rawTextByteCount = nil
+            metadata.firstTranscriptLine = nil
+            let rawTombstoneName = entryExists(named: "raw.txt", in: directoryFD)
+                ? ".raw.txt." + UUID().uuidString + ".pruned"
+                : nil
+            let cleanTombstoneName = entryExists(named: "clean.txt", in: directoryFD)
+                ? ".clean.txt." + UUID().uuidString + ".pruned"
+                : nil
+            let pending = PendingTranscriptPrune(
+                metadata: metadata,
+                rawTombstoneName: rawTombstoneName,
+                cleanTombstoneName: cleanTombstoneName
             )
-            try removeEntry(
-                named: "clean.txt",
+            try writePendingTranscriptPrune(
+                pending,
                 in: directoryFD,
-                at: session.cleanTextURL,
-                allowMissing: true
+                at: current.directoryURL.appendingPathComponent(Self.pendingTranscriptPruneName)
             )
+            if let rawTombstoneName {
+                try renameEntry(
+                    named: "raw.txt",
+                    to: rawTombstoneName,
+                    in: directoryFD,
+                    at: current.rawTextURL
+                )
+            }
+            if let cleanTombstoneName {
+                try renameEntry(
+                    named: "clean.txt",
+                    to: cleanTombstoneName,
+                    in: directoryFD,
+                    at: current.cleanTextURL
+                )
+            }
+            try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
+            if let rawTombstoneName {
+                try removeEntry(
+                    named: rawTombstoneName,
+                    in: directoryFD,
+                    at: current.directoryURL.appendingPathComponent(rawTombstoneName),
+                    allowMissing: true
+                )
+            }
+            if let cleanTombstoneName {
+                try removeEntry(
+                    named: cleanTombstoneName,
+                    in: directoryFD,
+                    at: current.directoryURL.appendingPathComponent(cleanTombstoneName),
+                    allowMissing: true
+                )
+            }
+            try removePendingTranscriptPrune(in: directoryFD, at: current.directoryURL)
             _ = Darwin.fsync(directoryFD)
         }
     }
@@ -1112,6 +1165,29 @@ public final class SessionStore: @unchecked Sendable {
         try boundedSessionDirectories(maxCount: maxDirectories).compactMap { directoryURL in
             try? readSession(at: directoryURL)
         }
+    }
+
+    private func newestSessions(maxCount: Int) throws -> [DictationSession] {
+        guard maxCount > 0 else {
+            return []
+        }
+
+        var sessions: [DictationSession] = []
+        try forEachTolerantSession { session in
+            sessions.append(session)
+            sessions.sort { isNewer($0, than: $1) }
+            if sessions.count > maxCount {
+                sessions.removeLast()
+            }
+        }
+        return sessions
+    }
+
+    private func isNewer(_ lhs: DictationSession, than rhs: DictationSession) -> Bool {
+        if lhs.metadata.createdAt == rhs.metadata.createdAt {
+            return lhs.metadata.directoryName > rhs.metadata.directoryName
+        }
+        return lhs.metadata.createdAt > rhs.metadata.createdAt
     }
 
     private func forEachTolerantSession(
@@ -1160,12 +1236,10 @@ public final class SessionStore: @unchecked Sendable {
         }
 
         var directories: [URL] = []
-        var inspectedEntries = 0
-        while inspectedEntries < maxCount, let value = enumerator.nextObject() {
+        while let value = enumerator.nextObject() {
             guard let url = value as? URL else {
                 continue
             }
-            inspectedEntries += 1
             guard let values = try? url.resourceValues(
                 forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
             ) else {
@@ -1178,10 +1252,14 @@ public final class SessionStore: @unchecked Sendable {
                 continue
             }
             directories.append(url)
+            directories.sort { lhs, rhs in
+                lhs.lastPathComponent > rhs.lastPathComponent
+            }
+            if directories.count > maxCount {
+                directories.removeLast()
+            }
         }
-        return directories.sorted { lhs, rhs in
-            lhs.lastPathComponent > rhs.lastPathComponent
-        }
+        return directories
     }
 
     private func readFirstTranscriptLine(at directoryURL: URL) throws -> String? {
@@ -1190,7 +1268,7 @@ public final class SessionStore: @unchecked Sendable {
 
         let fileURL = directoryURL.appendingPathComponent("raw.txt")
         let fileFD = "raw.txt".withCString { name in
-            Darwin.openat(directoryFD, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+            Darwin.openat(directoryFD, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
         }
         guard fileFD >= 0 else {
             guard errno == ENOENT else {
@@ -1207,6 +1285,11 @@ public final class SessionStore: @unchecked Sendable {
         from fileFD: Int32,
         at url: URL
     ) throws -> String? {
+        var fileInfo = stat()
+        guard Darwin.fstat(fileFD, &fileInfo) == 0,
+              (fileInfo.st_mode & S_IFMT) == S_IFREG else {
+            throw SessionStoreError.invalidSessionDirectory(url)
+        }
         var buffer = [UInt8](repeating: 0, count: 4_096)
         let count = buffer.withUnsafeMutableBytes { bytes in
             Darwin.read(fileFD, bytes.baseAddress, bytes.count)
@@ -1240,6 +1323,7 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     private func readSession(at directoryURL: URL, directoryFD: Int32) throws -> DictationSession {
+        try recoverTranscriptPrune(at: directoryURL, directoryFD: directoryFD)
         try recoverPendingPersistence(at: directoryURL, directoryFD: directoryFD)
         let metadataURL = directoryURL.appendingPathComponent("session.json")
         do {
@@ -1302,6 +1386,38 @@ public final class SessionStore: @unchecked Sendable {
         at url: URL
     ) throws -> Int64 {
         Int64((try readDataIfPresent(named: name, in: directoryFD, at: url) ?? Data()).count)
+    }
+
+    private func writePendingTranscriptPrune(
+        _ pending: PendingTranscriptPrune,
+        in directoryFD: Int32,
+        at url: URL
+    ) throws {
+        let data = try encoder.encode(pending)
+        try rejectSymlink(
+            named: Self.pendingTranscriptPruneName,
+            in: directoryFD,
+            at: url,
+            allowMissing: true
+        )
+        try atomicWrite(
+            data,
+            named: Self.pendingTranscriptPruneName,
+            in: directoryFD,
+            at: url
+        )
+    }
+
+    private func removePendingTranscriptPrune(
+        in directoryFD: Int32,
+        at directoryURL: URL
+    ) throws {
+        try removeEntry(
+            named: Self.pendingTranscriptPruneName,
+            in: directoryFD,
+            at: directoryURL.appendingPathComponent(Self.pendingTranscriptPruneName),
+            allowMissing: true
+        )
     }
 
     private func writePendingPersistence(
@@ -1390,6 +1506,83 @@ public final class SessionStore: @unchecked Sendable {
             }
         }
         try removePendingPersistence(in: directoryFD, at: directoryURL)
+    }
+
+    private func recoverTranscriptPrune(at directoryURL: URL, directoryFD: Int32) throws {
+        let pendingURL = directoryURL.appendingPathComponent(Self.pendingTranscriptPruneName)
+        guard let data = try readDataIfPresent(
+            named: Self.pendingTranscriptPruneName,
+            in: directoryFD,
+            at: pendingURL,
+            maxBytes: Self.maxMetadataBytes
+        ) else {
+            return
+        }
+        let pending: PendingTranscriptPrune
+        do {
+            pending = try decoder.decode(PendingTranscriptPrune.self, from: data)
+        } catch {
+            throw SessionStoreError.invalidMetadata(pendingURL)
+        }
+        guard pending.metadata.directoryName == directoryURL.standardizedFileURL.lastPathComponent,
+              pending.metadata.audioFileName == "audio.caf",
+              pending.metadata.rawTextFileName == "raw.txt",
+              pending.metadata.cleanTextFileName == "clean.txt" else {
+            throw SessionStoreError.invalidMetadata(pendingURL)
+        }
+
+        let metadataURL = directoryURL.appendingPathComponent("session.json")
+        let metadata: SessionMetadata
+        do {
+            let metadataData = try readData(
+                named: "session.json",
+                in: directoryFD,
+                at: metadataURL,
+                maxBytes: Self.maxMetadataBytes
+            )
+            metadata = try decoder.decode(SessionMetadata.self, from: metadataData)
+        } catch {
+            throw SessionStoreError.invalidMetadata(metadataURL)
+        }
+        let pruneCompleted = metadata.rawTextByteCount == nil
+            && metadata.firstTranscriptLine == nil
+        let tombstones = [
+            ("raw.txt", pending.rawTombstoneName),
+            ("clean.txt", pending.cleanTombstoneName)
+        ]
+        for (originalName, tombstoneName) in tombstones {
+            guard let tombstoneName else {
+                continue
+            }
+            let tombstoneURL = directoryURL.appendingPathComponent(tombstoneName)
+            guard entryExists(named: tombstoneName, in: directoryFD) else {
+                continue
+            }
+            if pruneCompleted {
+                try removeEntry(
+                    named: tombstoneName,
+                    in: directoryFD,
+                    at: tombstoneURL,
+                    allowMissing: true
+                )
+            } else if entryExists(named: originalName, in: directoryFD) {
+                try removeEntry(
+                    named: tombstoneName,
+                    in: directoryFD,
+                    at: tombstoneURL,
+                    allowMissing: true
+                )
+            } else {
+                try renameEntry(
+                    named: tombstoneName,
+                    to: originalName,
+                    in: directoryFD,
+                    at: directoryURL.appendingPathComponent(originalName)
+                )
+            }
+        }
+        try removePendingTranscriptPrune(in: directoryFD, at: directoryURL)
+        _ = Darwin.fsync(directoryFD)
     }
 
     private func withSessionDirectory<T>(
@@ -1552,6 +1745,41 @@ public final class SessionStore: @unchecked Sendable {
             }
             return
         }
+    }
+
+    private func renameEntry(
+        named sourceName: String,
+        to destinationName: String,
+        in directoryFD: Int32,
+        at destinationURL: URL
+    ) throws {
+        guard !sourceName.isEmpty,
+              !destinationName.isEmpty,
+              !sourceName.contains("/"),
+              !destinationName.contains("/") else {
+            throw SessionStoreError.invalidSessionDirectory(destinationURL)
+        }
+        try rejectSymlink(
+            named: sourceName,
+            in: directoryFD,
+            at: destinationURL,
+            allowMissing: false
+        )
+        try rejectSymlink(
+            named: destinationName,
+            in: directoryFD,
+            at: destinationURL,
+            allowMissing: true
+        )
+        let result = sourceName.withCString { sourceName in
+            destinationName.withCString { destinationName in
+                Darwin.renameat(directoryFD, sourceName, directoryFD, destinationName)
+            }
+        }
+        guard result == 0 else {
+            throw SessionStoreError.invalidSessionDirectory(destinationURL)
+        }
+        _ = Darwin.fsync(directoryFD)
     }
 
     private func prepareAtomicWrite(

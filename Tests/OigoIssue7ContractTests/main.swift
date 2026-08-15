@@ -1,5 +1,6 @@
 import Foundation
-import OigoCore
+import Darwin
+@_spi(Testing) import OigoCore
 import OigoInsertion
 @_spi(Testing) import OigoTranscription
 
@@ -166,6 +167,26 @@ private struct OigoIssue7ContractTests {
             options: [.atomic]
         )
 
+        let fifoSession = try store.createSession(now: Date(timeIntervalSince1970: 11_999))
+        let fifoCompleted = try store.update(
+            fifoSession,
+            state: .completed,
+            at: Date(timeIntervalSince1970: 12_000)
+        )
+        let fifoResult = fifoCompleted.rawTextURL.path.withCString { path in
+            Darwin.mkfifo(path, mode_t(0o600))
+        }
+        guard fifoResult == 0 else {
+            throw ContractFailure(message: "could not create the non-regular transcript fixture")
+        }
+
+        let fifoHistory = try store.listHistory(limit: 10).first { entry in
+            entry.id == fifoCompleted.id
+        }
+        guard fifoHistory?.firstTranscriptLine == nil else {
+            throw ContractFailure(message: "history read a non-regular transcript artifact")
+        }
+
         let newestOnly = try store.listHistory(limit: 1)
         guard newestOnly.count == 1,
               newestOnly[0].id == newest.id,
@@ -178,8 +199,22 @@ private struct OigoIssue7ContractTests {
         }
 
         let history = try store.listHistory(limit: 10)
-        guard history.map(\.id) == [newest.id, older.id] else {
+        guard history.map(\.id) == [newest.id, older.id, fifoCompleted.id] else {
             throw ContractFailure(message: "one malformed session prevented valid history entries from loading")
+        }
+
+        let oversized = try store.createSession(now: Date(timeIntervalSince1970: 12_004))
+        _ = try store.persistRawText(
+            String(repeating: "x", count: 4 * 1024 * 1024 + 1),
+            for: oversized
+        )
+        do {
+            _ = try store.readRawText(for: oversized)
+            throw ContractFailure(message: "oversized transcript was loaded without a read bound")
+        } catch let error as SessionStoreError {
+            guard case .transcriptTooLarge = error else {
+                throw ContractFailure(message: "oversized transcript returned the wrong error: " + error.description)
+            }
         }
     }
 
@@ -405,6 +440,24 @@ private struct OigoIssue7ContractTests {
         let prunedPersisted = try prunedStore.persistRawText("prune transcript", for: prunedCreated)
         let pruned = try prunedStore.update(prunedPersisted, state: .completed, at: base)
         try Data([0x50, 0x52, 0x55, 0x4E, 0x45]).write(to: pruned.audioURL, options: [.atomic])
+        prunedStore.failNextMetadataWriteForTesting()
+        var faultWasObserved = false
+        do {
+            _ = try prunedStore.performIdleMaintenance(
+                at: base.addingTimeInterval(1),
+                policy: SessionRetentionPolicy(maxTranscriptSessions: 0)
+            )
+        } catch {
+            faultWasObserved = true
+        }
+        guard faultWasObserved else {
+            throw ContractFailure(message: "transcript pruning did not expose the injected metadata-write fault")
+        }
+        let recoveredPruned = try prunedStore.load(id: pruned.id)
+        guard FileManager.default.fileExists(atPath: recoveredPruned.rawTextURL.path),
+              try prunedStore.readRawText(for: recoveredPruned) == "prune transcript" else {
+            throw ContractFailure(message: "transcript pruning did not recover the original files after a metadata fault")
+        }
         _ = try prunedStore.performIdleMaintenance(
             at: base.addingTimeInterval(1),
             policy: SessionRetentionPolicy(maxTranscriptSessions: 0)
