@@ -1,20 +1,29 @@
 import AppKit
+import AVFAudio
 import Foundation
 import OigoCore
+import OigoCapture
 
 @MainActor
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = DictationCoordinator()
+    private let recorder = AudioRecorder()
+    private let playback = AudioPlayback()
     private let shortcutRegistrar = CarbonGlobalShortcutRegistrar()
     private let statusSurface = StatusSurfaceController()
+    private var sessionStore: SessionStore?
+    private var lastSession: DictationSession?
     private var settingsWindow: SettingsWindowController?
     private var statusItem: NSStatusItem?
     private var toggleItem: NSMenuItem?
+    private var playItem: NSMenuItem?
+    private var revealItem: NSMenuItem?
     private var shortcut = OigoAppDelegate.loadShortcut()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
         NSApp.setActivationPolicy(.accessory)
+        prepareSessionStore()
         configureStatusItem()
         registerShortcut()
         updateSurface()
@@ -23,6 +32,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
         shortcutRegistrar.unregister()
+        playback.stop()
         coordinator.shutdown()
         return .terminateNow
     }
@@ -64,6 +74,22 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         toggle.target = self
         menu.addItem(toggle)
 
+        let play = NSMenuItem(
+            title: "Play Last Recording",
+            action: #selector(playLastRecording),
+            keyEquivalent: ""
+        )
+        play.target = self
+        menu.addItem(play)
+
+        let reveal = NSMenuItem(
+            title: "Reveal Last Recording",
+            action: #selector(revealLastRecording),
+            keyEquivalent: ""
+        )
+        reveal.target = self
+        menu.addItem(reveal)
+
         let settings = NSMenuItem(
             title: "Settings…",
             action: #selector(openSettings),
@@ -85,6 +111,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         item.menu = menu
         statusItem = item
         toggleItem = toggle
+        playItem = play
+        revealItem = reveal
     }
 
     private func registerShortcut() {
@@ -99,8 +127,35 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleToggle() {
+        Task { @MainActor [weak self] in
+            await self?.performToggle()
+        }
+    }
+
+    private func performToggle() async {
         do {
-            try coordinator.toggle()
+            switch coordinator.state {
+            case .idle, .complete, .failed, .cancelled, .interrupted:
+                guard let sessionStore else {
+                    throw SessionStoreError.invalidSessionDirectory(
+                        SessionStore.defaultRootDirectory()
+                    )
+                }
+                if AVAudioApplication.shared.recordPermission == .undetermined {
+                    _ = await AudioRecorder.requestMicrophonePermission()
+                }
+                lastSession = try coordinator.startRecording(
+                    using: recorder,
+                    store: sessionStore
+                )
+            case .recording:
+                lastSession = try coordinator.stopRecording()
+            case .preparing, .finalizing, .cleaning, .inserting:
+                throw DictationTransitionError.illegal(
+                    from: coordinator.state,
+                    event: .start
+                )
+            }
             updateSurface()
         } catch {
             NSLog("Oigo rejected the toggle command: %@", String(describing: error))
@@ -120,8 +175,44 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         ].contains(coordinator.state)
         toggleItem?.title = isRecording ? "Stop Dictation" : "Start Dictation"
         toggleItem?.isEnabled = canToggle
+        let hasSession = lastSession != nil
+        let hasPlayableRecording = lastSession.map {
+            $0.metadata.state == .completed
+                && FileManager.default.fileExists(atPath: $0.audioURL.path)
+        } ?? false
+        playItem?.isEnabled = hasPlayableRecording && !isRecording
+        revealItem?.isEnabled = hasSession
         statusItem?.button?.title = "Oigo · " + coordinator.state.rawValue.capitalized
         statusSurface.show(state: coordinator.state, anchoredTo: statusItem?.button)
+    }
+
+    @objc private func playLastRecording() {
+        guard let session = lastSession else {
+            return
+        }
+        do {
+            _ = try playback.play(url: session.audioURL)
+        } catch {
+            NSLog("Oigo could not play the last recording: %@", String(describing: error))
+        }
+    }
+
+    @objc private func revealLastRecording() {
+        guard let session = lastSession else {
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([session.directoryURL])
+    }
+
+    private func prepareSessionStore() {
+        do {
+            let store = try SessionStore()
+            sessionStore = store
+            _ = try store.recoverUnfinishedSessions()
+            lastSession = try store.listSessions().first
+        } catch {
+            NSLog("Oigo could not prepare durable sessions: %@", String(describing: error))
+        }
     }
 
     private static func loadShortcut() -> ToggleShortcut {

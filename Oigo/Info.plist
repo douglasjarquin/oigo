@@ -18,6 +18,8 @@
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>26.0</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Oigo needs microphone access to save your dictation audio.</string>
     <key>LSUIElement</key>
     <true/>
 </dict>

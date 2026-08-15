@@ -9,6 +9,7 @@ let package = Package(
     ],
     products: [
         .library(name: "OigoCore", targets: ["OigoCore"]),
+        .library(name: "OigoCapture", targets: ["OigoCapture"]),
         .library(name: "OigoSpike", targets: ["OigoSpike"]),
         .executable(name: "Oigo", targets: ["Oigo"]),
         .executable(name: "oigo-spike", targets: ["OigoSpikeCLI"]),
@@ -16,12 +17,24 @@ let package = Package(
         .executable(
             name: "oigo-issue3-contract-tests",
             targets: ["OigoIssue3ContractTests"]
+        ),
+        .executable(
+            name: "oigo-issue4-contract-tests",
+            targets: ["OigoIssue4ContractTests"]
         )
     ],
     targets: [
         .target(
             name: "OigoCore",
             path: "Sources/OigoCore"
+        ),
+        .target(
+            name: "OigoCapture",
+            dependencies: ["OigoCore"],
+            path: "Sources/OigoCapture",
+            linkerSettings: [
+                .linkedFramework("AVFAudio")
+            ]
         ),
         .target(
             name: "OigoSpike",
@@ -43,7 +56,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "Oigo",
-            dependencies: ["OigoCore"],
+            dependencies: ["OigoCore", "OigoCapture"],
             path: "Sources/Oigo",
             linkerSettings: [
                 .linkedFramework("AppKit")
@@ -53,6 +66,11 @@ let package = Package(
             name: "OigoIssue3ContractTests",
             dependencies: ["OigoCore"],
             path: "Tests/OigoIssue3ContractTests"
+        ),
+        .executableTarget(
+            name: "OigoIssue4ContractTests",
+            dependencies: ["OigoCore", "OigoCapture"],
+            path: "Tests/OigoIssue4ContractTests"
         )
     ]
 )
