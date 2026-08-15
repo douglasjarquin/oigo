@@ -189,6 +189,12 @@ private struct OigoIssue7ContractTests {
             options: [.atomic]
         )
 
+        let listedSessions = try store.listSessions()
+        guard listedSessions.contains(where: { $0.id == older.id }),
+              !listedSessions.contains(where: { $0.directoryURL == malformed }) else {
+            throw ContractFailure(message: "strict session listing did not isolate malformed metadata")
+        }
+
         let fifoSession = try store.createSession(now: Date(timeIntervalSince1970: 11_999))
         let fifoCompleted = try store.update(
             fifoSession,

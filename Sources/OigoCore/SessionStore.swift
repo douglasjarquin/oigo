@@ -369,12 +369,16 @@ public final class SessionStore: @unchecked Sendable {
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         )
-        return try urls
-            .filter { url in
-                let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-                return values.isDirectory == true || values.isSymbolicLink == true
+        return try urls.compactMap { url in
+            let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard values.isSymbolicLink != true else {
+                throw SessionStoreError.invalidSessionDirectory(url)
             }
-            .map { try readSession(at: $0) }
+            guard values.isDirectory == true else {
+                return nil
+            }
+            return try? readSession(at: url)
+        }
             .sorted { lhs, rhs in
                 lhs.metadata.createdAt > rhs.metadata.createdAt
             }
@@ -579,7 +583,8 @@ public final class SessionStore: @unchecked Sendable {
             let existingData = try readDataIfPresent(
                 named: "raw.txt",
                 in: directoryFD,
-                at: current.rawTextURL
+                at: current.rawTextURL,
+                maxBytes: Self.maxTranscriptBytes
             ) ?? Data()
             let rawData = Data(rawText.utf8)
             try rejectSymlink(named: "raw.txt", in: directoryFD, at: current.rawTextURL, allowMissing: true)
@@ -676,7 +681,8 @@ public final class SessionStore: @unchecked Sendable {
             guard let data = try readDataIfPresent(
                 named: staging.fileName,
                 in: directoryFD,
-                at: stagingURL
+                at: stagingURL,
+                maxBytes: Self.maxTranscriptBytes
             ) else {
                 throw SessionStoreError.invalidSessionDirectory(stagingURL)
             }
@@ -1368,7 +1374,7 @@ public final class SessionStore: @unchecked Sendable {
         in directoryFD: Int32,
         at url: URL
     ) throws -> Int64 {
-        Int64((try readDataIfPresent(named: name, in: directoryFD, at: url) ?? Data()).count)
+        try fileByteCount(named: name, in: directoryFD, at: url)
     }
 
     private func writePendingTranscriptPrune(
@@ -1607,6 +1613,31 @@ public final class SessionStore: @unchecked Sendable {
             throw SessionStoreError.invalidSessionDirectory(directoryURL)
         }
         return directoryFD
+    }
+
+    private func fileByteCount(
+        named name: String,
+        in directoryFD: Int32,
+        at url: URL
+    ) throws -> Int64 {
+        let flags = O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK
+        let fileFD = name.withCString { entryName in
+            Darwin.openat(directoryFD, entryName, flags)
+        }
+        guard fileFD >= 0 else {
+            guard errno == ENOENT else {
+                throw SessionStoreError.invalidSessionDirectory(url)
+            }
+            return 0
+        }
+        defer { _ = Darwin.close(fileFD) }
+
+        var fileInfo = stat()
+        guard Darwin.fstat(fileFD, &fileInfo) == 0,
+              (fileInfo.st_mode & S_IFMT) == S_IFREG else {
+            throw SessionStoreError.invalidSessionDirectory(url)
+        }
+        return Int64(fileInfo.st_size)
     }
 
     private func readData(

@@ -473,6 +473,18 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func runIdleMaintenance() {
+        let canRunMaintenance = [
+            .idle,
+            .complete,
+            .failed,
+            .cancelled,
+            .interrupted
+        ].contains(coordinator.state) && !coordinator.hasActiveTranscription
+        guard canRunMaintenance else {
+            historyWindow?.showMessage("Idle maintenance is unavailable while dictation is active.")
+            updateSurface()
+            return
+        }
         guard let store = sessionStore else {
             return
         }
