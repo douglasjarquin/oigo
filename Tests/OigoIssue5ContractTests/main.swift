@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 @_spi(Testing) import OigoCore
 @_spi(Testing) import OigoTranscription
@@ -1279,6 +1280,7 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
     private var onBuffer: (@Sendable (AudioCaptureBuffer) -> Void)?
     private var onFinish: (@Sendable () -> Void)?
     private var outputURL: URL?
+    private var outputDescriptor: AudioFileDescriptor?
     private(set) var isActive = false
 
     func start(
@@ -1297,8 +1299,27 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
         isActive = true
     }
 
+    func start(
+        to descriptor: AudioFileDescriptor,
+        url: URL,
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
+        onFinish: @escaping @Sendable () -> Void,
+        onInterruption: @escaping @Sendable (String) -> Void,
+        onFailure: @escaping @Sendable (String) -> Void
+    ) throws {
+        _ = onInterruption
+        _ = onFailure
+        outputURL = url
+        outputDescriptor = descriptor
+        self.onBuffer = onBuffer
+        self.onFinish = onFinish
+        isActive = true
+    }
+
     func stop() throws {
         isActive = false
+        outputDescriptor?.close()
+        outputDescriptor = nil
         outputURL = nil
         onFinish?()
         onBuffer = nil
@@ -1307,13 +1328,22 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
 
     func cancel() {
         isActive = false
+        outputDescriptor?.close()
+        outputDescriptor = nil
         outputURL = nil
         onBuffer = nil
         onFinish = nil
     }
 
     func sendBuffer() {
-        try? Data([0, 0]).write(to: outputURL ?? FileManager.default.temporaryDirectory.appendingPathComponent("unused"), options: [.atomic])
+        if let outputDescriptor {
+            var bytes = [UInt8](repeating: 0, count: 2)
+            _ = bytes.withUnsafeMutableBytes { buffer in
+                Darwin.write(outputDescriptor.rawValue, buffer.baseAddress, buffer.count)
+            }
+        } else {
+            try? Data([0, 0]).write(to: outputURL ?? FileManager.default.temporaryDirectory.appendingPathComponent("unused"), options: [.atomic])
+        }
         onBuffer?(
             AudioCaptureBuffer(
                 frameCount: 1,

@@ -112,6 +112,33 @@ private enum SecureCaptureFile {
         return CaptureFileDescriptor(rawValue: descriptor)
     }
 
+    static func openOrCreate(at url: URL) throws -> CaptureFileDescriptor {
+        let directoryFD = try openParentDirectory(for: url)
+        defer { _ = Darwin.close(directoryFD) }
+        let name = url.lastPathComponent
+        guard !name.isEmpty, name != ".", name != ".." else {
+            throw CaptureJournalError.invalid(url, "the capture filename is empty")
+        }
+        let descriptor = name.withCString { namePointer in
+            Darwin.openat(
+                directoryFD,
+                namePointer,
+                O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW,
+                mode_t(0o600)
+            )
+        }
+        guard descriptor >= 0 else {
+            throw CaptureJournalError.invalid(url, "the capture file could not be opened without following a link")
+        }
+        do {
+            try validateRegularFile(descriptor, at: url)
+        } catch {
+            _ = Darwin.close(descriptor)
+            throw error
+        }
+        return CaptureFileDescriptor(rawValue: descriptor)
+    }
+
     private static func openParentDirectory(for url: URL) throws -> Int32 {
         let parent = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(
@@ -140,47 +167,96 @@ public final class DurableCaptureJournal: @unchecked Sendable {
     public let url: URL
 
     private let lock = NSLock()
-    private var handle: FileHandle?
+    private var descriptor: CaptureFileDescriptor?
     private(set) public var bytesWritten = 0
 
-    public init(url: URL) throws {
+    public convenience init(url: URL) throws {
+        try self.init(url: url, beforeOpeningDescriptor: nil)
+    }
+
+    @_spi(Testing)
+    public init(
+        url: URL,
+        beforeOpeningDescriptor: ((CaptureFileDescriptor) throws -> Void)?
+    ) throws {
         self.url = url
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        FileManager.default.createFile(atPath: url.path, contents: nil)
-        handle = try FileHandle(forWritingTo: url)
+        let openedDescriptor = try SecureCaptureFile.openOrCreate(at: url)
+        do {
+            try beforeOpeningDescriptor?(openedDescriptor)
+            guard Darwin.lseek(openedDescriptor.rawValue, 0, SEEK_END) >= 0 else {
+                throw CaptureJournalError.descriptor("could not seek to the end of the capture journal")
+            }
+        } catch {
+            openedDescriptor.close()
+            throw error
+        }
+        descriptor = openedDescriptor
     }
 
     public func append(_ data: Data) throws {
         lock.lock()
         defer { lock.unlock() }
-        guard let handle else {
+        guard let descriptor else {
             throw CaptureJournalError.closed
         }
-        try handle.seekToEnd()
-        try handle.write(contentsOf: data)
-        try handle.synchronize()
+        try data.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else {
+                return
+            }
+            var offset = 0
+            while offset < bytes.count {
+                let written = Darwin.write(
+                    descriptor.rawValue,
+                    baseAddress.advanced(by: offset),
+                    bytes.count - offset
+                )
+                guard written > 0 else {
+                    throw CaptureJournalError.descriptor("could not append capture data")
+                }
+                offset += written
+            }
+        }
+        guard Darwin.fsync(descriptor.rawValue) == 0 else {
+            throw CaptureJournalError.descriptor("could not flush capture data")
+        }
         bytesWritten += data.count
     }
 
     public func finish() throws {
         lock.lock()
         defer { lock.unlock() }
-        guard let handle else {
+        guard let descriptor else {
             return
         }
-        try handle.synchronize()
-        try handle.close()
-        self.handle = nil
+        defer {
+            descriptor.close()
+            self.descriptor = nil
+        }
+        guard Darwin.fsync(descriptor.rawValue) == 0 else {
+            throw CaptureJournalError.descriptor("could not flush the capture journal")
+        }
     }
 
     public static func recover(_ url: URL) throws -> Data {
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            throw CaptureJournalError.missing(url)
+        let descriptor = try SecureCaptureFile.open(at: url)
+        defer { descriptor.close() }
+        guard Darwin.lseek(descriptor.rawValue, 0, SEEK_SET) >= 0 else {
+            throw CaptureJournalError.descriptor("could not rewind the capture journal")
         }
-        return try Data(contentsOf: url)
+        var contents = Data()
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let count = buffer.withUnsafeMutableBytes { bytes in
+                Darwin.read(descriptor.rawValue, bytes.baseAddress, bytes.count)
+            }
+            guard count >= 0 else {
+                throw CaptureJournalError.descriptor("could not read the capture journal")
+            }
+            if count == 0 {
+                return contents
+            }
+            contents.append(contentsOf: buffer.prefix(count))
+        }
     }
 
     deinit {

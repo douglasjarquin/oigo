@@ -62,14 +62,6 @@ public struct AudioCaptureBuffer: Equatable, Sendable {
 
 public protocol AudioCapturing: AnyObject {
     func start(
-        to url: URL,
-        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
-        onFinish: @escaping @Sendable () -> Void,
-        onInterruption: @escaping @Sendable (String) -> Void,
-        onFailure: @escaping @Sendable (String) -> Void
-    ) throws
-
-    func start(
         to descriptor: AudioFileDescriptor,
         url: URL,
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
@@ -81,24 +73,4 @@ public protocol AudioCapturing: AnyObject {
     func stop() throws
 
     func cancel()
-}
-
-public extension AudioCapturing {
-    func start(
-        to descriptor: AudioFileDescriptor,
-        url: URL,
-        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
-        onFinish: @escaping @Sendable () -> Void,
-        onInterruption: @escaping @Sendable (String) -> Void,
-        onFailure: @escaping @Sendable (String) -> Void
-    ) throws {
-        defer { descriptor.close() }
-        try start(
-            to: url,
-            onBuffer: onBuffer,
-            onFinish: onFinish,
-            onInterruption: onInterruption,
-            onFailure: onFailure
-        )
-    }
 }

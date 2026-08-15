@@ -421,6 +421,24 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
         streamFinished = false
     }
 
+    func start(
+        to descriptor: AudioFileDescriptor,
+        url: URL,
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
+        onFinish: @escaping @Sendable () -> Void,
+        onInterruption: @escaping @Sendable (String) -> Void,
+        onFailure: @escaping @Sendable (String) -> Void
+    ) throws {
+        _ = url
+        descriptor.close()
+        self.onBuffer = onBuffer
+        self.onFinish = onFinish
+        self.onInterruption = onInterruption
+        self.onFailure = onFailure
+        isActive = true
+        streamFinished = false
+    }
+
     func stop() throws {
         finish()
     }
@@ -525,6 +543,7 @@ private final class DescriptorAwareAudioCapture: AudioCapturing, @unchecked Send
 private final class CAFTestAudioCapture: AudioCapturing, @unchecked Sendable {
     private let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
     private var file: AVAudioFile?
+    private var descriptor: AudioFileDescriptor?
     private var onBuffer: (@Sendable (AudioCaptureBuffer) -> Void)?
     private var onFinish: (@Sendable () -> Void)?
     private(set) var isActive = false
@@ -545,6 +564,34 @@ private final class CAFTestAudioCapture: AudioCapturing, @unchecked Sendable {
             commonFormat: format.commonFormat,
             interleaved: format.isInterleaved
         )
+        self.onFinish = onFinish
+        isActive = true
+    }
+
+    func start(
+        to descriptor: AudioFileDescriptor,
+        url: URL,
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
+        onFinish: @escaping @Sendable () -> Void,
+        onInterruption: @escaping @Sendable (String) -> Void,
+        onFailure: @escaping @Sendable (String) -> Void
+    ) throws {
+        _ = url
+        _ = onInterruption
+        _ = onFailure
+        self.onBuffer = onBuffer
+        do {
+            file = try AVAudioFile(
+                forWriting: URL(fileURLWithPath: "/dev/fd/\(descriptor.rawValue)"),
+                settings: format.settings,
+                commonFormat: format.commonFormat,
+                interleaved: format.isInterleaved
+            )
+        } catch {
+            descriptor.close()
+            throw error
+        }
+        self.descriptor = descriptor
         self.onFinish = onFinish
         isActive = true
     }
@@ -584,6 +631,8 @@ private final class CAFTestAudioCapture: AudioCapturing, @unchecked Sendable {
         }
         isActive = false
         file = nil
+        descriptor?.close()
+        descriptor = nil
         onBuffer = nil
         onFinish?()
         onFinish = nil

@@ -89,6 +89,36 @@ private struct OigoSpikeContractTests {
             throw ContractFailure(message: "CAF recorder followed a pre-created output symlink")
         }
 
+        let journalSymlink = root.appendingPathComponent("attacker-journal")
+        try FileManager.default.createSymbolicLink(
+            at: journalSymlink,
+            withDestinationURL: symlinkTarget
+        )
+        var rejectedJournalSymlink = false
+        do {
+            _ = try DurableCaptureJournal(url: journalSymlink)
+        } catch {
+            rejectedJournalSymlink = true
+        }
+        guard rejectedJournalSymlink, try Data(contentsOf: symlinkTarget) == sentinel else {
+            throw ContractFailure(message: "durable capture journal followed a pre-created symlink")
+        }
+
+        let journalURL = root.appendingPathComponent("capture.log")
+        let journalReplacement = Data("journal-replacement".utf8)
+        let journal = try DurableCaptureJournal(
+            url: journalURL,
+            beforeOpeningDescriptor: { _ in
+                try FileManager.default.removeItem(at: journalURL)
+                try journalReplacement.write(to: journalURL, options: [.atomic])
+            }
+        )
+        try journal.append(Data("journal-original".utf8))
+        try journal.finish()
+        guard try Data(contentsOf: journalURL) == journalReplacement else {
+            throw ContractFailure(message: "durable capture journal reopened a replacement pathname")
+        }
+
         let capturedURL = root.appendingPathComponent("captured.caf")
         let replacement = Data("replacement-after-open".utf8)
         var retainedDescriptor: CaptureFileDescriptor?
