@@ -20,6 +20,13 @@ public enum DictationSessionState: String, Codable, CaseIterable, Sendable {
     }
 }
 
+public enum InsertionOutcome: String, Codable, CaseIterable, Equatable, Sendable {
+    case pasted
+    case copied
+    case secureRejected
+    case failed
+}
+
 public struct SessionMetadata: Codable, Equatable, Sendable {
     public let id: UUID
     public let directoryName: String
@@ -32,6 +39,8 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
     public var failureReason: String?
     public var audioByteCount: Int64?
     public var rawTextByteCount: Int64?
+    public var insertionOutcome: InsertionOutcome?
+    public var insertionFailureReason: String?
     public let audioFileName: String
     public let rawTextFileName: String
     public let cleanTextFileName: String
@@ -48,6 +57,8 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         failureReason: String? = nil,
         audioByteCount: Int64? = nil,
         rawTextByteCount: Int64? = nil,
+        insertionOutcome: InsertionOutcome? = nil,
+        insertionFailureReason: String? = nil,
         audioFileName: String = "audio.caf",
         rawTextFileName: String = "raw.txt",
         cleanTextFileName: String = "clean.txt"
@@ -63,6 +74,8 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         self.failureReason = failureReason
         self.audioByteCount = audioByteCount
         self.rawTextByteCount = rawTextByteCount
+        self.insertionOutcome = insertionOutcome
+        self.insertionFailureReason = insertionFailureReason
         self.audioFileName = audioFileName
         self.rawTextFileName = rawTextFileName
         self.cleanTextFileName = cleanTextFileName
@@ -243,7 +256,9 @@ public final class SessionStore: @unchecked Sendable {
         at date: Date = Date(),
         failureReason: String? = nil,
         audioByteCount: Int64? = nil,
-        rawTextByteCount: Int64? = nil
+        rawTextByteCount: Int64? = nil,
+        insertionOutcome: InsertionOutcome? = nil,
+        insertionFailureReason: String? = nil
     ) throws -> DictationSession {
         lock.lock()
         defer { lock.unlock() }
@@ -272,6 +287,10 @@ public final class SessionStore: @unchecked Sendable {
             }
             if let rawTextByteCount {
                 metadata.rawTextByteCount = rawTextByteCount
+            }
+            if let insertionOutcome {
+                metadata.insertionOutcome = insertionOutcome
+                metadata.insertionFailureReason = insertionFailureReason
             }
 
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)

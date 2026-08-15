@@ -38,14 +38,25 @@ final class StatusSurfaceController {
         panel.orderOut(nil)
     }
 
-    func show(state: DictationState, anchoredTo button: NSStatusBarButton?) {
-        label.stringValue = "Oigo: " + state.rawValue.capitalized
+    func show(message: String, anchoredTo button: NSStatusBarButton?) {
+        label.stringValue = "Oigo: " + message
         if let button, let window = button.window {
             let buttonFrame = window.convertToScreen(button.convert(button.bounds, to: nil))
-            let origin = NSPoint(
+            var origin = NSPoint(
                 x: buttonFrame.midX - (panel.frame.width / 2),
                 y: buttonFrame.minY - panel.frame.height - 8
             )
+            if let screen = window.screen ?? NSScreen.main {
+                let visibleFrame = screen.visibleFrame
+                origin.x = min(
+                    max(origin.x, visibleFrame.minX + 8),
+                    visibleFrame.maxX - panel.frame.width - 8
+                )
+                origin.y = min(
+                    max(origin.y, visibleFrame.minY + 8),
+                    visibleFrame.maxY - panel.frame.height - 8
+                )
+            }
             panel.setFrameOrigin(origin)
         }
         panel.orderFront(nil)

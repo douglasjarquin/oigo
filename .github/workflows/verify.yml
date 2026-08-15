@@ -31,3 +31,5 @@ jobs:
         run: swift run oigo-issue4-contract-tests
       - name: Issue five transcription contract harness
         run: swift run oigo-issue5-contract-tests
+      - name: Issue six raw insertion contract harness
+        run: swift run oigo-issue6-contract-tests
