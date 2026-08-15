@@ -50,6 +50,54 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         configuredLocale = locale
     }
 
+    @_spi(Testing)
+    public func deliverFinalAtStartupBoundaryForTesting(
+        range: TranscriptionRange,
+        text: String
+    ) async throws -> TranscriptionSnapshot {
+        guard beginStarting() else {
+            throw remember(.alreadyRunning)
+        }
+
+        let gate = TranscriptionStartupGate()
+        let resultTask = Task { [weak self, startupStream = gate.resultStream] in
+            for await _ in startupStream {
+                break
+            }
+            self?.consume(
+                range: range,
+                text: text,
+                isFinal: true,
+                persistCanonical: false
+            )
+        }
+        let published = publishStartingState(
+            module: nil,
+            analyzer: nil,
+            inputContinuation: nil,
+            audioFormat: nil,
+            session: nil,
+            store: nil,
+            updateHandler: nil,
+            resultTask: resultTask,
+            analysisTask: nil,
+            transcriptStore: TranscriptStore()
+        )
+        guard published else {
+            gate.finish()
+            resultTask.cancel()
+            _ = await resultTask.value
+            finishStarting()
+            throw remember(.cancelled)
+        }
+
+        gate.release()
+        _ = await resultTask.value
+        let snapshot = latestSnapshot
+        await releaseResources()
+        return snapshot
+    }
+
     public var configuredLocaleIdentifier: String {
         configuredLocale.identifier
     }
@@ -194,25 +242,18 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             startupResultTask = resultTask
             startupAnalysisTask = analysisTask
 
-            let published = withLock {
-                guard lifecycle == .starting, !cancellationRequested else {
-                    return false
-                }
-                lifecycle = .running
-                transcriber = module
-                self.analyzer = analyzer
-                inputContinuation = streamPair.continuation
-                self.audioFormat = audioFormat
-                self.session = session
-                sessionStore = store
-                updateHandler = onUpdate
-                transcriptStore = TranscriptStore()
-                analysisError = nil
-                lastError = nil
-                self.resultTask = resultTask
-                self.analysisTask = analysisTask
-                return true
-            }
+            let published = publishStartingState(
+                module: module,
+                analyzer: analyzer,
+                inputContinuation: streamPair.continuation,
+                audioFormat: audioFormat,
+                session: session,
+                store: store,
+                updateHandler: onUpdate,
+                resultTask: resultTask,
+                analysisTask: analysisTask,
+                transcriptStore: TranscriptStore()
+            )
             guard published else {
                 gate.finish()
                 throw TranscriptionError.cancelled
@@ -683,24 +724,38 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private func consume(_ result: DictationTranscriber.Result) {
         let start = max(0, result.range.start.seconds)
         let end = max(start, result.range.end.seconds)
-        let range = TranscriptionRange(
-            startMilliseconds: Int64(start * 1_000),
-            endMilliseconds: Int64(end * 1_000)
+        consume(
+            range: TranscriptionRange(
+                startMilliseconds: Int64(start * 1_000),
+                endMilliseconds: Int64(end * 1_000)
+            ),
+            text: String(result.text.characters),
+            isFinal: result.isFinal,
+            persistCanonical: true
         )
-        let text = String(result.text.characters)
+    }
+
+    private func consume(
+        range: TranscriptionRange,
+        text: String,
+        isFinal: Bool,
+        persistCanonical: Bool
+    ) {
         let ingested = transcriptStore.ingestAndReport(
             range: range,
             text: text,
-            isFinal: result.isFinal
+            isFinal: isFinal
         )
-        if result.isFinal {
+        if isFinal {
             guard let finalization = ingested.finalization else {
                 return
             }
-            do {
-                try applyCanonicalFinalization(finalization)
-            } catch {
-                record(error: Self.map(error))
+            if persistCanonical {
+                do {
+                    try applyCanonicalFinalization(finalization)
+                } catch {
+                    record(error: Self.map(error))
+                }
             }
             let handler = currentUpdateHandler()
             handler?(TranscriptionUpdate(
@@ -710,6 +765,39 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             ))
         } else {
             schedulePreview(text)
+        }
+    }
+
+    private func publishStartingState(
+        module: DictationTranscriber?,
+        analyzer: SpeechAnalyzer?,
+        inputContinuation: AsyncStream<AnalyzerInput>.Continuation?,
+        audioFormat: AVAudioFormat?,
+        session: DictationSession?,
+        store: SessionStore?,
+        updateHandler: (@Sendable (TranscriptionUpdate) -> Void)?,
+        resultTask: Task<Void, Never>?,
+        analysisTask: Task<Void, Never>?,
+        transcriptStore: TranscriptStore
+    ) -> Bool {
+        withLock {
+            guard lifecycle == .starting, !cancellationRequested else {
+                return false
+            }
+            lifecycle = .running
+            transcriber = module
+            self.analyzer = analyzer
+            self.inputContinuation = inputContinuation
+            self.audioFormat = audioFormat
+            self.session = session
+            sessionStore = store
+            self.updateHandler = updateHandler
+            self.transcriptStore = transcriptStore
+            analysisError = nil
+            lastError = nil
+            self.resultTask = resultTask
+            self.analysisTask = analysisTask
+            return true
         }
     }
 

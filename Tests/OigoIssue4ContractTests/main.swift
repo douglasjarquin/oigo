@@ -407,23 +407,6 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
     private(set) var streamFinished = false
 
     func start(
-        to url: URL,
-        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
-        onFinish: @escaping @Sendable () -> Void,
-        onInterruption: @escaping @Sendable (String) -> Void,
-        onFailure: @escaping @Sendable (String) -> Void
-    ) throws {
-        _ = url
-        _ = onInterruption
-        self.onBuffer = onBuffer
-        self.onFinish = onFinish
-        self.onInterruption = onInterruption
-        self.onFailure = onFailure
-        isActive = true
-        streamFinished = false
-    }
-
-    func start(
         to descriptor: AudioFileDescriptor,
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
@@ -536,26 +519,6 @@ private final class CAFTestAudioCapture: AudioCapturing, @unchecked Sendable {
     private var onBuffer: (@Sendable (AudioCaptureBuffer) -> Void)?
     private var onFinish: (@Sendable () -> Void)?
     private(set) var isActive = false
-
-    func start(
-        to url: URL,
-        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
-        onFinish: @escaping @Sendable () -> Void,
-        onInterruption: @escaping @Sendable (String) -> Void,
-        onFailure: @escaping @Sendable (String) -> Void
-    ) throws {
-        _ = onFailure
-        self.onBuffer = onBuffer
-        _ = onInterruption
-        file = try AVAudioFile(
-            forWriting: url,
-            settings: format.settings,
-            commonFormat: format.commonFormat,
-            interleaved: format.isInterleaved
-        )
-        self.onFinish = onFinish
-        isActive = true
-    }
 
     func start(
         to descriptor: AudioFileDescriptor,

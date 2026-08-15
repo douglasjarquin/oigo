@@ -271,18 +271,15 @@ private struct OigoIssue5ContractTests {
 
     @MainActor
     private static func testEarlyFinalPublication() async throws {
-        let immediateResult = Task {
-            var accumulator = TranscriptionAccumulator()
-            return accumulator.ingest(
-                range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
-                text: "published before analysis work",
-                isFinal: true
-            )
-        }
-        let snapshot = await immediateResult.value
+        let service = TranscriptionService()
+        let snapshot = try await service.deliverFinalAtStartupBoundaryForTesting(
+            range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
+            text: "published before analysis work"
+        )
         guard snapshot.finalizedText == "published before analysis work",
               snapshot.volatileText.isEmpty,
-              snapshot.displayedText == snapshot.finalizedText else {
+              snapshot.displayedText == snapshot.finalizedText,
+              service.latestSnapshot == snapshot else {
             throw ContractFailure(message: "an immediate final result was not retained after startup publication")
         }
     }
@@ -1279,25 +1276,8 @@ private final class BlockingRetryTranscriptionController: TranscriptionControlle
 private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
     private var onBuffer: (@Sendable (AudioCaptureBuffer) -> Void)?
     private var onFinish: (@Sendable () -> Void)?
-    private var outputURL: URL?
     private var outputDescriptor: AudioFileDescriptor?
     private(set) var isActive = false
-
-    func start(
-        to url: URL,
-        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
-        onFinish: @escaping @Sendable () -> Void,
-        onInterruption: @escaping @Sendable (String) -> Void,
-        onFailure: @escaping @Sendable (String) -> Void
-    ) throws {
-        _ = onInterruption
-        _ = onFailure
-        outputURL = url
-        try Data().write(to: url, options: [.atomic])
-        self.onBuffer = onBuffer
-        self.onFinish = onFinish
-        isActive = true
-    }
 
     func start(
         to descriptor: AudioFileDescriptor,
@@ -1318,7 +1298,6 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
         isActive = false
         outputDescriptor?.close()
         outputDescriptor = nil
-        outputURL = nil
         onFinish?()
         onBuffer = nil
         onFinish = nil
@@ -1328,19 +1307,17 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
         isActive = false
         outputDescriptor?.close()
         outputDescriptor = nil
-        outputURL = nil
         onBuffer = nil
         onFinish = nil
     }
 
     func sendBuffer() {
-        if let outputDescriptor {
-            var bytes = [UInt8](repeating: 0, count: 2)
-            _ = bytes.withUnsafeMutableBytes { buffer in
-                Darwin.write(outputDescriptor.rawValue, buffer.baseAddress, buffer.count)
-            }
-        } else {
-            try? Data([0, 0]).write(to: outputURL ?? FileManager.default.temporaryDirectory.appendingPathComponent("unused"), options: [.atomic])
+        guard let outputDescriptor else {
+            return
+        }
+        var bytes = [UInt8](repeating: 0, count: 2)
+        _ = bytes.withUnsafeMutableBytes { buffer in
+            Darwin.write(outputDescriptor.rawValue, buffer.baseAddress, buffer.count)
         }
         onBuffer?(
             AudioCaptureBuffer(
