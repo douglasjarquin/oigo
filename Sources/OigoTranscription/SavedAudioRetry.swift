@@ -7,16 +7,16 @@ import OigoCore
 final class SecuredAudioFile: @unchecked Sendable {
     let file: AVAudioFile
     let byteCount: Int64
-    private let fileDescriptor: Int32
+    private let fileDescriptor: AudioFileDescriptor
 
-    init(file: AVAudioFile, byteCount: Int64, fileDescriptor: Int32) {
+    init(file: AVAudioFile, byteCount: Int64, fileDescriptor: AudioFileDescriptor) {
         self.file = file
         self.byteCount = byteCount
         self.fileDescriptor = fileDescriptor
     }
 
     deinit {
-        _ = Darwin.close(fileDescriptor)
+        fileDescriptor.close()
     }
 }
 
@@ -74,7 +74,7 @@ public enum SavedAudioRetry {
         liveFailure: Error
     ) throws -> SecuredAudioFile {
         let url = try audioURL(for: session, liveFailure: liveFailure)
-        let fileDescriptor: Int32
+        let fileDescriptor: AudioFileDescriptor
         do {
             fileDescriptor = try store.openAudioFileDescriptor(for: session)
         } catch {
@@ -85,16 +85,16 @@ public enum SavedAudioRetry {
         }
 
         var fileInfo = stat()
-        guard Darwin.fstat(fileDescriptor, &fileInfo) == 0,
+        guard Darwin.fstat(fileDescriptor.rawValue, &fileInfo) == 0,
               (fileInfo.st_mode & S_IFMT) == S_IFREG else {
-            _ = Darwin.close(fileDescriptor)
+            fileDescriptor.close()
             throw TranscriptionError.malformedAudio(
                 url,
                 "the saved CAF file is not a regular file"
             )
         }
         do {
-            let descriptorURL = URL(fileURLWithPath: "/dev/fd/\(fileDescriptor)")
+            let descriptorURL = URL(fileURLWithPath: "/dev/fd/\(fileDescriptor.rawValue)")
             let file = try AVAudioFile(forReading: descriptorURL)
             return SecuredAudioFile(
                 file: file,
@@ -102,11 +102,12 @@ public enum SavedAudioRetry {
                 fileDescriptor: fileDescriptor
             )
         } catch {
-            _ = Darwin.close(fileDescriptor)
+            fileDescriptor.close()
             throw TranscriptionError.malformedAudio(url, String(describing: error))
         }
     }
 
+    @_spi(Testing)
     public static func retry<T>(
         session: DictationSession,
         liveFailure: Error,

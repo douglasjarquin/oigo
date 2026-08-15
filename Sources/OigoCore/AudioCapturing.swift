@@ -1,4 +1,31 @@
 import Foundation
+import Darwin
+
+public final class AudioFileDescriptor: @unchecked Sendable {
+    public let rawValue: Int32
+
+    private let lock = NSLock()
+    private var closed = false
+
+    init(rawValue: Int32) {
+        self.rawValue = rawValue
+    }
+
+    public func close() {
+        lock.lock()
+        guard !closed else {
+            lock.unlock()
+            return
+        }
+        closed = true
+        lock.unlock()
+        _ = Darwin.close(rawValue)
+    }
+
+    deinit {
+        close()
+    }
+}
 
 public struct AudioCaptureFormat: Equatable, Sendable {
     public let sampleRate: Double
@@ -42,7 +69,36 @@ public protocol AudioCapturing: AnyObject {
         onFailure: @escaping @Sendable (String) -> Void
     ) throws
 
+    func start(
+        to descriptor: AudioFileDescriptor,
+        url: URL,
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
+        onFinish: @escaping @Sendable () -> Void,
+        onInterruption: @escaping @Sendable (String) -> Void,
+        onFailure: @escaping @Sendable (String) -> Void
+    ) throws
+
     func stop() throws
 
     func cancel()
+}
+
+public extension AudioCapturing {
+    func start(
+        to descriptor: AudioFileDescriptor,
+        url: URL,
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
+        onFinish: @escaping @Sendable () -> Void,
+        onInterruption: @escaping @Sendable (String) -> Void,
+        onFailure: @escaping @Sendable (String) -> Void
+    ) throws {
+        defer { descriptor.close() }
+        try start(
+            to: url,
+            onBuffer: onBuffer,
+            onFinish: onFinish,
+            onInterruption: onInterruption,
+            onFailure: onFailure
+        )
+    }
 }

@@ -303,14 +303,20 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     }
 
     public func cancel() async throws -> TranscriptionResult? {
-        if withLock({
-            if lifecycle == .starting {
-                cancellationRequested = true
-                return true
+        let startingResources: (SpeechAnalyzer?, Task<Void, Never>?)? = withLock {
+            guard lifecycle == .starting else {
+                return nil
             }
-            return false
-        }) {
+            cancellationRequested = true
+            return (analyzer, resultTask)
+        }
+        if let startingResources {
+            startingResources.1?.cancel()
+            if let analyzer = startingResources.0 {
+                await analyzer.cancelAndFinishNow()
+            }
             await waitForStartToFinish()
+            return nil
         }
         guard let resources = takeResources() else {
             return nil
@@ -376,12 +382,20 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             throw remember(.malformedAudio(url, String(describing: error)))
         }
         let audioFile = securedAudioFile.file
+        let staging: RawTextStaging
         do {
-            _ = try store.persistRawText("", for: session)
+            staging = try store.beginRawTextStaging(for: session)
         } catch {
             await SpeechModels.endRetention()
             throw remember(.persistenceFailed(String(describing: error)))
         }
+        var stagingCommitted = false
+        defer {
+            if !stagingCommitted {
+                try? store.discardRawTextStaging(staging, for: session)
+            }
+        }
+        defer { clearRetryResources() }
 
         var createdAnalyzer: SpeechAnalyzer?
         do {
@@ -407,23 +421,40 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         }
 
         let transcriptStore = TranscriptStore()
-        let resultTask = Task {
+        let resultTask = Task { [weak self, module, transcriptStore] in
             do {
                 for try await result in module.results {
                     try Task.checkCancellation()
                     let ingested = transcriptStore.ingestAndReport(result)
                     if let finalText = ingested.acceptedFinalText {
-                        try appendCanonicalFinal(
-                            finalText,
-                            for: session,
-                            store: store
-                        )
+                        try Self.appendStagedFinal(finalText, staging: staging, for: session, store: store)
                     }
                 }
             } catch is CancellationError {
             } catch {
-                throw Self.map(error)
+                self?.record(error: Self.map(error))
             }
+        }
+
+        let published = withLock {
+            guard lifecycle == .starting else {
+                return false
+            }
+            transcriber = module
+            self.analyzer = analyzer
+            self.resultTask = resultTask
+            self.session = session
+            sessionStore = store
+            self.transcriptStore = transcriptStore
+            analysisError = nil
+            return !cancellationRequested
+        }
+        guard published else {
+            resultTask.cancel()
+            await analyzer.cancelAndFinishNow()
+            _ = await resultTask.value
+            await SpeechModels.endRetention()
+            throw remember(.cancelled)
         }
 
         do {
@@ -432,34 +463,40 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             try checkCancellationRequested()
             try await analyzer.finalizeAndFinishThroughEndOfInput()
             try checkCancellationRequested()
-            _ = try await resultTask.value
+            _ = await resultTask.value
+            if let analysisError = currentAnalysisError() {
+                throw analysisError
+            }
             try checkCancellationRequested()
         } catch is CancellationError {
             resultTask.cancel()
             await analyzer.cancelAndFinishNow()
-            _ = try? await resultTask.value
+            _ = await resultTask.value
             await SpeechModels.endRetention()
             throw remember(.cancelled)
         } catch {
             resultTask.cancel()
             await analyzer.cancelAndFinishNow()
-            _ = try? await resultTask.value
+            _ = await resultTask.value
             await SpeechModels.endRetention()
             throw remember(Self.map(error))
         }
 
         do {
-            let persisted = try persistCanonicalRawText(for: session, store: store)
+            let persistedSession = try store.commitRawTextStaging(staging, for: session)
+            stagingCommitted = true
+            let rawText = try store.readRawText(for: persistedSession)
+            let rawTextByteCount = Int64(Data(rawText.utf8).count)
             _ = try store.update(
-                session,
+                persistedSession,
                 state: .completed,
                 audioByteCount: securedAudioFile.byteCount,
-                rawTextByteCount: persisted.rawTextByteCount
+                rawTextByteCount: rawTextByteCount
             )
             await SpeechModels.endRetention()
             return TranscriptionResult(
-                finalizedText: persisted.text,
-                rawTextByteCount: persisted.rawTextByteCount
+                finalizedText: rawText,
+                rawTextByteCount: rawTextByteCount
             )
         } catch {
             await SpeechModels.endRetention()
@@ -621,6 +658,17 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         await SpeechModels.endRetention()
     }
 
+    private func clearRetryResources() {
+        withLock {
+            transcriber = nil
+            analyzer = nil
+            resultTask = nil
+            session = nil
+            sessionStore = nil
+            analysisError = nil
+        }
+    }
+
     private func finishPreviewTask() async {
         let previewTask = withLock {
             let task = self.previewTask
@@ -746,6 +794,23 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         }
         do {
             _ = try store.appendRawText(normalizedText, for: session)
+        } catch {
+            throw TranscriptionError.persistenceFailed(String(describing: error))
+        }
+    }
+
+    private static func appendStagedFinal(
+        _ text: String,
+        staging: RawTextStaging,
+        for session: DictationSession,
+        store: SessionStore
+    ) throws {
+        let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedText.isEmpty else {
+            return
+        }
+        do {
+            try store.appendRawText(normalizedText, to: staging, for: session)
         } catch {
             throw TranscriptionError.persistenceFailed(String(describing: error))
         }

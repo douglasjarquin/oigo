@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import OigoCore
 import OigoSpike
-import OigoTranscription
+@_spi(Testing) import OigoTranscription
 
 private enum CLIError: Error, CustomStringConvertible {
     case missingValue(String)

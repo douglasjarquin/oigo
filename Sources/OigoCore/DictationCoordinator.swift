@@ -241,8 +241,10 @@ public final class DictationCoordinator {
             activeCapture = capture
             sessionStore = store
             currentSession = preparedSession
+            let audioDescriptor = try store.createAudioFileDescriptor(for: preparedSession)
             try capture.start(
-                to: preparedSession.audioURL,
+                to: audioDescriptor,
+                url: preparedSession.audioURL,
                 onBuffer: onBuffer,
                 onFinish: {},
                 onInterruption: { [weak self] (reason: String) in
@@ -317,8 +319,10 @@ public final class DictationCoordinator {
             )
             _ = try apply(.prepared)
             currentSession = preparedSession
+            let audioDescriptor = try store.createAudioFileDescriptor(for: preparedSession)
             try capture.start(
-                to: preparedSession.audioURL,
+                to: audioDescriptor,
+                url: preparedSession.audioURL,
                 onBuffer: { buffer in
                     transcription.append(buffer)
                 },

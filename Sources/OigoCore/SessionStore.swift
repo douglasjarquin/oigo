@@ -99,6 +99,16 @@ public struct DictationSession: Equatable, Identifiable, Sendable {
     }
 }
 
+public struct RawTextStaging: Equatable, Sendable {
+    fileprivate let sessionID: UUID
+    fileprivate let fileName: String
+
+    fileprivate init(sessionID: UUID, fileName: String) {
+        self.sessionID = sessionID
+        self.fileName = fileName
+    }
+}
+
 public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendable {
     case missingSession(UUID)
     case invalidMetadata(URL)
@@ -123,6 +133,16 @@ public final class SessionStore: @unchecked Sendable {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let lock = NSLock()
+    private var failNextMetadataWrite = false
+
+    private struct PendingRawPersistence: Codable {
+        let metadata: SessionMetadata
+        let sourceName: String?
+        let previousRawTextByteCount: Int64
+        let targetRawTextByteCount: Int64
+    }
+
+    private static let pendingRawPersistenceName = ".raw-persistence.json"
 
     public init(rootDirectory: URL? = nil, fileManager: FileManager = .default) throws {
         self.fileManager = fileManager
@@ -141,6 +161,13 @@ public final class SessionStore: @unchecked Sendable {
             at: self.rootDirectory,
             withIntermediateDirectories: true
         )
+    }
+
+    @_spi(Testing)
+    public func failNextMetadataWriteForTesting() {
+        lock.lock()
+        failNextMetadataWrite = true
+        lock.unlock()
     }
 
     public static func defaultRootDirectory(fileManager: FileManager = .default) -> URL {
@@ -265,12 +292,46 @@ public final class SessionStore: @unchecked Sendable {
             let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
             let data = Data(rawText.utf8)
             try rejectSymlink(named: "raw.txt", in: directoryFD, at: current.rawTextURL, allowMissing: true)
-            try atomicWrite(data, named: "raw.txt", in: directoryFD, at: current.rawTextURL)
-
+            let previousRawTextByteCount = try rawTextByteCount(
+                named: "raw.txt",
+                in: directoryFD,
+                at: current.rawTextURL
+            )
             var metadata = current.metadata
             metadata.updatedAt = date
             metadata.rawTextByteCount = Int64(data.count)
+
+            let temporaryName = try prepareAtomicWrite(
+                data,
+                named: "raw.txt",
+                in: directoryFD,
+                at: current.rawTextURL
+            )
+            var pendingWritten = false
+            defer {
+                if !pendingWritten {
+                    try? removeEntry(named: temporaryName, in: directoryFD, at: current.rawTextURL)
+                }
+            }
+            try writePendingPersistence(
+                PendingRawPersistence(
+                    metadata: metadata,
+                    sourceName: temporaryName,
+                    previousRawTextByteCount: previousRawTextByteCount,
+                    targetRawTextByteCount: Int64(data.count)
+                ),
+                in: directoryFD,
+                at: current.directoryURL.appendingPathComponent(Self.pendingRawPersistenceName)
+            )
+            pendingWritten = true
+            try commitTemporary(
+                named: temporaryName,
+                as: "raw.txt",
+                in: directoryFD,
+                at: current.rawTextURL
+            )
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
+            try removePendingPersistence(in: directoryFD, at: current.directoryURL)
             return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
         }
     }
@@ -289,13 +350,37 @@ public final class SessionStore: @unchecked Sendable {
             guard !rawText.isEmpty else {
                 return current
             }
+            let existingData = try readDataIfPresent(
+                named: "raw.txt",
+                in: directoryFD,
+                at: current.rawTextURL
+            ) ?? Data()
             let rawData = Data(rawText.utf8)
             try rejectSymlink(named: "raw.txt", in: directoryFD, at: current.rawTextURL, allowMissing: true)
+            let separator = existingData.isEmpty ? Data() : Data([0x20])
+            let previousRawTextByteCount = Int64(existingData.count)
+            let targetRawTextByteCount = previousRawTextByteCount
+                + Int64(separator.count)
+                + Int64(rawData.count)
+            var metadata = current.metadata
+            metadata.updatedAt = date
+            metadata.rawTextByteCount = targetRawTextByteCount
+            try writePendingPersistence(
+                PendingRawPersistence(
+                    metadata: metadata,
+                    sourceName: nil,
+                    previousRawTextByteCount: previousRawTextByteCount,
+                    targetRawTextByteCount: targetRawTextByteCount
+                ),
+                in: directoryFD,
+                at: current.directoryURL.appendingPathComponent(Self.pendingRawPersistenceName)
+            )
             let flags = O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC | O_NOFOLLOW
             let rawFD = "raw.txt".withCString { name in
                 Darwin.openat(directoryFD, name, flags, mode_t(0o600))
             }
             guard rawFD >= 0 else {
+                try? removePendingPersistence(in: directoryFD, at: current.directoryURL)
                 throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
             }
             defer { _ = Darwin.close(rawFD) }
@@ -303,10 +388,11 @@ public final class SessionStore: @unchecked Sendable {
             var before = stat()
             guard Darwin.fstat(rawFD, &before) == 0,
                   (before.st_mode & S_IFMT) == S_IFREG else {
+                try? removePendingPersistence(in: directoryFD, at: current.directoryURL)
                 throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
             }
             if before.st_size > 0 {
-                try writeData(Data([0x20]), to: rawFD, at: current.rawTextURL)
+                try writeData(separator, to: rawFD, at: current.rawTextURL)
             }
             try writeData(rawData, to: rawFD, at: current.rawTextURL)
             guard Darwin.fsync(rawFD) == 0 else {
@@ -316,12 +402,153 @@ public final class SessionStore: @unchecked Sendable {
             guard Darwin.fstat(rawFD, &after) == 0 else {
                 throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
             }
+            guard Int64(after.st_size) == targetRawTextByteCount else {
+                throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
+            }
+            try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
+            try removePendingPersistence(in: directoryFD, at: current.directoryURL)
+            return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
+        }
+    }
+
+    public func beginRawTextStaging(for session: DictationSession) throws -> RawTextStaging {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            let staging = RawTextStaging(
+                sessionID: current.id,
+                fileName: ".raw.txt." + UUID().uuidString + ".retry"
+            )
+            let flags = O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW
+            let stagingFD = staging.fileName.withCString { name in
+                Darwin.openat(directoryFD, name, flags, mode_t(0o600))
+            }
+            guard stagingFD >= 0 else {
+                throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
+            }
+            defer { _ = Darwin.close(stagingFD) }
+            var fileInfo = stat()
+            guard Darwin.fstat(stagingFD, &fileInfo) == 0,
+                  (fileInfo.st_mode & S_IFMT) == S_IFREG else {
+                throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
+            }
+            return staging
+        }
+    }
+
+    public func appendRawText(
+        _ rawText: String,
+        to staging: RawTextStaging,
+        for session: DictationSession
+    ) throws {
+        guard !rawText.isEmpty else {
+            return
+        }
+        lock.lock()
+        defer { lock.unlock() }
+
+        try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            try validate(staging, for: current)
+            let stagingURL = current.directoryURL.appendingPathComponent(staging.fileName)
+            try rejectSymlink(named: staging.fileName, in: directoryFD, at: stagingURL, allowMissing: false)
+            let flags = O_WRONLY | O_APPEND | O_CLOEXEC | O_NOFOLLOW
+            let stagingFD = staging.fileName.withCString { name in
+                Darwin.openat(directoryFD, name, flags)
+            }
+            guard stagingFD >= 0 else {
+                throw SessionStoreError.invalidSessionDirectory(stagingURL)
+            }
+            defer { _ = Darwin.close(stagingFD) }
+            var before = stat()
+            guard Darwin.fstat(stagingFD, &before) == 0,
+                  (before.st_mode & S_IFMT) == S_IFREG else {
+                throw SessionStoreError.invalidSessionDirectory(stagingURL)
+            }
+            if before.st_size > 0 {
+                try writeData(Data([0x20]), to: stagingFD, at: stagingURL)
+            }
+            try writeData(Data(rawText.utf8), to: stagingFD, at: stagingURL)
+            guard Darwin.fsync(stagingFD) == 0 else {
+                throw SessionStoreError.invalidSessionDirectory(stagingURL)
+            }
+        }
+    }
+
+    @discardableResult
+    public func commitRawTextStaging(
+        _ staging: RawTextStaging,
+        for session: DictationSession,
+        at date: Date = Date()
+    ) throws -> DictationSession {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            try validate(staging, for: current)
+            let stagingURL = current.directoryURL.appendingPathComponent(staging.fileName)
+            let stagingFD = staging.fileName.withCString { name in
+                Darwin.openat(directoryFD, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+            }
+            guard stagingFD >= 0 else {
+                throw SessionStoreError.invalidSessionDirectory(stagingURL)
+            }
+            defer { _ = Darwin.close(stagingFD) }
+            var fileInfo = stat()
+            guard Darwin.fstat(stagingFD, &fileInfo) == 0,
+                  (fileInfo.st_mode & S_IFMT) == S_IFREG else {
+                throw SessionStoreError.invalidSessionDirectory(stagingURL)
+            }
+            try rejectSymlink(named: "raw.txt", in: directoryFD, at: current.rawTextURL, allowMissing: true)
 
             var metadata = current.metadata
             metadata.updatedAt = date
-            metadata.rawTextByteCount = Int64(after.st_size)
+            metadata.rawTextByteCount = Int64(fileInfo.st_size)
+            try writePendingPersistence(
+                PendingRawPersistence(
+                    metadata: metadata,
+                    sourceName: staging.fileName,
+                    previousRawTextByteCount: try rawTextByteCount(
+                        named: "raw.txt",
+                        in: directoryFD,
+                        at: current.rawTextURL
+                    ),
+                    targetRawTextByteCount: Int64(fileInfo.st_size)
+                ),
+                in: directoryFD,
+                at: current.directoryURL.appendingPathComponent(Self.pendingRawPersistenceName)
+            )
+            try commitTemporary(
+                named: staging.fileName,
+                as: "raw.txt",
+                in: directoryFD,
+                at: current.rawTextURL
+            )
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
+            try removePendingPersistence(in: directoryFD, at: current.directoryURL)
             return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
+        }
+    }
+
+    public func discardRawTextStaging(
+        _ staging: RawTextStaging,
+        for session: DictationSession
+    ) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            try validate(staging, for: current)
+            try removeEntry(
+                named: staging.fileName,
+                in: directoryFD,
+                at: current.directoryURL.appendingPathComponent(staging.fileName),
+                allowMissing: true
+            )
         }
     }
 
@@ -345,7 +572,31 @@ public final class SessionStore: @unchecked Sendable {
         }
     }
 
-    public func openAudioFileDescriptor(for session: DictationSession) throws -> Int32 {
+    public func createAudioFileDescriptor(for session: DictationSession) throws -> AudioFileDescriptor {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            try rejectSymlink(named: "audio.caf", in: directoryFD, at: current.audioURL, allowMissing: true)
+            let flags = O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW
+            let audioFD = "audio.caf".withCString { name in
+                Darwin.openat(directoryFD, name, flags, mode_t(0o600))
+            }
+            guard audioFD >= 0 else {
+                throw SessionStoreError.invalidSessionDirectory(current.audioURL)
+            }
+            var fileInfo = stat()
+            guard Darwin.fstat(audioFD, &fileInfo) == 0,
+                  (fileInfo.st_mode & S_IFMT) == S_IFREG else {
+                _ = Darwin.close(audioFD)
+                throw SessionStoreError.invalidSessionDirectory(current.audioURL)
+            }
+            return AudioFileDescriptor(rawValue: audioFD)
+        }
+    }
+
+    public func openAudioFileDescriptor(for session: DictationSession) throws -> AudioFileDescriptor {
         lock.lock()
         defer { lock.unlock() }
 
@@ -364,7 +615,7 @@ public final class SessionStore: @unchecked Sendable {
                 _ = Darwin.close(audioFD)
                 throw SessionStoreError.invalidSessionDirectory(current.audioURL)
             }
-            return audioFD
+            return AudioFileDescriptor(rawValue: audioFD)
         }
     }
 
@@ -428,6 +679,7 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     private func readSession(at directoryURL: URL, directoryFD: Int32) throws -> DictationSession {
+        try recoverPendingPersistence(at: directoryURL, directoryFD: directoryFD)
         let metadataURL = directoryURL.appendingPathComponent("session.json")
         do {
             let data = try readData(named: "session.json", in: directoryFD, at: metadataURL)
@@ -453,9 +705,124 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     private func writeMetadata(_ metadata: SessionMetadata, at url: URL, directoryFD: Int32) throws {
+        if consumeMetadataWriteFailure() {
+            throw SessionStoreError.invalidMetadata(url)
+        }
         let data = try encoder.encode(metadata)
         try rejectSymlink(named: url.lastPathComponent, in: directoryFD, at: url, allowMissing: true)
         try atomicWrite(data, named: url.lastPathComponent, in: directoryFD, at: url)
+    }
+
+    private func consumeMetadataWriteFailure() -> Bool {
+        guard failNextMetadataWrite else {
+            return false
+        }
+        failNextMetadataWrite = false
+        return true
+    }
+
+    private func validate(_ staging: RawTextStaging, for session: DictationSession) throws {
+        guard staging.sessionID == session.id,
+              staging.fileName.hasPrefix(".raw.txt."),
+              staging.fileName.hasSuffix(".retry"),
+              !staging.fileName.contains("/") else {
+            throw SessionStoreError.invalidSessionDirectory(session.rawTextURL)
+        }
+    }
+
+    private func rawTextByteCount(
+        named name: String,
+        in directoryFD: Int32,
+        at url: URL
+    ) throws -> Int64 {
+        Int64((try readDataIfPresent(named: name, in: directoryFD, at: url) ?? Data()).count)
+    }
+
+    private func writePendingPersistence(
+        _ pending: PendingRawPersistence,
+        in directoryFD: Int32,
+        at url: URL
+    ) throws {
+        let data = try encoder.encode(pending)
+        try rejectSymlink(
+            named: Self.pendingRawPersistenceName,
+            in: directoryFD,
+            at: url,
+            allowMissing: true
+        )
+        try atomicWrite(data, named: Self.pendingRawPersistenceName, in: directoryFD, at: url)
+    }
+
+    private func removePendingPersistence(in directoryFD: Int32, at directoryURL: URL) throws {
+        try removeEntry(
+            named: Self.pendingRawPersistenceName,
+            in: directoryFD,
+            at: directoryURL.appendingPathComponent(Self.pendingRawPersistenceName),
+            allowMissing: true
+        )
+        _ = Darwin.fsync(directoryFD)
+    }
+
+    private func recoverPendingPersistence(at directoryURL: URL, directoryFD: Int32) throws {
+        let pendingURL = directoryURL.appendingPathComponent(Self.pendingRawPersistenceName)
+        guard let data = try readDataIfPresent(
+            named: Self.pendingRawPersistenceName,
+            in: directoryFD,
+            at: pendingURL
+        ) else {
+            return
+        }
+        let pending: PendingRawPersistence
+        do {
+            pending = try decoder.decode(PendingRawPersistence.self, from: data)
+        } catch {
+            throw SessionStoreError.invalidMetadata(pendingURL)
+        }
+        guard pending.metadata.directoryName == directoryURL.standardizedFileURL.lastPathComponent,
+              pending.metadata.audioFileName == "audio.caf",
+              pending.metadata.rawTextFileName == "raw.txt",
+              pending.metadata.cleanTextFileName == "clean.txt" else {
+            throw SessionStoreError.invalidMetadata(pendingURL)
+        }
+
+        if let sourceName = pending.sourceName {
+            guard sourceName.hasPrefix(".raw.txt."),
+                  sourceName.hasSuffix(".tmp") || sourceName.hasSuffix(".retry"),
+                  !sourceName.contains("/") else {
+                throw SessionStoreError.invalidMetadata(pendingURL)
+            }
+            if entryExists(named: sourceName, in: directoryFD) {
+                try removeEntry(
+                    named: sourceName,
+                    in: directoryFD,
+                    at: directoryURL.appendingPathComponent(sourceName)
+                )
+            } else {
+                try writeMetadata(
+                    pending.metadata,
+                    at: directoryURL.appendingPathComponent("session.json"),
+                    directoryFD: directoryFD
+                )
+            }
+        } else {
+            let currentByteCount = try rawTextByteCount(
+                named: "raw.txt",
+                in: directoryFD,
+                at: directoryURL.appendingPathComponent("raw.txt")
+            )
+            guard currentByteCount == pending.previousRawTextByteCount
+                    || currentByteCount == pending.targetRawTextByteCount else {
+                throw SessionStoreError.invalidMetadata(pendingURL)
+            }
+            if currentByteCount == pending.targetRawTextByteCount {
+                try writeMetadata(
+                    pending.metadata,
+                    at: directoryURL.appendingPathComponent("session.json"),
+                    directoryFD: directoryFD
+                )
+            }
+        }
+        try removePendingPersistence(in: directoryFD, at: directoryURL)
     }
 
     private func withSessionDirectory<T>(
@@ -580,12 +947,36 @@ public final class SessionStore: @unchecked Sendable {
         }
     }
 
-    private func atomicWrite(
+    private func entryExists(named name: String, in directoryFD: Int32) -> Bool {
+        var fileInfo = stat()
+        return name.withCString { entryName in
+            Darwin.fstatat(directoryFD, entryName, &fileInfo, AT_SYMLINK_NOFOLLOW) == 0
+        }
+    }
+
+    private func removeEntry(
+        named name: String,
+        in directoryFD: Int32,
+        at url: URL,
+        allowMissing: Bool = false
+    ) throws {
+        let result = name.withCString { entryName in
+            Darwin.unlinkat(directoryFD, entryName, 0)
+        }
+        guard result == 0 else {
+            guard allowMissing, errno == ENOENT else {
+                throw SessionStoreError.invalidSessionDirectory(url)
+            }
+            return
+        }
+    }
+
+    private func prepareAtomicWrite(
         _ data: Data,
         named name: String,
         in directoryFD: Int32,
         at url: URL
-    ) throws {
+    ) throws -> String {
         let temporaryName = "." + name + "." + UUID().uuidString + ".tmp"
         let flags = O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW
         let temporaryFD = temporaryName.withCString { temporaryName in
@@ -594,30 +985,51 @@ public final class SessionStore: @unchecked Sendable {
         guard temporaryFD >= 0 else {
             throw SessionStoreError.invalidSessionDirectory(url)
         }
-        var committed = false
+        var prepared = false
         defer {
             _ = Darwin.close(temporaryFD)
-            if !committed {
-                _ = temporaryName.withCString { name in
-                    Darwin.unlinkat(directoryFD, name, 0)
-                }
+            if !prepared {
+                try? removeEntry(named: temporaryName, in: directoryFD, at: url)
             }
         }
-
         try writeData(data, to: temporaryFD, at: url)
         guard Darwin.fsync(temporaryFD) == 0 else {
             throw SessionStoreError.invalidSessionDirectory(url)
         }
-        let renamed = temporaryName.withCString { sourceName in
-            name.withCString { destinationName in
+        prepared = true
+        return temporaryName
+    }
+
+    private func commitTemporary(
+        named sourceName: String,
+        as destinationName: String,
+        in directoryFD: Int32,
+        at url: URL
+    ) throws {
+        let renamed = sourceName.withCString { sourceName in
+            destinationName.withCString { destinationName in
                 Darwin.renameat(directoryFD, sourceName, directoryFD, destinationName)
             }
         }
         guard renamed == 0 else {
             throw SessionStoreError.invalidSessionDirectory(url)
         }
-        committed = true
         _ = Darwin.fsync(directoryFD)
+    }
+
+    private func atomicWrite(
+        _ data: Data,
+        named name: String,
+        in directoryFD: Int32,
+        at url: URL
+    ) throws {
+        let temporaryName = try prepareAtomicWrite(data, named: name, in: directoryFD, at: url)
+        do {
+            try commitTemporary(named: temporaryName, as: name, in: directoryFD, at: url)
+        } catch {
+            try? removeEntry(named: temporaryName, in: directoryFD, at: url)
+            throw error
+        }
     }
 
     private func writeData(_ data: Data, to fileFD: Int32, at url: URL) throws {

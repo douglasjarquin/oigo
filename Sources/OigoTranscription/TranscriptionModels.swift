@@ -133,20 +133,42 @@ public struct TranscriptionAccumulator: Sendable {
         isFinal: Bool
     ) -> TranscriptIngestResult {
         if isFinal {
-            guard !finalizedTail.contains(where: { $0.range.overlaps(range) }),
-                  range.startMilliseconds >= finalizedEndMilliseconds else {
-                return TranscriptIngestResult(snapshot: snapshot, acceptedFinalText: nil)
+            let overlapping = finalizedTail.filter { $0.range.overlaps(range) }
+            let acceptedText: String?
+            if overlapping.isEmpty {
+                guard range.startMilliseconds >= finalizedEndMilliseconds else {
+                    return TranscriptIngestResult(snapshot: snapshot, acceptedFinalText: nil)
+                }
+                acceptedText = text
+                finalizedTail.append(Segment(
+                    range: range,
+                    text: String(text.prefix(Self.maxRevisionTailCharacters))
+                ))
+            } else {
+                let existingText = join(overlapping.map(\.text))
+                let mergedRange = TranscriptionRange(
+                    startMilliseconds: min(
+                        range.startMilliseconds,
+                        overlapping.map { $0.range.startMilliseconds }.min() ?? range.startMilliseconds
+                    ),
+                    endMilliseconds: max(
+                        range.endMilliseconds,
+                        overlapping.map { $0.range.endMilliseconds }.max() ?? range.endMilliseconds
+                    )
+                )
+                acceptedText = newlyAcceptedText(existing: existingText, incoming: text)
+                finalizedTail.removeAll { $0.range.overlaps(range) }
+                finalizedTail.append(Segment(
+                    range: mergedRange,
+                    text: String(mergedText(existing: existingText, incoming: text).prefix(Self.maxRevisionTailCharacters))
+                ))
             }
-            finalizedTail.removeAll { $0.range.overlaps(range) }
             if volatile?.range.overlaps(range) == true {
                 volatile = nil
             }
-            finalizedTail.append(Segment(
-                range: range,
-                text: String(text.prefix(Self.maxRevisionTailCharacters))
-            ))
             finalizedTail.sort { $0.range < $1.range }
             compactFinalizedTailIfNeeded()
+            return TranscriptIngestResult(snapshot: snapshot, acceptedFinalText: acceptedText)
         } else {
             volatile = Segment(
                 range: range,
@@ -155,7 +177,7 @@ public struct TranscriptionAccumulator: Sendable {
         }
         return TranscriptIngestResult(
             snapshot: snapshot,
-            acceptedFinalText: isFinal ? text : nil
+            acceptedFinalText: nil
         )
     }
 
@@ -191,6 +213,64 @@ public struct TranscriptionAccumulator: Sendable {
         while finalizedTail.count > Self.maxRevisionTailSegments {
             finalizedTail.removeFirst()
         }
+    }
+
+    private func mergedText(existing: String, incoming: String) -> String {
+        let existing = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+        let incoming = incoming.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !existing.isEmpty else {
+            return incoming
+        }
+        guard !incoming.isEmpty else {
+            return existing
+        }
+        if incoming.hasPrefix(existing) || existing.hasPrefix(incoming) {
+            return incoming.count >= existing.count ? incoming : existing
+        }
+        let overlap = wordOverlap(existing: existing, incoming: incoming)
+        if overlap > 0 {
+            let incomingWords = incoming.split(whereSeparator: { $0.isWhitespace })
+            return join([existing, incomingWords.dropFirst(overlap).joined(separator: " ")])
+        }
+        return join([existing, incoming])
+    }
+
+    private func newlyAcceptedText(existing: String, incoming: String) -> String? {
+        let existing = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+        let incoming = incoming.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !incoming.isEmpty else {
+            return nil
+        }
+        guard !existing.isEmpty else {
+            return incoming
+        }
+        if incoming == existing || existing.hasPrefix(incoming) {
+            return nil
+        }
+        if incoming.hasPrefix(existing) {
+            let suffix = String(incoming.dropFirst(existing.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return suffix.isEmpty ? nil : suffix
+        }
+        let overlap = wordOverlap(existing: existing, incoming: incoming)
+        let incomingWords = incoming.split(whereSeparator: { $0.isWhitespace })
+        let suffix = incomingWords.dropFirst(overlap).joined(separator: " ")
+        return suffix.isEmpty ? nil : suffix
+    }
+
+    private func wordOverlap(existing: String, incoming: String) -> Int {
+        let existingWords = existing.split(whereSeparator: { $0.isWhitespace })
+        let incomingWords = incoming.split(whereSeparator: { $0.isWhitespace })
+        let maximum = min(existingWords.count, incomingWords.count)
+        guard maximum > 0 else {
+            return 0
+        }
+        for count in stride(from: maximum, through: 1, by: -1) {
+            if existingWords.suffix(count).elementsEqual(incomingWords.prefix(count)) {
+                return count
+            }
+        }
+        return 0
     }
 
     private func join(_ texts: [String]) -> String {

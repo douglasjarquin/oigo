@@ -1,5 +1,5 @@
 import Foundation
-import OigoCore
+@_spi(Testing) import OigoCore
 @_spi(Testing) import OigoTranscription
 
 private struct ContractFailure: Error, CustomStringConvertible {
@@ -22,10 +22,13 @@ private struct OigoIssue5ContractTests {
             ("startup shutdown handshake", testStartupShutdownHandshake),
             ("startup gate releases both tasks", testStartupGateReleasesBothTasks),
             ("early-final publication", testEarlyFinalPublication),
+            ("overlapping final merge", testOverlappingFinalMerge),
             ("terminal operation serialization", testTerminalOperationSerialization),
             ("retry shutdown tracking", testRetryShutdownTracking),
             ("failure and actionable errors", testFailureAndActionableErrors),
-            ("saved-file retry", testSavedFileRetry)
+            ("saved-file retry", testSavedFileRetry),
+            ("bounded retry staging preservation", testBoundedRetryStagingPreservation),
+            ("persistence recovery fault window", testPersistenceRecoveryFaultWindow)
         ]
 
         var failures = 0
@@ -278,6 +281,39 @@ private struct OigoIssue5ContractTests {
               snapshot.volatileText.isEmpty,
               snapshot.displayedText == snapshot.finalizedText else {
             throw ContractFailure(message: "an immediate final result was not retained after startup publication")
+        }
+    }
+
+    @MainActor
+    private static func testOverlappingFinalMerge() throws {
+        var accumulator = TranscriptionAccumulator()
+        _ = accumulator.ingest(
+            range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
+            text: "hello",
+            isFinal: true
+        )
+        let extended = accumulator.ingest(
+            range: TranscriptionRange(startMilliseconds: 50, endMilliseconds: 150),
+            text: "hello world",
+            isFinal: true
+        )
+        guard extended.finalizedText == "hello world" else {
+            throw ContractFailure(message: "overlapping final range discarded the newly covered transcript tail")
+        }
+
+        var disjointText = TranscriptionAccumulator()
+        _ = disjointText.ingest(
+            range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
+            text: "hello",
+            isFinal: true
+        )
+        let disjointExtended = disjointText.ingest(
+            range: TranscriptionRange(startMilliseconds: 50, endMilliseconds: 150),
+            text: "world",
+            isFinal: true
+        )
+        guard disjointExtended.finalizedText == "hello world" else {
+            throw ContractFailure(message: "overlapping final range duplicated or lost a non-prefix text tail")
         }
     }
 
@@ -612,6 +648,62 @@ private struct OigoIssue5ContractTests {
             }
         }
     }
+    @MainActor
+    private static func testBoundedRetryStagingPreservation() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-staging-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let created = try store.createSession()
+        let failed = try store.update(created, state: .failed, failureReason: "staging fixture")
+        _ = try store.persistRawText("original canonical", for: failed)
+
+        let discarded = try store.beginRawTextStaging(for: failed)
+        try store.appendRawText("replacement that must not publish", to: discarded, for: failed)
+        try store.discardRawTextStaging(discarded, for: failed)
+        guard try store.readRawText(for: failed) == "original canonical" else {
+            throw ContractFailure(message: "discarded retry staging replaced canonical raw.txt")
+        }
+
+        let committed = try store.beginRawTextStaging(for: failed)
+        try store.appendRawText("replacement transcript", to: committed, for: failed)
+        let completed = try store.commitRawTextStaging(committed, for: failed)
+        let rawText = try store.readRawText(for: completed)
+        guard rawText == "replacement transcript",
+              completed.metadata.rawTextByteCount == Int64(rawText.utf8.count) else {
+            throw ContractFailure(message: "committed retry staging did not atomically publish canonical raw.txt")
+        }
+    }
+
+    @MainActor
+    private static func testPersistenceRecoveryFaultWindow() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-persistence-recovery-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let session = try store.createSession()
+        store.failNextMetadataWriteForTesting()
+        do {
+            _ = try store.persistRawText("recovered canonical", for: session)
+            throw ContractFailure(message: "metadata fault injection did not fail the persistence transaction")
+        } catch let error as SessionStoreError {
+            guard case .invalidMetadata = error else {
+                throw ContractFailure(message: "metadata fault injection returned the wrong category: " + error.description)
+            }
+        }
+
+        guard try String(contentsOf: session.rawTextURL, encoding: .utf8) == "recovered canonical" else {
+            throw ContractFailure(message: "raw.txt was not canonical after the metadata fault window")
+        }
+        let recovered = try store.load(id: session.id)
+        guard recovered.metadata.rawTextByteCount == Int64("recovered canonical".utf8.count),
+              try store.readRawText(for: recovered) == "recovered canonical" else {
+            throw ContractFailure(message: "pending persistence journal did not recover metadata from committed raw.txt")
+        }
+    }
+
 }
 
 private final class UpdateCollector: @unchecked Sendable {

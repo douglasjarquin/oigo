@@ -28,6 +28,7 @@ private struct OigoIssue4ContractTests {
             ("recovery preserves audio", testRecoveryPreservesAudio),
             ("session discoverability", testSessionDiscoverability),
             ("session metadata path safety", testSessionMetadataPathSafety),
+            ("descriptor-bound live capture", testDescriptorBoundLiveCapture),
             ("lifecycle teardown", testLifecycleTeardown),
             ("capture buffer forwarding", testCaptureBufferForwarding),
             ("100 start-stop cycles", testStartStopCycles),
@@ -200,6 +201,26 @@ private struct OigoIssue4ContractTests {
             guard case .invalidSessionDirectory = error else {
                 throw ContractFailure(message: "unexpected symlink validation error: " + String(describing: error))
             }
+        }
+    }
+
+    private static func testDescriptorBoundLiveCapture() throws {
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let outside = root.deletingLastPathComponent()
+            .appendingPathComponent("oigo-issue4-recorder-outside-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try Data("outside sentinel".utf8).write(to: outside, options: [.atomic])
+
+        let capture = DescriptorAwareAudioCapture(outsideURL: outside)
+        let coordinator = DictationCoordinator()
+        let session = try coordinator.startRecording(using: capture, store: store)
+        try coordinator.stopRecording()
+        guard capture.secureStartCalled,
+              try Data(contentsOf: outside) == Data("outside sentinel".utf8),
+              (try? store.load(id: session.id).metadata.state) == .completed else {
+            throw ContractFailure(message: "live capture did not use the root-bound descriptor seam")
         }
     }
 
@@ -437,6 +458,66 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
         onFinish = nil
         onInterruption = nil
         onFailure = nil
+    }
+}
+
+private final class DescriptorAwareAudioCapture: AudioCapturing, @unchecked Sendable {
+    private let outsideURL: URL
+    private var onFinish: (@Sendable () -> Void)?
+    private(set) var secureStartCalled = false
+    private(set) var isActive = false
+
+    init(outsideURL: URL) {
+        self.outsideURL = outsideURL
+    }
+
+    func start(
+        to url: URL,
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
+        onFinish: @escaping @Sendable () -> Void,
+        onInterruption: @escaping @Sendable (String) -> Void,
+        onFailure: @escaping @Sendable (String) -> Void
+    ) throws {
+        _ = url
+        _ = onBuffer
+        _ = onFinish
+        _ = onInterruption
+        _ = onFailure
+        throw ContractFailure(message: "coordinator fell back to pathname-based live capture")
+    }
+
+    func start(
+        to descriptor: AudioFileDescriptor,
+        url: URL,
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
+        onFinish: @escaping @Sendable () -> Void,
+        onInterruption: @escaping @Sendable (String) -> Void,
+        onFailure: @escaping @Sendable (String) -> Void
+    ) throws {
+        _ = descriptor.rawValue
+        _ = onBuffer
+        _ = onInterruption
+        _ = onFailure
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.createSymbolicLink(at: url, withDestinationURL: outsideURL)
+        descriptor.close()
+        secureStartCalled = true
+        self.onFinish = onFinish
+        isActive = true
+    }
+
+    func stop() throws {
+        guard isActive else {
+            throw ContractFailure(message: "descriptor capture stopped while idle")
+        }
+        isActive = false
+        onFinish?()
+        onFinish = nil
+    }
+
+    func cancel() {
+        isActive = false
+        onFinish = nil
     }
 }
 
