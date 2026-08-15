@@ -28,6 +28,7 @@ private struct OigoIssue4ContractTests {
             ("recovery preserves audio", testRecoveryPreservesAudio),
             ("session discoverability", testSessionDiscoverability),
             ("lifecycle teardown", testLifecycleTeardown),
+            ("capture buffer forwarding", testCaptureBufferForwarding),
             ("100 start-stop cycles", testStartStopCycles),
             ("actionable capture failure", testActionableCaptureFailure),
             ("interruption recovery", testInterruptionRecovery),
@@ -163,6 +164,30 @@ private struct OigoIssue4ContractTests {
         }
     }
 
+    private static func testCaptureBufferForwarding() throws {
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let capture = FakeAudioCapture()
+        let coordinator = DictationCoordinator()
+        let receipt = BufferReceipt()
+        _ = try coordinator.startRecording(
+            using: capture,
+            store: store,
+            onBuffer: { buffer in
+                receipt.buffer = buffer
+            }
+        )
+        capture.sendBuffer(frames: 512)
+
+        guard receipt.buffer?.frameCount == 512,
+              receipt.buffer?.channelCount == 1,
+              receipt.buffer?.pcmData.isEmpty == false else {
+            throw ContractFailure(message: "capture did not forward the recorded buffer to its consumer")
+        }
+        _ = try coordinator.cancelRecording()
+    }
+
     private static func testActionableCaptureFailure() async throws {
         let root = try temporaryDirectory()
         defer { cleanup(root) }
@@ -252,7 +277,7 @@ private struct OigoIssue4ContractTests {
         do {
             try recorder.start(
                 to: output,
-                onBuffer: {},
+                onBuffer: { _ in },
                 onFinish: {},
                 onInterruption: { _ in },
                 onFailure: { _ in }
@@ -287,8 +312,12 @@ private struct OigoIssue4ContractTests {
     }
 }
 
+private final class BufferReceipt: @unchecked Sendable {
+    var buffer: AudioCaptureBuffer?
+}
+
 private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
-    private var onBuffer: (@Sendable () -> Void)?
+    private var onBuffer: (@Sendable (AudioCaptureBuffer) -> Void)?
     private var onFinish: (@Sendable () -> Void)?
     private var onInterruption: (@Sendable (String) -> Void)?
     private var onFailure: (@Sendable (String) -> Void)?
@@ -298,7 +327,7 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
 
     func start(
         to url: URL,
-        onBuffer: @escaping @Sendable () -> Void,
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
         onInterruption: @escaping @Sendable (String) -> Void,
         onFailure: @escaping @Sendable (String) -> Void
@@ -321,8 +350,15 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
         finish()
     }
 
-    func sendBuffer() {
-        onBuffer?()
+    func sendBuffer(frames: Int = 1) {
+        onBuffer?(
+            AudioCaptureBuffer(
+                frameCount: frames,
+                sampleRate: 16_000,
+                channelCount: 1,
+                pcmData: Data(repeating: 0, count: frames * 2)
+            )
+        )
     }
 
     func fail(_ message: String) {
@@ -350,18 +386,19 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
 private final class CAFTestAudioCapture: AudioCapturing, @unchecked Sendable {
     private let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
     private var file: AVAudioFile?
+    private var onBuffer: (@Sendable (AudioCaptureBuffer) -> Void)?
     private var onFinish: (@Sendable () -> Void)?
     private(set) var isActive = false
 
     func start(
         to url: URL,
-        onBuffer: @escaping @Sendable () -> Void,
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
         onInterruption: @escaping @Sendable (String) -> Void,
         onFailure: @escaping @Sendable (String) -> Void
     ) throws {
         _ = onFailure
-        _ = onBuffer
+        self.onBuffer = onBuffer
         _ = onInterruption
         file = try AVAudioFile(
             forWriting: url,
@@ -387,7 +424,19 @@ private final class CAFTestAudioCapture: AudioCapturing, @unchecked Sendable {
             return
         }
         buffer.frameLength = frames
-        try? file?.write(from: buffer)
+        do {
+            try file?.write(from: buffer)
+            onBuffer?(
+                AudioCaptureBuffer(
+                    frameCount: Int(frames),
+                    sampleRate: format.sampleRate,
+                    channelCount: Int(format.channelCount),
+                    pcmData: Data()
+                )
+            )
+        } catch {
+            return
+        }
     }
 
     private func finish() {
@@ -396,6 +445,7 @@ private final class CAFTestAudioCapture: AudioCapturing, @unchecked Sendable {
         }
         isActive = false
         file = nil
+        onBuffer = nil
         onFinish?()
         onFinish = nil
     }

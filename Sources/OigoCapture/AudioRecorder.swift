@@ -32,7 +32,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private let lock = NSLock()
     private var engine: AVAudioEngine?
     private var audioFile: AVAudioFile?
-    private var onBuffer: (@Sendable () -> Void)?
+    private var onBuffer: (@Sendable (AudioCaptureBuffer) -> Void)?
     private var onFinish: (@Sendable () -> Void)?
     private var onInterruption: (@Sendable (String) -> Void)?
     private var onFailure: (@Sendable (String) -> Void)?
@@ -58,7 +58,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
     public func start(
         to url: URL,
-        onBuffer: @escaping @Sendable () -> Void,
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
         onInterruption: @escaping @Sendable (String) -> Void,
         onFailure: @escaping @Sendable (String) -> Void
@@ -149,7 +149,8 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     }
 
     private func handle(_ buffer: AVAudioPCMBuffer) {
-        var callback: (@Sendable () -> Void)?
+        var callback: (@Sendable (AudioCaptureBuffer) -> Void)?
+        var forwardedBuffer: AudioCaptureBuffer?
         var failure: (@Sendable (String) -> Void)?
         var failureDescription: String?
 
@@ -161,6 +162,12 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         do {
             try audioFile.write(from: buffer)
             callback = onBuffer
+            forwardedBuffer = AudioCaptureBuffer(
+                frameCount: Int(buffer.frameLength),
+                sampleRate: buffer.format.sampleRate,
+                channelCount: Int(buffer.format.channelCount),
+                pcmData: Self.pcmData(from: buffer)
+            )
         } catch {
             if !failureReported {
                 failureReported = true
@@ -173,9 +180,17 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         if let failure, let failureDescription {
             cancel()
             failure(failureDescription)
-        } else {
-            callback?()
+        } else if let callback, let forwardedBuffer {
+            callback(forwardedBuffer)
         }
+    }
+
+    private static func pcmData(from buffer: AVAudioPCMBuffer) -> Data {
+        let audioBuffer = buffer.audioBufferList.pointee.mBuffers
+        guard let data = audioBuffer.mData, audioBuffer.mDataByteSize > 0 else {
+            return Data()
+        }
+        return Data(bytes: data, count: Int(audioBuffer.mDataByteSize))
     }
 
     private func beginTeardown() -> TeardownResources? {

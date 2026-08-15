@@ -200,7 +200,8 @@ public final class DictationCoordinator {
     public func startRecording(
         using capture: AudioCapturing,
         store: SessionStore,
-        now: Date = Date()
+        now: Date = Date(),
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void = { _ in }
     ) throws -> DictationSession {
         guard activeCapture == nil else {
             throw DictationCoordinatorError.workAlreadyActive
@@ -224,7 +225,7 @@ public final class DictationCoordinator {
             currentSession = preparedSession
             try capture.start(
                 to: preparedSession.audioURL,
-                onBuffer: {},
+                onBuffer: onBuffer,
                 onFinish: {},
                 onInterruption: { [weak self] (reason: String) in
                     Task { @MainActor [weak self] in
