@@ -3,11 +3,13 @@ import AVFAudio
 import Foundation
 import OigoCore
 import OigoCapture
+import OigoTranscription
 
 @MainActor
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = DictationCoordinator()
     private let recorder = AudioRecorder()
+    private let transcription = TranscriptionService()
     private let playback = AudioPlayback()
     private let shortcutRegistrar = CarbonGlobalShortcutRegistrar()
     private let statusSurface = StatusSurfaceController()
@@ -33,6 +35,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         _ = sender
         shortcutRegistrar.unregister()
         playback.stop()
+        if coordinator.hasActiveTranscription {
+            Task { @MainActor [weak self] in
+                await self?.coordinator.shutdownWithTranscription()
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+            return .terminateLater
+        }
         coordinator.shutdown()
         return .terminateNow
     }
@@ -144,12 +153,15 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 if AVAudioApplication.shared.recordPermission == .undetermined {
                     _ = await AudioRecorder.requestMicrophonePermission()
                 }
-                lastSession = try coordinator.startRecording(
+                let format = try recorder.captureFormat()
+                lastSession = try await coordinator.startRecordingWithTranscription(
                     using: recorder,
-                    store: sessionStore
+                    store: sessionStore,
+                    transcription: transcription,
+                    format: format
                 )
             case .recording:
-                lastSession = try coordinator.stopRecording()
+                lastSession = try await coordinator.stopRecordingWithTranscription()
             case .preparing, .finalizing, .cleaning, .inserting:
                 throw DictationTransitionError.illegal(
                     from: coordinator.state,

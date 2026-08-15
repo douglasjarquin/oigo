@@ -1,7 +1,9 @@
 import AVFAudio
 import Darwin
 import Foundation
+import OigoCore
 import OigoSpike
+import OigoTranscription
 
 private enum CLIError: Error, CustomStringConvertible {
     case missingValue(String)
@@ -118,6 +120,8 @@ private struct OigoSpikeCLI {
             throw CLIError.missingScenario
         }
         switch scenario {
+        case "issue5-retry":
+            try runIssue5Retry()
         case "failure-retry":
             try runFailureRetry(output: options.output)
         case "transcript-cleanup":
@@ -154,6 +158,67 @@ private struct OigoSpikeCLI {
         print("playable_frames=" + String(frames))
         print("forced_live_failure=preserved")
         print("saved_file_retry=" + retryResult)
+    }
+
+    private static func runIssue5Retry() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-cli-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let created = try store.createSession()
+        let failed = try store.update(
+            created,
+            state: .failed,
+            failureReason: "live on-device recognition failed"
+        )
+        try Data("CAF-ISSUE5-FIXTURE".utf8).write(to: failed.audioURL, options: [.atomic])
+
+        let transcript = try SavedAudioRetry.retry(
+            session: failed,
+            liveFailure: TranscriptionError.analysisFailed("live fixture failure"),
+            transcribe: { url in
+                guard url == failed.audioURL else {
+                    throw CLIError.unknownArgument("retry source was not audio.caf")
+                }
+                let rawText = "saved audio retry transcript"
+                let persisted = try store.persistRawText(rawText, for: failed)
+                _ = try store.update(
+                    persisted,
+                    state: .completed,
+                    audioByteCount: Int64(try Data(contentsOf: url).count),
+                    rawTextByteCount: Int64(rawText.utf8.count)
+                )
+                return rawText
+            }
+        )
+        let completed = try store.load(id: failed.id)
+        let rawText = try String(contentsOf: completed.rawTextURL, encoding: .utf8)
+        guard completed.metadata.state == .completed, rawText == transcript else {
+            throw CLIError.unknownArgument("saved retry did not persist completed raw transcript")
+        }
+
+        try FileManager.default.removeItem(at: completed.audioURL)
+        let interrupted = try store.update(completed, state: .interrupted, failureReason: "malformed fixture")
+        do {
+            _ = try SavedAudioRetry.audioURL(
+                for: interrupted,
+                liveFailure: TranscriptionError.analysisFailed("malformed fixture")
+            )
+            throw CLIError.unknownArgument("malformed saved audio unexpectedly passed validation")
+        } catch let error as TranscriptionError {
+            guard case .malformedAudio = error else {
+                throw error
+            }
+            print("malformed_audio_error=true")
+        }
+
+        print("saved_file_retry=true")
+        print("retry_source=audio.caf")
+        print("retry_new_capture=false")
+        print("raw_text=" + rawText)
+        print("session_state=" + completed.metadata.state.rawValue)
+        print("raw_text_byte_count=" + String(completed.metadata.rawTextByteCount ?? -1))
     }
 
     private static func runTranscriptCleanup() async throws {
@@ -259,6 +324,7 @@ private struct OigoSpikeCLI {
     }
 
     private static func printHelp() {
+        print("oigo-spike --scenario issue5-retry")
         print("oigo-spike --scenario failure-retry [--output path]")
         print("oigo-spike --scenario transcript-cleanup")
         print("oigo-spike --scenario offline [--fixture path]")
