@@ -1,0 +1,25 @@
+name: verify
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  swift-build-and-contracts:
+    name: Swift build and contract harness
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Report SwiftPM host
+        run: |
+          sw_vers
+          swift --version
+          xcode-select -p
+      - name: Swift build
+        run: swift build
+      - name: Dependency-free contract harness
+        run: swift run oigo-spike-contract-tests
