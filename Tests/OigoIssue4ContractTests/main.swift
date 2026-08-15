@@ -27,6 +27,7 @@ private struct OigoIssue4ContractTests {
             ("session store atomic metadata", testSessionStoreAtomicMetadata),
             ("recovery preserves audio", testRecoveryPreservesAudio),
             ("session discoverability", testSessionDiscoverability),
+            ("session metadata path safety", testSessionMetadataPathSafety),
             ("lifecycle teardown", testLifecycleTeardown),
             ("capture buffer forwarding", testCaptureBufferForwarding),
             ("100 start-stop cycles", testStartStopCycles),
@@ -143,6 +144,62 @@ private struct OigoIssue4ContractTests {
               saved.metadata.state == .completed,
               saved.metadata.duration == 1 else {
             throw ContractFailure(message: "stop did not finish capture resources and persist completion")
+        }
+    }
+
+    private static func testSessionMetadataPathSafety() throws {
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let session = try store.createSession(now: Date(timeIntervalSince1970: 3_500))
+        let originalData = try Data(contentsOf: session.metadataURL)
+        var metadataObject = try JSONSerialization.jsonObject(with: originalData) as! [String: Any]
+        metadataObject["audioFileName"] = "../outside.caf"
+        let mutatedData = try JSONSerialization.data(withJSONObject: metadataObject, options: [.sortedKeys])
+        try mutatedData.write(to: session.metadataURL, options: [.atomic])
+
+        do {
+            _ = try store.load(id: session.id)
+            throw ContractFailure(message: "session metadata accepted a filename outside the session directory")
+        } catch let error as SessionStoreError {
+            guard case .invalidMetadata = error else {
+                throw ContractFailure(message: "unexpected metadata validation error: " + String(describing: error))
+            }
+        }
+
+        try originalData.write(to: session.metadataURL, options: [.atomic])
+        let outsideRoot = root.deletingLastPathComponent().appendingPathComponent(
+            "oigo-issue4-outside-" + UUID().uuidString,
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: outsideRoot) }
+        let outsideSession = outsideRoot.appendingPathComponent("linked-session", isDirectory: true)
+        try FileManager.default.createDirectory(at: outsideSession, withIntermediateDirectories: true)
+        let outsideMetadata = SessionMetadata(
+            id: UUID(),
+            directoryName: "linked-session",
+            createdAt: Date(timeIntervalSince1970: 3_500),
+            updatedAt: Date(timeIntervalSince1970: 3_500),
+            state: .completed
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(outsideMetadata).write(
+            to: outsideSession.appendingPathComponent("session.json"),
+            options: [.atomic]
+        )
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("linked-session"),
+            withDestinationURL: outsideSession
+        )
+
+        do {
+            _ = try store.listSessions()
+            throw ContractFailure(message: "symlinked session directory escaped the store root")
+        } catch let error as SessionStoreError {
+            guard case .invalidSessionDirectory = error else {
+                throw ContractFailure(message: "unexpected symlink validation error: " + String(describing: error))
+            }
         }
     }
 

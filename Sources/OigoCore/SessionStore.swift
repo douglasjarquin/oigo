@@ -78,15 +78,15 @@ public struct DictationSession: Equatable, Identifiable, Sendable {
     }
 
     public var audioURL: URL {
-        directoryURL.appendingPathComponent(metadata.audioFileName)
+        directoryURL.appendingPathComponent("audio.caf")
     }
 
     public var rawTextURL: URL {
-        directoryURL.appendingPathComponent(metadata.rawTextFileName)
+        directoryURL.appendingPathComponent("raw.txt")
     }
 
     public var cleanTextURL: URL {
-        directoryURL.appendingPathComponent(metadata.cleanTextFileName)
+        directoryURL.appendingPathComponent("clean.txt")
     }
 
     public init(metadata: SessionMetadata, directoryURL: URL) {
@@ -196,7 +196,8 @@ public final class SessionStore: @unchecked Sendable {
         )
         return try urls
             .filter { url in
-                try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+                let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                return values.isDirectory == true || values.isSymbolicLink == true
             }
             .map { try readSession(at: $0) }
             .sorted { lhs, rhs in
@@ -281,7 +282,8 @@ public final class SessionStore: @unchecked Sendable {
         )
         return try urls
             .filter { url in
-                try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+                let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                return values.isDirectory == true || values.isSymbolicLink == true
             }
             .map { try readSession(at: $0) }
             .sorted { lhs, rhs in
@@ -294,8 +296,8 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     private func readSession(at directoryURL: URL) throws -> DictationSession {
-        let rootPath = rootDirectory.standardizedFileURL.path
-        let directoryPath = directoryURL.standardizedFileURL.path
+        let rootPath = rootDirectory.resolvingSymlinksInPath().standardizedFileURL.path
+        let directoryPath = directoryURL.resolvingSymlinksInPath().standardizedFileURL.path
         guard directoryPath.hasPrefix(rootPath + "/") else {
             throw SessionStoreError.invalidSessionDirectory(directoryURL)
         }
@@ -306,7 +308,10 @@ public final class SessionStore: @unchecked Sendable {
         do {
             let data = try Data(contentsOf: metadataURL)
             let metadata = try decoder.decode(SessionMetadata.self, from: data)
-            guard metadata.directoryName == directoryURL.lastPathComponent else {
+            guard metadata.directoryName == directoryURL.lastPathComponent,
+                  metadata.audioFileName == "audio.caf",
+                  metadata.rawTextFileName == "raw.txt",
+                  metadata.cleanTextFileName == "clean.txt" else {
                 throw SessionStoreError.invalidMetadata(metadataURL)
             }
             return DictationSession(metadata: metadata, directoryURL: directoryURL)
