@@ -250,7 +250,6 @@ public final class DictationCoordinator {
             )
             try capture.start(
                 to: audioDescriptor,
-                url: preparedSession.audioURL,
                 onBuffer: onBuffer,
                 onFinish: {},
                 onInterruption: { [weak self] (reason: String) in
@@ -332,7 +331,6 @@ public final class DictationCoordinator {
             )
             try capture.start(
                 to: audioDescriptor,
-                url: preparedSession.audioURL,
                 onBuffer: { buffer in
                     transcription.append(buffer)
                 },

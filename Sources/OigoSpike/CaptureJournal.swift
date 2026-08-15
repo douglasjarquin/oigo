@@ -68,21 +68,22 @@ public final class CaptureFileDescriptor: @unchecked Sendable {
 
 private enum SecureCaptureFile {
     static func create(at url: URL) throws -> CaptureFileDescriptor {
-        let directoryFD = try openParentDirectory(for: url)
+        let normalizedURL = try normalizedFileURL(for: url)
+        let directoryFD = try openParentDirectory(for: normalizedURL)
         defer { _ = Darwin.close(directoryFD) }
-        let name = url.lastPathComponent
+        let name = normalizedURL.lastPathComponent
         guard !name.isEmpty, name != ".", name != ".." else {
-            throw CaptureJournalError.invalid(url, "the capture filename is empty")
+            throw CaptureJournalError.invalid(normalizedURL, "the capture filename is empty")
         }
         let flags = O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW
         let descriptor = name.withCString { namePointer in
             Darwin.openat(directoryFD, namePointer, flags, mode_t(0o600))
         }
         guard descriptor >= 0 else {
-            throw CaptureJournalError.invalid(url, "the capture file could not be created without following a link")
+            throw CaptureJournalError.invalid(normalizedURL, "the capture file could not be created without following a link")
         }
         do {
-            try validateRegularFile(descriptor, at: url)
+            try validateRegularFile(descriptor, at: normalizedURL)
         } catch {
             _ = Darwin.close(descriptor)
             throw error
@@ -91,20 +92,21 @@ private enum SecureCaptureFile {
     }
 
     static func open(at url: URL) throws -> CaptureFileDescriptor {
-        let directoryFD = try openParentDirectory(for: url)
+        let normalizedURL = try normalizedFileURL(for: url)
+        let directoryFD = try openParentDirectory(for: normalizedURL)
         defer { _ = Darwin.close(directoryFD) }
-        let name = url.lastPathComponent
+        let name = normalizedURL.lastPathComponent
         guard !name.isEmpty, name != ".", name != ".." else {
-            throw CaptureJournalError.missing(url)
+            throw CaptureJournalError.missing(normalizedURL)
         }
         let descriptor = name.withCString { namePointer in
             Darwin.openat(directoryFD, namePointer, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
         }
         guard descriptor >= 0 else {
-            throw CaptureJournalError.missing(url)
+            throw CaptureJournalError.missing(normalizedURL)
         }
         do {
-            try validateRegularFile(descriptor, at: url)
+            try validateRegularFile(descriptor, at: normalizedURL)
         } catch {
             _ = Darwin.close(descriptor)
             throw error
@@ -113,11 +115,12 @@ private enum SecureCaptureFile {
     }
 
     static func openOrCreate(at url: URL) throws -> CaptureFileDescriptor {
-        let directoryFD = try openParentDirectory(for: url)
+        let normalizedURL = try normalizedFileURL(for: url)
+        let directoryFD = try openParentDirectory(for: normalizedURL)
         defer { _ = Darwin.close(directoryFD) }
-        let name = url.lastPathComponent
+        let name = normalizedURL.lastPathComponent
         guard !name.isEmpty, name != ".", name != ".." else {
-            throw CaptureJournalError.invalid(url, "the capture filename is empty")
+            throw CaptureJournalError.invalid(normalizedURL, "the capture filename is empty")
         }
         let descriptor = name.withCString { namePointer in
             Darwin.openat(
@@ -128,10 +131,10 @@ private enum SecureCaptureFile {
             )
         }
         guard descriptor >= 0 else {
-            throw CaptureJournalError.invalid(url, "the capture file could not be opened without following a link")
+            throw CaptureJournalError.invalid(normalizedURL, "the capture file could not be opened without following a link")
         }
         do {
-            try validateRegularFile(descriptor, at: url)
+            try validateRegularFile(descriptor, at: normalizedURL)
         } catch {
             _ = Darwin.close(descriptor)
             throw error
@@ -140,18 +143,58 @@ private enum SecureCaptureFile {
     }
 
     private static func openParentDirectory(for url: URL) throws -> Int32 {
-        let parent = url.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: parent,
-            withIntermediateDirectories: true
-        )
-        let descriptor = parent.path.withCString { path in
+        let components = url.pathComponents
+        var currentFD = "/".withCString { path in
             Darwin.open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
         }
-        guard descriptor >= 0 else {
-            throw CaptureJournalError.invalid(url, "the capture directory is not a real directory")
+        guard currentFD >= 0 else {
+            throw CaptureJournalError.invalid(url, "the filesystem root is not a real directory")
         }
-        return descriptor
+
+        for component in components.dropFirst().dropLast() {
+            var nextFD = component.withCString { name in
+                Darwin.openat(currentFD, name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+            }
+            if nextFD < 0, errno == ENOENT {
+                let mkdirResult = component.withCString { name in
+                    Darwin.mkdirat(currentFD, name, mode_t(0o700))
+                }
+                if mkdirResult != 0, errno != EEXIST {
+                    _ = Darwin.close(currentFD)
+                    throw CaptureJournalError.invalid(url, "the capture directory could not be created securely")
+                }
+                nextFD = component.withCString { name in
+                    Darwin.openat(currentFD, name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+                }
+            }
+            guard nextFD >= 0 else {
+                _ = Darwin.close(currentFD)
+                throw CaptureJournalError.invalid(url, "the capture directory is not a real directory")
+            }
+            _ = Darwin.close(currentFD)
+            currentFD = nextFD
+        }
+        return currentFD
+    }
+
+    private static func normalizedFileURL(for url: URL) throws -> URL {
+        guard url.isFileURL, url.path.hasPrefix("/"), !url.pathComponents.contains("..") else {
+            throw CaptureJournalError.invalid(url, "the capture path must be an absolute file path without traversal")
+        }
+        let standardizedPath = url.standardizedFileURL.path
+        let canonicalPath: String
+        if ["/etc", "/tmp", "/var"].contains(where: {
+            standardizedPath == $0 || standardizedPath.hasPrefix($0 + "/")
+        }) {
+            canonicalPath = "/private" + standardizedPath
+        } else {
+            canonicalPath = standardizedPath
+        }
+        let normalizedURL = URL(fileURLWithPath: canonicalPath)
+        guard normalizedURL.pathComponents.count >= 2 else {
+            throw CaptureJournalError.invalid(url, "the capture filename is empty")
+        }
+        return normalizedURL
     }
 
     private static func validateRegularFile(_ descriptor: Int32, at url: URL) throws {

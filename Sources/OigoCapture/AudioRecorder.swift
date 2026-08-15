@@ -73,25 +73,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     }
 
     public func start(
-        to url: URL,
-        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
-        onFinish: @escaping @Sendable () -> Void,
-        onInterruption: @escaping @Sendable (String) -> Void,
-        onFailure: @escaping @Sendable (String) -> Void
-    ) throws {
-        try start(
-            writingTo: url,
-            retainedDescriptor: nil,
-            onBuffer: onBuffer,
-            onFinish: onFinish,
-            onInterruption: onInterruption,
-            onFailure: onFailure
-        )
-    }
-
-    public func start(
         to descriptor: AudioFileDescriptor,
-        url: URL,
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
         onInterruption: @escaping @Sendable (String) -> Void,
@@ -105,7 +87,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         }
         try start(
             writingTo: URL(fileURLWithPath: "/dev/fd/\(descriptor.rawValue)"),
-            retainedDescriptor: descriptor,
+            descriptor: descriptor,
             onBuffer: onBuffer,
             onFinish: onFinish,
             onInterruption: onInterruption,
@@ -116,7 +98,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
     private func start(
         writingTo url: URL,
-        retainedDescriptor: AudioFileDescriptor?,
+        descriptor: AudioFileDescriptor,
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
         onInterruption: @escaping @Sendable (String) -> Void,
@@ -149,12 +131,6 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             channels: 1
         ) ?? nativeFormat
 
-        if retainedDescriptor == nil {
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-        }
         let file = try AVAudioFile(
             forWriting: url,
             settings: captureFormat.settings,
@@ -165,7 +141,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         lock.lock()
         self.engine = engine
         audioFile = file
-        audioFileDescriptor = retainedDescriptor
+        audioFileDescriptor = descriptor
         self.onBuffer = onBuffer
         self.onFinish = onFinish
         self.onInterruption = onInterruption

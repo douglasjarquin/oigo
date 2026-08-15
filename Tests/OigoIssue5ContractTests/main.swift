@@ -1301,7 +1301,6 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
 
     func start(
         to descriptor: AudioFileDescriptor,
-        url: URL,
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
         onInterruption: @escaping @Sendable (String) -> Void,
@@ -1309,7 +1308,6 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
     ) throws {
         _ = onInterruption
         _ = onFailure
-        outputURL = url
         outputDescriptor = descriptor
         self.onBuffer = onBuffer
         self.onFinish = onFinish

@@ -89,6 +89,29 @@ private struct OigoSpikeContractTests {
             throw ContractFailure(message: "CAF recorder followed a pre-created output symlink")
         }
 
+        let outsideDirectory = root.deletingLastPathComponent()
+            .appendingPathComponent("oigo-spike-outside-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outsideDirectory) }
+        let linkedParent = root.appendingPathComponent("linked-parent", isDirectory: true)
+        try FileManager.default.createSymbolicLink(
+            at: linkedParent,
+            withDestinationURL: outsideDirectory
+        )
+        var rejectedAncestorSymlink = false
+        do {
+            _ = try CAFRecorder(
+                url: linkedParent.appendingPathComponent("escaped.caf"),
+                format: format
+            )
+        } catch {
+            rejectedAncestorSymlink = true
+        }
+        guard rejectedAncestorSymlink,
+              !FileManager.default.fileExists(atPath: outsideDirectory.appendingPathComponent("escaped.caf").path) else {
+            throw ContractFailure(message: "CAF recorder traversed an ancestor symlink")
+        }
+
         let journalSymlink = root.appendingPathComponent("attacker-journal")
         try FileManager.default.createSymbolicLink(
             at: journalSymlink,

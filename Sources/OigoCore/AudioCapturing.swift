@@ -63,7 +63,6 @@ public struct AudioCaptureBuffer: Equatable, Sendable {
 public protocol AudioCapturing: AnyObject {
     func start(
         to descriptor: AudioFileDescriptor,
-        url: URL,
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
         onInterruption: @escaping @Sendable (String) -> Void,

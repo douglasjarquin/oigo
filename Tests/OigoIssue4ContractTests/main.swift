@@ -213,7 +213,7 @@ private struct OigoIssue4ContractTests {
         defer { try? FileManager.default.removeItem(at: outside) }
         try Data("outside sentinel".utf8).write(to: outside, options: [.atomic])
 
-        let capture = DescriptorAwareAudioCapture(outsideURL: outside)
+        let capture = DescriptorAwareAudioCapture(outsideURL: outside, store: store)
         let coordinator = DictationCoordinator()
         let session = try coordinator.startRecording(using: capture, store: store)
         let completed = try coordinator.stopRecording()
@@ -350,12 +350,14 @@ private struct OigoIssue4ContractTests {
     private static func testActionableHostFailure() throws {
         let root = try temporaryDirectory()
         defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let session = try store.createSession()
+        let descriptor = try store.createAudioFileDescriptor(for: session)
         let recorder = AudioRecorder()
-        let output = root.appendingPathComponent("audio.caf")
 
         do {
             try recorder.start(
-                to: output,
+                to: descriptor,
                 onBuffer: { _ in },
                 onFinish: {},
                 onInterruption: { _ in },
@@ -423,13 +425,11 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
 
     func start(
         to descriptor: AudioFileDescriptor,
-        url: URL,
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
         onInterruption: @escaping @Sendable (String) -> Void,
         onFailure: @escaping @Sendable (String) -> Void
     ) throws {
-        _ = url
         descriptor.close()
         self.onBuffer = onBuffer
         self.onFinish = onFinish
@@ -482,32 +482,18 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
 
 private final class DescriptorAwareAudioCapture: AudioCapturing, @unchecked Sendable {
     private let outsideURL: URL
+    private let store: SessionStore
     private var onFinish: (@Sendable () -> Void)?
     private(set) var secureStartCalled = false
     private(set) var isActive = false
 
-    init(outsideURL: URL) {
+    init(outsideURL: URL, store: SessionStore) {
         self.outsideURL = outsideURL
-    }
-
-    func start(
-        to url: URL,
-        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
-        onFinish: @escaping @Sendable () -> Void,
-        onInterruption: @escaping @Sendable (String) -> Void,
-        onFailure: @escaping @Sendable (String) -> Void
-    ) throws {
-        _ = url
-        _ = onBuffer
-        _ = onFinish
-        _ = onInterruption
-        _ = onFailure
-        throw ContractFailure(message: "coordinator fell back to pathname-based live capture")
+        self.store = store
     }
 
     func start(
         to descriptor: AudioFileDescriptor,
-        url: URL,
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
         onInterruption: @escaping @Sendable (String) -> Void,
@@ -517,8 +503,11 @@ private final class DescriptorAwareAudioCapture: AudioCapturing, @unchecked Send
         _ = onBuffer
         _ = onInterruption
         _ = onFailure
-        try FileManager.default.removeItem(at: url)
-        try Data(contentsOf: outsideURL).write(to: url, options: [.atomic])
+        guard let audioURL = try store.listSessions().first?.audioURL else {
+            throw ContractFailure(message: "descriptor fixture could not locate the active session audio")
+        }
+        try FileManager.default.removeItem(at: audioURL)
+        try Data(contentsOf: outsideURL).write(to: audioURL, options: [.atomic])
         descriptor.close()
         secureStartCalled = true
         self.onFinish = onFinish
@@ -570,13 +559,11 @@ private final class CAFTestAudioCapture: AudioCapturing, @unchecked Sendable {
 
     func start(
         to descriptor: AudioFileDescriptor,
-        url: URL,
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
         onInterruption: @escaping @Sendable (String) -> Void,
         onFailure: @escaping @Sendable (String) -> Void
     ) throws {
-        _ = url
         _ = onInterruption
         _ = onFailure
         self.onBuffer = onBuffer
