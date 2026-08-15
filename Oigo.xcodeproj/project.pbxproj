@@ -25,6 +25,16 @@
         A00000010000000000000010 /* AVFAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000D /* AVFAudio.framework */; };
         A00000010000000000000011 /* libOigoCapture.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000E /* libOigoCapture.a */; };
         A00000010000000000000012 /* libOigoCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000B /* libOigoCore.a */; };
+        A00000010000000000000013 /* libOigoTranscription.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000013 /* libOigoTranscription.a */; };
+        A00000010000000000000014 /* Speech.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000015 /* Speech.framework */; };
+        A00000010000000000000015 /* TranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000014 /* TranscriptionService.swift */; };
+        A00000010000000000000016 /* TranscriptionContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000016 /* TranscriptionContracts.swift */; };
+        A00000010000000000000017 /* libOigoCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000B /* libOigoCore.a */; };
+        A00000010000000000000018 /* AVFAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000D /* AVFAudio.framework */; };
+        A00000010000000000000019 /* TranscriptionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000017 /* TranscriptionModels.swift */; };
+        A0000001000000000000001A /* SavedAudioRetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000018 /* SavedAudioRetry.swift */; };
+        A0000001000000000000001B /* TranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000019 /* TranscriptStore.swift */; };
+        A0000001000000000000001C /* TranscriptionStartupGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001A /* TranscriptionStartupGate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -43,6 +53,20 @@
             remoteInfo = OigoCapture;
         };
         K00000010000000000000003 /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = F00000010000000000000001 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = E00000010000000000000002;
+            remoteInfo = OigoCore;
+        };
+        K00000010000000000000004 /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = F00000010000000000000001 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = E00000010000000000000004;
+            remoteInfo = OigoTranscription;
+        };
+        K00000010000000000000005 /* PBXContainerItemProxy */ = {
             isa = PBXContainerItemProxy;
             containerPortal = F00000010000000000000001 /* Project object */;
             proxyType = 1;
@@ -70,6 +94,14 @@
         B00000010000000000000010 /* AudioPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayback.swift; sourceTree = "<group>"; };
         B00000010000000000000011 /* AudioCapturing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCapturing.swift; sourceTree = "<group>"; };
         B00000010000000000000012 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
+        B00000010000000000000013 /* libOigoTranscription.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoTranscription.a; sourceTree = BUILT_PRODUCTS_DIR; };
+        B00000010000000000000014 /* TranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionService.swift; sourceTree = "<group>"; };
+        B00000010000000000000015 /* Speech.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Speech.framework; path = System/Library/Frameworks/Speech.framework; sourceTree = SDKROOT; };
+        B00000010000000000000016 /* TranscriptionContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionContracts.swift; sourceTree = "<group>"; };
+        B00000010000000000000017 /* TranscriptionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionModels.swift; sourceTree = "<group>"; };
+        B00000010000000000000018 /* SavedAudioRetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedAudioRetry.swift; sourceTree = "<group>"; };
+        B00000010000000000000019 /* TranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStore.swift; sourceTree = "<group>"; };
+        B0000001000000000000001A /* TranscriptionStartupGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionStartupGate.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -83,6 +115,7 @@
                 A0000001000000000000000B /* libOigoCore.a in Frameworks */,
                 A00000010000000000000010 /* AVFAudio.framework in Frameworks */,
                 A00000010000000000000011 /* libOigoCapture.a in Frameworks */,
+                A00000010000000000000013 /* libOigoTranscription.a in Frameworks */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -104,6 +137,16 @@
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
+        D00000010000000000000009 /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A00000010000000000000017 /* libOigoCore.a in Frameworks */,
+                A00000010000000000000018 /* AVFAudio.framework in Frameworks */,
+                A00000010000000000000014 /* Speech.framework in Frameworks */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -113,6 +156,7 @@
                 C00000010000000000000002 /* Oigo */,
                 C00000010000000000000003 /* OigoCore */,
                 C00000010000000000000006 /* OigoCapture */,
+                C00000010000000000000007 /* OigoTranscription */,
                 B0000001000000000000000C /* Info.plist */,
                 C00000010000000000000004 /* Frameworks */,
                 C00000010000000000000005 /* Products */,
@@ -137,6 +181,7 @@
                 B00000010000000000000006 /* DictationCoordinator.swift */,
                 B00000010000000000000011 /* AudioCapturing.swift */,
                 B00000010000000000000012 /* SessionStore.swift */,
+                B00000010000000000000016 /* TranscriptionContracts.swift */,
             );
             path = Sources/OigoCore;
             sourceTree = "<group>";
@@ -150,6 +195,18 @@
             path = Sources/OigoCapture;
             sourceTree = "<group>";
         };
+        C00000010000000000000007 /* OigoTranscription */ = {
+            isa = PBXGroup;
+            children = (
+                B00000010000000000000017 /* TranscriptionModels.swift */,
+                B00000010000000000000018 /* SavedAudioRetry.swift */,
+                B00000010000000000000019 /* TranscriptStore.swift */,
+                B0000001000000000000001A /* TranscriptionStartupGate.swift */,
+                B00000010000000000000014 /* TranscriptionService.swift */,
+            );
+            path = Sources/OigoTranscription;
+            sourceTree = "<group>";
+        };
         C00000010000000000000004 /* Frameworks */ = {
             isa = PBXGroup;
             children = (
@@ -157,6 +214,7 @@
                 B00000010000000000000008 /* AppKit.framework */,
                 B00000010000000000000009 /* Carbon.framework */,
                 B0000001000000000000000D /* AVFAudio.framework */,
+                B00000010000000000000015 /* Speech.framework */,
             );
             name = Frameworks;
             sourceTree = "<group>";
@@ -167,6 +225,7 @@
                 B0000001000000000000000A /* Oigo.app */,
                 B0000001000000000000000B /* libOigoCore.a */,
                 B0000001000000000000000E /* libOigoCapture.a */,
+                B00000010000000000000013 /* libOigoTranscription.a */,
             );
             name = Products;
             sourceTree = "<group>";
@@ -187,6 +246,7 @@
             dependencies = (
                 J00000010000000000000001 /* PBXTargetDependency */,
                 J00000010000000000000002 /* PBXTargetDependency */,
+                J00000010000000000000004 /* PBXTargetDependency */,
             );
             name = Oigo;
             productName = Oigo;
@@ -226,6 +286,23 @@
             productReference = B0000001000000000000000E /* libOigoCapture.a */;
             productType = "com.apple.product-type.library.static";
         };
+        E00000010000000000000004 /* OigoTranscription */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = M00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoTranscription" */;
+            buildPhases = (
+                D00000010000000000000008 /* Sources */,
+                D00000010000000000000009 /* Frameworks */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+                J00000010000000000000005 /* PBXTargetDependency */,
+            );
+            name = OigoTranscription;
+            productName = OigoTranscription;
+            productReference = B00000010000000000000013 /* libOigoTranscription.a */;
+            productType = "com.apple.product-type.library.static";
+        };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -242,6 +319,9 @@
                         CreatedOnToolsVersion = 16.0;
                     };
                     E00000010000000000000003 = {
+                        CreatedOnToolsVersion = 16.0;
+                    };
+                    E00000010000000000000004 = {
                         CreatedOnToolsVersion = 16.0;
                     };
                 };
@@ -262,6 +342,7 @@
                 E00000010000000000000001 /* Oigo */,
                 E00000010000000000000002 /* OigoCore */,
                 E00000010000000000000003 /* OigoCapture */,
+                E00000010000000000000004 /* OigoTranscription */,
             );
         };
 /* End PBXProject section */
@@ -299,6 +380,7 @@
                 A00000010000000000000006 /* DictationCoordinator.swift in Sources */,
                 A0000001000000000000000E /* AudioCapturing.swift in Sources */,
                 A0000001000000000000000F /* SessionStore.swift in Sources */,
+                A00000010000000000000016 /* TranscriptionContracts.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -308,6 +390,18 @@
             files = (
                 A0000001000000000000000C /* AudioRecorder.swift in Sources */,
                 A0000001000000000000000D /* AudioPlayback.swift in Sources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        D00000010000000000000008 /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A00000010000000000000019 /* TranscriptionModels.swift in Sources */,
+                A0000001000000000000001A /* SavedAudioRetry.swift in Sources */,
+                A0000001000000000000001B /* TranscriptStore.swift in Sources */,
+                A0000001000000000000001C /* TranscriptionStartupGate.swift in Sources */,
+                A00000010000000000000015 /* TranscriptionService.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -328,6 +422,16 @@
             isa = PBXTargetDependency;
             target = E00000010000000000000002 /* OigoCore */;
             targetProxy = K00000010000000000000003 /* PBXContainerItemProxy */;
+        };
+        J00000010000000000000004 /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = E00000010000000000000004 /* OigoTranscription */;
+            targetProxy = K00000010000000000000004 /* PBXContainerItemProxy */;
+        };
+        J00000010000000000000005 /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = E00000010000000000000002 /* OigoCore */;
+            targetProxy = K00000010000000000000005 /* PBXContainerItemProxy */;
         };
 /* End PBXTargetDependency section */
 
@@ -420,6 +524,28 @@
             };
             name = Release;
         };
+        M00000010000000000000001 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = arm64;
+                CODE_SIGNING_ALLOWED = NO;
+                CODE_SIGN_IDENTITY = "";
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_NAME = OigoTranscription;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Debug;
+        };
+        M00000010000000000000002 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = arm64;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_NAME = OigoTranscription;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Release;
+        };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -455,6 +581,15 @@
             buildConfigurations = (
                 L00000010000000000000001 /* Debug */,
                 L00000010000000000000002 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        M00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoTranscription" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                M00000010000000000000001 /* Debug */,
+                M00000010000000000000002 /* Release */,
             );
             defaultConfigurationIsVisible = 0;
             defaultConfigurationName = Release;

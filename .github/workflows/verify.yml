@@ -29,3 +29,5 @@ jobs:
         run: swift run oigo-issue3-contract-tests
       - name: Issue four durable capture contract harness
         run: swift run oigo-issue4-contract-tests
+      - name: Issue five transcription contract harness
+        run: swift run oigo-issue5-contract-tests

@@ -1,4 +1,45 @@
 import Foundation
+import Darwin
+
+public final class AudioFileDescriptor: @unchecked Sendable {
+    public let rawValue: Int32
+
+    private let lock = NSLock()
+    private var closed = false
+
+    init(rawValue: Int32) {
+        self.rawValue = rawValue
+    }
+
+    public func close() {
+        lock.lock()
+        guard !closed else {
+            lock.unlock()
+            return
+        }
+        closed = true
+        lock.unlock()
+        _ = Darwin.close(rawValue)
+    }
+
+    deinit {
+        close()
+    }
+}
+
+public struct AudioCaptureFormat: Equatable, Sendable {
+    public let sampleRate: Double
+    public let channelCount: Int
+
+    public init(sampleRate: Double, channelCount: Int) {
+        self.sampleRate = sampleRate
+        self.channelCount = channelCount
+    }
+
+    public var isValid: Bool {
+        sampleRate.isFinite && sampleRate > 0 && channelCount > 0
+    }
+}
 
 public struct AudioCaptureBuffer: Equatable, Sendable {
     public let frameCount: Int
@@ -21,7 +62,7 @@ public struct AudioCaptureBuffer: Equatable, Sendable {
 
 public protocol AudioCapturing: AnyObject {
     func start(
-        to url: URL,
+        to descriptor: AudioFileDescriptor,
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
         onInterruption: @escaping @Sendable (String) -> Void,

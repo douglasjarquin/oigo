@@ -28,6 +28,7 @@ private struct OigoIssue4ContractTests {
             ("recovery preserves audio", testRecoveryPreservesAudio),
             ("session discoverability", testSessionDiscoverability),
             ("session metadata path safety", testSessionMetadataPathSafety),
+            ("descriptor-bound live capture", testDescriptorBoundLiveCapture),
             ("lifecycle teardown", testLifecycleTeardown),
             ("capture buffer forwarding", testCaptureBufferForwarding),
             ("100 start-stop cycles", testStartStopCycles),
@@ -203,6 +204,27 @@ private struct OigoIssue4ContractTests {
         }
     }
 
+    private static func testDescriptorBoundLiveCapture() throws {
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let outside = root.deletingLastPathComponent()
+            .appendingPathComponent("oigo-issue4-recorder-outside-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try Data("outside sentinel".utf8).write(to: outside, options: [.atomic])
+
+        let capture = DescriptorAwareAudioCapture(outsideURL: outside, store: store)
+        let coordinator = DictationCoordinator()
+        let session = try coordinator.startRecording(using: capture, store: store)
+        let completed = try coordinator.stopRecording()
+        guard capture.secureStartCalled,
+              try Data(contentsOf: outside) == Data("outside sentinel".utf8),
+              completed.metadata.audioByteCount == 0,
+              (try? store.load(id: session.id).metadata.state) == .completed else {
+            throw ContractFailure(message: "live capture did not use the root-bound descriptor seam")
+        }
+    }
+
     private static func testStartStopCycles() throws {
         let root = try temporaryDirectory()
         defer { cleanup(root) }
@@ -328,12 +350,14 @@ private struct OigoIssue4ContractTests {
     private static func testActionableHostFailure() throws {
         let root = try temporaryDirectory()
         defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let session = try store.createSession()
+        let descriptor = try store.createAudioFileDescriptor(for: session)
         let recorder = AudioRecorder()
-        let output = root.appendingPathComponent("audio.caf")
 
         do {
             try recorder.start(
-                to: output,
+                to: descriptor,
                 onBuffer: { _ in },
                 onFinish: {},
                 onInterruption: { _ in },
@@ -383,14 +407,13 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
     private(set) var streamFinished = false
 
     func start(
-        to url: URL,
+        to descriptor: AudioFileDescriptor,
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
         onInterruption: @escaping @Sendable (String) -> Void,
         onFailure: @escaping @Sendable (String) -> Void
     ) throws {
-        _ = url
-        _ = onInterruption
+        descriptor.close()
         self.onBuffer = onBuffer
         self.onFinish = onFinish
         self.onInterruption = onInterruption
@@ -440,29 +463,85 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
     }
 }
 
-private final class CAFTestAudioCapture: AudioCapturing, @unchecked Sendable {
-    private let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
-    private var file: AVAudioFile?
-    private var onBuffer: (@Sendable (AudioCaptureBuffer) -> Void)?
+private final class DescriptorAwareAudioCapture: AudioCapturing, @unchecked Sendable {
+    private let outsideURL: URL
+    private let store: SessionStore
     private var onFinish: (@Sendable () -> Void)?
+    private(set) var secureStartCalled = false
     private(set) var isActive = false
 
+    init(outsideURL: URL, store: SessionStore) {
+        self.outsideURL = outsideURL
+        self.store = store
+    }
+
     func start(
-        to url: URL,
+        to descriptor: AudioFileDescriptor,
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
         onFinish: @escaping @Sendable () -> Void,
         onInterruption: @escaping @Sendable (String) -> Void,
         onFailure: @escaping @Sendable (String) -> Void
     ) throws {
+        _ = descriptor.rawValue
+        _ = onBuffer
+        _ = onInterruption
+        _ = onFailure
+        guard let audioURL = try store.listSessions().first?.audioURL else {
+            throw ContractFailure(message: "descriptor fixture could not locate the active session audio")
+        }
+        try FileManager.default.removeItem(at: audioURL)
+        try Data(contentsOf: outsideURL).write(to: audioURL, options: [.atomic])
+        descriptor.close()
+        secureStartCalled = true
+        self.onFinish = onFinish
+        isActive = true
+    }
+
+    func stop() throws {
+        guard isActive else {
+            throw ContractFailure(message: "descriptor capture stopped while idle")
+        }
+        isActive = false
+        onFinish?()
+        onFinish = nil
+    }
+
+    func cancel() {
+        isActive = false
+        onFinish = nil
+    }
+}
+
+private final class CAFTestAudioCapture: AudioCapturing, @unchecked Sendable {
+    private let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
+    private var file: AVAudioFile?
+    private var descriptor: AudioFileDescriptor?
+    private var onBuffer: (@Sendable (AudioCaptureBuffer) -> Void)?
+    private var onFinish: (@Sendable () -> Void)?
+    private(set) var isActive = false
+
+    func start(
+        to descriptor: AudioFileDescriptor,
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
+        onFinish: @escaping @Sendable () -> Void,
+        onInterruption: @escaping @Sendable (String) -> Void,
+        onFailure: @escaping @Sendable (String) -> Void
+    ) throws {
+        _ = onInterruption
         _ = onFailure
         self.onBuffer = onBuffer
-        _ = onInterruption
-        file = try AVAudioFile(
-            forWriting: url,
-            settings: format.settings,
-            commonFormat: format.commonFormat,
-            interleaved: format.isInterleaved
-        )
+        do {
+            file = try AVAudioFile(
+                forWriting: URL(fileURLWithPath: "/dev/fd/\(descriptor.rawValue)"),
+                settings: format.settings,
+                commonFormat: format.commonFormat,
+                interleaved: format.isInterleaved
+            )
+        } catch {
+            descriptor.close()
+            throw error
+        }
+        self.descriptor = descriptor
         self.onFinish = onFinish
         isActive = true
     }
@@ -502,6 +581,8 @@ private final class CAFTestAudioCapture: AudioCapturing, @unchecked Sendable {
         }
         isActive = false
         file = nil
+        descriptor?.close()
+        descriptor = nil
         onBuffer = nil
         onFinish?()
         onFinish = nil

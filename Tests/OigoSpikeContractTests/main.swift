@@ -1,7 +1,7 @@
 import AVFAudio
 import Darwin
 import Foundation
-import OigoSpike
+@_spi(Testing) import OigoSpike
 
 private struct ContractFailure: Error, CustomStringConvertible {
     let message: String
@@ -16,6 +16,7 @@ private struct OigoSpikeContractTests {
     static func main() async {
         let cases: [(String, () async throws -> Void)] = [
             ("durable capture and retry", { try testDurableCaptureAndRetry() }),
+            ("descriptor-bound recorder and retry seams", { try testDescriptorBoundSeams() }),
             ("volatile final replacement and raw cleanup fallback", { try testTranscriptAndCleanup() }),
             ("cleanup unavailable and raw fallback", testCleanupFallback),
             ("state memory bound across twenty runs", { try testResourceMeasurement() }),
@@ -48,11 +49,135 @@ private struct OigoSpikeContractTests {
         let retriedFrames = try SavedAudioRetry.retryAfterFailure(
             url: url,
             liveFailure: ForcedRecognitionFailure()
-        ) { savedURL in
-            try CAFRecorder.playableFrameLength(at: savedURL)
+        ) { savedDescriptor in
+            try CAFRecorder.playableFrameLength(descriptor: savedDescriptor)
         }
         guard frames > 0, retriedFrames == frames else {
             throw ContractFailure(message: "saved CAF was not playable after forced recognition failure")
+        }
+    }
+
+    private static func testDescriptorBoundSeams() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1_600) else {
+            throw ContractFailure(message: "could not create the recorder seam format")
+        }
+        buffer.frameLength = 1_600
+        if let samples = buffer.floatChannelData?.pointee {
+            for index in 0..<Int(buffer.frameLength) {
+                samples[index] = 0
+            }
+        }
+
+        let sentinel = Data("sentinel-before".utf8)
+        let symlinkTarget = root.appendingPathComponent("sentinel")
+        try sentinel.write(to: symlinkTarget)
+        let symlinkOutput = root.appendingPathComponent("attacker-output.caf")
+        try FileManager.default.createSymbolicLink(
+            at: symlinkOutput,
+            withDestinationURL: symlinkTarget
+        )
+        var rejectedSymlink = false
+        do {
+            _ = try CAFRecorder(url: symlinkOutput, format: format)
+        } catch {
+            rejectedSymlink = true
+        }
+        guard rejectedSymlink, try Data(contentsOf: symlinkTarget) == sentinel else {
+            throw ContractFailure(message: "CAF recorder followed a pre-created output symlink")
+        }
+
+        let outsideDirectory = root.deletingLastPathComponent()
+            .appendingPathComponent("oigo-spike-outside-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outsideDirectory) }
+        let linkedParent = root.appendingPathComponent("linked-parent", isDirectory: true)
+        try FileManager.default.createSymbolicLink(
+            at: linkedParent,
+            withDestinationURL: outsideDirectory
+        )
+        var rejectedAncestorSymlink = false
+        do {
+            _ = try CAFRecorder(
+                url: linkedParent.appendingPathComponent("escaped.caf"),
+                format: format
+            )
+        } catch {
+            rejectedAncestorSymlink = true
+        }
+        guard rejectedAncestorSymlink,
+              !FileManager.default.fileExists(atPath: outsideDirectory.appendingPathComponent("escaped.caf").path) else {
+            throw ContractFailure(message: "CAF recorder traversed an ancestor symlink")
+        }
+
+        let journalSymlink = root.appendingPathComponent("attacker-journal")
+        try FileManager.default.createSymbolicLink(
+            at: journalSymlink,
+            withDestinationURL: symlinkTarget
+        )
+        var rejectedJournalSymlink = false
+        do {
+            _ = try DurableCaptureJournal(url: journalSymlink)
+        } catch {
+            rejectedJournalSymlink = true
+        }
+        guard rejectedJournalSymlink, try Data(contentsOf: symlinkTarget) == sentinel else {
+            throw ContractFailure(message: "durable capture journal followed a pre-created symlink")
+        }
+
+        let journalURL = root.appendingPathComponent("capture.log")
+        let journalReplacement = Data("journal-replacement".utf8)
+        let journal = try DurableCaptureJournal(
+            url: journalURL,
+            beforeOpeningDescriptor: { _ in
+                try FileManager.default.removeItem(at: journalURL)
+                try journalReplacement.write(to: journalURL, options: [.atomic])
+            }
+        )
+        try journal.append(Data("journal-original".utf8))
+        try journal.finish()
+        guard try Data(contentsOf: journalURL) == journalReplacement else {
+            throw ContractFailure(message: "durable capture journal reopened a replacement pathname")
+        }
+
+        let capturedURL = root.appendingPathComponent("captured.caf")
+        let replacement = Data("replacement-after-open".utf8)
+        var retainedDescriptor: CaptureFileDescriptor?
+        let recorder = try CAFRecorder(
+            url: capturedURL,
+            format: format,
+            beforeOpeningAudioFile: { descriptor in
+                retainedDescriptor = try descriptor.duplicate()
+                try FileManager.default.removeItem(at: capturedURL)
+                try replacement.write(to: capturedURL, options: [.atomic])
+            }
+        )
+        try recorder.append(buffer)
+        try recorder.finish()
+        guard let retainedDescriptor else {
+            throw ContractFailure(message: "recorder seam did not retain the opened descriptor")
+        }
+        defer { retainedDescriptor.close() }
+        guard try Data(contentsOf: capturedURL) == replacement,
+              try CAFRecorder.playableFrameLength(descriptor: retainedDescriptor) > 0 else {
+            throw ContractFailure(message: "live CAF recorder did not stay pinned to its opened inode")
+        }
+
+        let retryURL = root.appendingPathComponent("retry.caf")
+        try createSilentCAF(at: retryURL)
+        let retryReplacement = Data("retry-replacement".utf8)
+        let retryFrames = try SavedAudioRetry.retryAfterFailure(
+            url: retryURL,
+            liveFailure: ForcedRecognitionFailure()
+        ) { descriptor in
+            try FileManager.default.removeItem(at: retryURL)
+            try retryReplacement.write(to: retryURL, options: [.atomic])
+            return try CAFRecorder.playableFrameLength(descriptor: descriptor)
+        }
+        guard retryFrames > 0, try Data(contentsOf: retryURL) == retryReplacement else {
+            throw ContractFailure(message: "saved retry reopened a replacement pathname")
         }
     }
 
