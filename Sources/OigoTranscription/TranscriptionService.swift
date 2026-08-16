@@ -82,6 +82,28 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     }
 
     @_spi(Testing)
+    public static func convertCaptureBufferForTesting(
+        _ captureBuffer: AudioCaptureBuffer,
+        to analyzerFormat: AVAudioFormat
+    ) throws -> AVAudioPCMBuffer {
+        guard let captureFormat = AVAudioFormat(
+            standardFormatWithSampleRate: captureBuffer.sampleRate,
+            channels: AVAudioChannelCount(captureBuffer.channelCount)
+        ), let converter = AVAudioConverter(
+            from: captureFormat,
+            to: analyzerFormat
+        ) else {
+            throw TranscriptionError.invalidCaptureFormat
+        }
+        converter.primeMethod = .none
+        return try TranscriptionService().makePCMBuffer(
+            captureBuffer,
+            format: analyzerFormat,
+            converter: converter
+        )
+    }
+
+    @_spi(Testing)
     public func deliverFinalAtStartupBoundaryForTesting(
         range: TranscriptionRange,
         text: String
@@ -1060,14 +1082,6 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 )
             }
             memcpy(source, baseAddress, sourceByteCount)
-        }
-        for index in 0..<captureBuffer.frameCount {
-            guard source[index].isFinite else {
-                throw TranscriptionError.malformedAudio(
-                    URL(fileURLWithPath: "<live-buffer>"),
-                    "capture buffer contains a non-finite sample"
-                )
-            }
         }
         capturePCMBuffer.frameLength = AVAudioFrameCount(captureBuffer.frameCount)
 

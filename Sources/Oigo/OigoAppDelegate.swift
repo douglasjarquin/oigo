@@ -7,6 +7,7 @@ import OigoCapture
 import OigoTranscription
 import OigoInsertion
 
+@available(macOS 26.0, *)
 @MainActor
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = DictationCoordinator()
@@ -177,11 +178,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 return [closest] + identifiers.filter { $0 != closest }
             },
-            checkSpeechAssets: { [weak self] in
+            checkSpeechAssets: { [weak self] identifier in
                 guard let self else {
                     return .unavailable("Oigo is no longer available")
                 }
-                let service = self.transcriptionService()
+                let service = self.transcriptionService(for: identifier)
                 do {
                     return try await service.installSpeechAssets()
                 } catch {
@@ -193,6 +194,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 self.settings = self.settings.with(localeIdentifier: identifier)
                 self.settingsStore.save(self.settings)
                 self.transcription = nil
+            },
+            saveStep: { [weak self] step in
+                self?.onboardingStore.save(OigoOnboardingState(step: step))
             },
             requestMicrophone: {
                 _ = await AudioRecorder.requestMicrophonePermission()
@@ -208,7 +212,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 self?.saveShortcut(candidate) ?? .invalid("Oigo is no longer available")
             },
             requestAccessibility: {
-                Self.currentAccessibilityPermissionState()
+                Self.requestAccessibilityPermission()
             },
             openAccessibilitySettings: { [weak self] in
                 self?.openSystemSettings(OigoPermissionPresentation.accessibility(.denied).settingsURL)
@@ -218,7 +222,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 self?.handleToggle(allowBeforeSetup: true)
             },
             stopTest: { [weak self] in
-                self?.handleToggle(allowBeforeSetup: true)
+                self?.stopTestDictation()
             },
             openHistory: { [weak self] in
                 self?.openHistory()
@@ -229,6 +233,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 self.onboardingWindow = nil
                 self.registerShortcut()
                 self.updateSurface()
+            },
+            onClose: { [weak self] in
+                self?.onboardingWindow = nil
             }
         )
         onboardingWindow = window
@@ -387,6 +394,30 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func stopTestDictation() {
+        let activeToggleTask = toggleTask
+        activeToggleTask?.cancel()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let activeToggleTask {
+                await activeToggleTask.value
+            }
+            guard self.coordinator.hasActiveTranscription else {
+                self.recordingStartedAt = nil
+                self.targetSnapshot = nil
+                self.statusSurface.hide()
+                self.updateSurface()
+                return
+            }
+            _ = try? await self.coordinator.cancelRecordingWithTranscription()
+            self.recordingStartedAt = nil
+            self.targetSnapshot = nil
+            self.insertionDisplayStatus = nil
+            self.statusSurface.hide()
+            self.updateSurface()
+        }
+    }
+
     private func performToggle() async {
         do {
             switch coordinator.state {
@@ -461,7 +492,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 onboardingWindow?.setTestResult(
                     transcript: rawText,
                     mode: settings.defaultMode,
-                    copied: result.outcome == .copied
+                    copied: result.outcome.clipboardOutputAvailable
                 )
                 if let fallbackReason = decision.fallbackReason {
                     historyWindow?.showMessage(
@@ -1046,10 +1077,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func transcriptionService() -> TranscriptionService {
-        let identifier = settings.localeIdentifier.isEmpty
+    private func transcriptionService(for requestedIdentifier: String? = nil) -> TranscriptionService {
+        let identifier = requestedIdentifier ?? (settings.localeIdentifier.isEmpty
             ? Locale.current.identifier
-            : settings.localeIdentifier
+            : settings.localeIdentifier)
         if let transcription,
            transcription.configuredLocaleIdentifier == identifier {
             return transcription
@@ -1220,6 +1251,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private static func currentAccessibilityPermissionState() -> OigoPermissionState {
         AXIsProcessTrusted() ? .granted : .denied
+    }
+
+    private static func requestAccessibilityPermission() -> OigoPermissionState {
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        return currentAccessibilityPermissionState()
     }
 
     private static func hudDetail(for state: OigoHUDProcessingState) -> String {

@@ -11,6 +11,7 @@ private struct ContractFailure: Error, CustomStringConvertible {
 }
 
 @main
+@available(macOS 26.0, *)
 @MainActor
 private struct OigoIssue9ContractTests {
     static func main() async {
@@ -92,6 +93,12 @@ private struct OigoIssue9ContractTests {
             throw ContractFailure(message: "onboarding completion was not persisted")
         }
         onboarding.rerun()
+        onboarding.save(OigoOnboardingState(step: .shortcut))
+        guard onboarding.load().step == .shortcut else {
+            throw ContractFailure(message: "onboarding progress did not persist before completion")
+        }
+        onboarding.markCompleted()
+        onboarding.rerun()
         guard !onboarding.load().isComplete,
               OigoSettingsStore(defaults: defaults).load().globalShortcut == before.globalShortcut else {
             throw ContractFailure(message: "rerunning onboarding erased settings")
@@ -145,6 +152,31 @@ private struct OigoIssue9ContractTests {
            analyzerFormat.commonFormat == .pcmFormatInt16,
            analyzerFormat.isInterleaved else {
             throw ContractFailure(message: "live SpeechAnalyzer input did not use the module's best compatible format")
+        }
+
+        let captureBuffer = AudioCaptureBuffer(
+            frameCount: 4_800,
+            sampleRate: 48_000,
+            channelCount: 1,
+            pcmData: Data(repeating: 0, count: 4_800 * MemoryLayout<Float>.size)
+        )
+        let converted = try TranscriptionService.convertCaptureBufferForTesting(
+            captureBuffer,
+            to: analyzerFormat
+        )
+        guard converted.frameLength > 0,
+              converted.format.commonFormat == .pcmFormatInt16,
+              converted.format.channelCount == 1,
+              converted.format.isInterleaved,
+              converted.int16ChannelData != nil else {
+            throw ContractFailure(message: "live capture conversion did not produce analyzer-compatible Int16 PCM")
+        }
+
+        guard InsertionOutcome.pasted.clipboardOutputAvailable,
+              InsertionOutcome.copied.clipboardOutputAvailable,
+              InsertionOutcome.secureRejected.clipboardOutputAvailable,
+              !InsertionOutcome.failed.clipboardOutputAvailable else {
+            throw ContractFailure(message: "clipboard output policy did not preserve copy-only outcomes")
         }
     }
 

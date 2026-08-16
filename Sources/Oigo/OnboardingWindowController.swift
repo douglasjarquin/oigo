@@ -2,12 +2,14 @@ import AppKit
 import OigoCore
 import OigoTranscription
 
+@available(macOS 26.0, *)
 @MainActor
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let support: OigoSystemSupportResult
     private let loadSupportedLanguages: () async -> [String]
-    private let checkSpeechAssets: () async -> SpeechAssetState
+    private let checkSpeechAssets: (String) async -> SpeechAssetState
     private let saveLanguage: (String) -> Void
+    private let saveStep: (OigoOnboardingStep) -> Void
     private let requestMicrophone: () async -> OigoPermissionState
     private let openMicrophoneSettings: () -> Void
     private let validateShortcut: (ToggleShortcut) -> OigoShortcutValidation
@@ -18,13 +20,16 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let stopTest: () -> Void
     private let openHistory: () -> Void
     private let onComplete: () -> Void
+    private let onClose: () -> Void
 
     private var currentStep: OigoOnboardingStep
     private var languageReady = false
     private var microphoneState: OigoPermissionState
     private var accessibilityState: OigoPermissionState
+    private var accessibilityRequestAttempted = false
     private var testComplete = false
     private var testRunning = false
+    private var completed = false
 
     private let progressLabel = NSTextField(labelWithString: "")
     private let titleLabel = NSTextField(labelWithString: "")
@@ -46,8 +51,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         microphoneState: OigoPermissionState,
         accessibilityState: OigoPermissionState,
         loadSupportedLanguages: @escaping () async -> [String],
-        checkSpeechAssets: @escaping () async -> SpeechAssetState,
+        checkSpeechAssets: @escaping (String) async -> SpeechAssetState,
         saveLanguage: @escaping (String) -> Void,
+        saveStep: @escaping (OigoOnboardingStep) -> Void,
         requestMicrophone: @escaping () async -> OigoPermissionState,
         openMicrophoneSettings: @escaping () -> Void,
         validateShortcut: @escaping (ToggleShortcut) -> OigoShortcutValidation,
@@ -57,13 +63,15 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         startTest: @escaping () -> Void,
         stopTest: @escaping () -> Void,
         openHistory: @escaping () -> Void,
-        onComplete: @escaping () -> Void
+        onComplete: @escaping () -> Void,
+        onClose: @escaping () -> Void
     ) {
         self.support = support
         self.currentStep = initialStep
         self.loadSupportedLanguages = loadSupportedLanguages
         self.checkSpeechAssets = checkSpeechAssets
         self.saveLanguage = saveLanguage
+        self.saveStep = saveStep
         self.requestMicrophone = requestMicrophone
         self.openMicrophoneSettings = openMicrophoneSettings
         self.validateShortcut = validateShortcut
@@ -74,6 +82,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.stopTest = stopTest
         self.openHistory = openHistory
         self.onComplete = onComplete
+        self.onClose = onClose
         self.microphoneState = microphoneState
         self.accessibilityState = accessibilityState
 
@@ -96,6 +105,18 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        _ = notification
+        if testRunning {
+            testRunning = false
+            stopTest()
+        }
+        if support.isSupported, !completed {
+            saveStep(currentStep)
+        }
+        onClose()
     }
 
     func showAndFocus() {
@@ -221,7 +242,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         } else if currentStep == .microphone {
             actionButton.title = microphoneState == .denied ? "Open Microphone Settings" : "Allow Microphone Access"
         } else if currentStep == .insertion {
-            actionButton.title = accessibilityState == .denied ? "Open Accessibility Settings" : "Allow Accessibility (optional)"
+            actionButton.title = accessibilityRequestAttempted && accessibilityState == .denied
+                ? "Open Accessibility Settings"
+                : "Allow Accessibility (optional)"
         } else if currentStep == .testDictation {
             actionButton.title = testRunning ? "Stop test dictation" : "Start test dictation"
         } else if currentStep == .recovery {
@@ -303,7 +326,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             actionButton.isEnabled = false
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let state = await checkSpeechAssets()
+                guard let selectedLanguage = languagePopup.selectedItem?.title else {
+                    statusLabel.stringValue = "Choose a supported speech language first."
+                    actionButton.isEnabled = true
+                    return
+                }
+                let state = await checkSpeechAssets(selectedLanguage)
                 statusLabel.stringValue = "Speech assets: " + state.description
                 languageReady = if case .ready = state { true } else { false }
                 actionButton.isEnabled = true
@@ -324,13 +352,17 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
                 }
             }
         case .insertion:
-            if accessibilityState == .denied {
+            if accessibilityRequestAttempted && accessibilityState == .denied {
                 openAccessibilitySettings()
             } else {
+                accessibilityRequestAttempted = true
                 accessibilityState = requestAccessibility()
                 statusLabel.stringValue = accessibilityState == .granted
                     ? "Automatic paste is ready."
                     : "Copy-only mode remains available. Open System Settings if you want automatic paste."
+                if accessibilityState == .denied {
+                    actionButton.title = "Open Accessibility Settings"
+                }
                 renderButtons()
             }
         case .testDictation:
@@ -339,6 +371,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             actionButton.title = testRunning ? "Stop test dictation" : "Start test dictation"
             renderButtons()
         case .recovery:
+            completed = true
             onComplete()
             window?.close()
         default:
@@ -380,12 +413,14 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         currentStep = next
+        saveStep(next)
         render()
     }
 
     @objc private func goBack() {
         guard let previous = previousStep(before: currentStep) else { return }
         currentStep = previous
+        saveStep(previous)
         render()
     }
 

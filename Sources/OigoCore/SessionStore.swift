@@ -26,6 +26,10 @@ public enum InsertionOutcome: String, Codable, CaseIterable, Equatable, Sendable
     case copied
     case secureRejected
     case failed
+
+    public var clipboardOutputAvailable: Bool {
+        self != .failed
+    }
 }
 
 public enum SessionTextSource: String, Codable, CaseIterable, Equatable, Sendable {

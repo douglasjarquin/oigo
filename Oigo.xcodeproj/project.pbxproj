@@ -549,7 +549,8 @@
         G00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                ONLY_ACTIVE_ARCH = NO;
                 SWIFT_VERSION = 6.0;
             };
             name = Debug;
@@ -557,7 +558,8 @@
         G00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                ONLY_ACTIVE_ARCH = NO;
                 SWIFT_VERSION = 6.0;
             };
             name = Release;
@@ -565,11 +567,12 @@
         H00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
+                ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
                 INFOPLIST_FILE = Oigo/Info.plist;
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                ONLY_ACTIVE_ARCH = NO;
                 PRODUCT_BUNDLE_IDENTIFIER = com.oigo.app;
                 PRODUCT_NAME = Oigo;
                 SWIFT_STRICT_CONCURRENCY = complete;
@@ -579,11 +582,12 @@
         H00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
+                ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
                 INFOPLIST_FILE = Oigo/Info.plist;
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                ONLY_ACTIVE_ARCH = NO;
                 PRODUCT_BUNDLE_IDENTIFIER = com.oigo.app;
                 PRODUCT_NAME = Oigo;
                 SWIFT_STRICT_CONCURRENCY = complete;
@@ -593,10 +597,10 @@
         I00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
+                ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoCore;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -605,8 +609,8 @@
         I00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                ARCHS = "$(ARCHS_STANDARD)";
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoCore;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -615,10 +619,10 @@
         L00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
+                ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoCapture;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -627,8 +631,8 @@
         L00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                ARCHS = "$(ARCHS_STANDARD)";
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoCapture;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -637,10 +641,10 @@
         M00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
+                ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoTranscription;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -649,8 +653,8 @@
         M00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                ARCHS = "$(ARCHS_STANDARD)";
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoTranscription;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -659,10 +663,10 @@
         N00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
+                ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoInsertion;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -671,8 +675,8 @@
         N00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                ARCHS = "$(ARCHS_STANDARD)";
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoInsertion;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };

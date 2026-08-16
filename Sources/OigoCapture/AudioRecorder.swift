@@ -29,6 +29,7 @@ public enum AudioRecorderError: Error, CustomStringConvertible, Sendable {
     }
 }
 
+@available(macOS 14.0, *)
 public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private let lock = NSLock()
     private var engine: AVAudioEngine?

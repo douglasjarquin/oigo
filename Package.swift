@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "OigoSpike",
     platforms: [
-        .macOS("26.0")
+        .macOS("13.0")
     ],
     products: [
         .library(name: "OigoCore", targets: ["OigoCore"]),
