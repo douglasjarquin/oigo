@@ -347,6 +347,11 @@ private enum TranscriptCleanupOutputGuard {
         "\\b[A-Z][a-z][A-Za-z0-9_./-]+\\b"
     ]
     private static let removableFillers: Set<String> = ["ah", "er", "hmm", "mm", "uh", "um"]
+    private static let ordinarySentenceStarters: Set<String> = [
+        "a", "an", "and", "are", "check", "clean", "copy", "deploy", "edit", "file",
+        "hello", "here", "how", "i", "let", "open", "paste", "please", "run", "say",
+        "send", "the", "this", "to", "use", "we", "what", "when", "write"
+    ]
 
     static func accepts(rawText: String, cleanedText: String) -> Bool {
         let rawTokens = semanticTokenSequence(in: rawText)
@@ -457,7 +462,9 @@ private enum TranscriptCleanupOutputGuard {
         }
         let requiresExactCase = raw.text.contains(where: { $0.isUppercase || $0.isNumber })
             || raw.text.contains("_")
-        return raw.text == cleaned.text || (!requiresExactCase && raw.allowsCaseChange)
+        let ordinarySentenceStarter = ordinarySentenceStarters.contains(raw.text.lowercased())
+        return raw.text == cleaned.text
+            || (!requiresExactCase && raw.allowsCaseChange && ordinarySentenceStarter)
     }
 
     private static func punctuationSequence(in text: String) -> [Character] {

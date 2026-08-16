@@ -203,6 +203,21 @@ private struct OigoIssue8ContractTests {
             throw ContractFailure(message: "lowercase technical token was recased")
         }
 
+        let sentenceStartTechnicalCoordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: {
+                FixedResultCleaner(result: .success("Oigo status"))
+            }
+        )
+        let sentenceStartTechnicalDecision = await sentenceStartTechnicalCoordinator.resolve(
+            mode: .clean,
+            rawText: "oigo status",
+            deadlineNanoseconds: 100_000_000
+        )
+        guard sentenceStartTechnicalDecision.insertionSource == .raw,
+              sentenceStartTechnicalDecision.fallbackReason == .unsafeOutput else {
+            throw ContractFailure(message: "sentence-start product token was recased")
+        }
+
         let meaningRawText = "send the report to Alice"
         let meaningCoordinator = TranscriptCleanupCoordinator(
             cleanerFactory: {
