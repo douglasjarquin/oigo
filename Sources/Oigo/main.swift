@@ -1,4 +1,5 @@
 import AppKit
+import OigoTranscription
 
 let application = NSApplication.shared
 let delegate = OigoAppDelegate()

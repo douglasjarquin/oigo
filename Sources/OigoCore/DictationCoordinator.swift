@@ -554,7 +554,10 @@ public final class DictationCoordinator {
     }
 
     @discardableResult
-    public func beginInsertion(using store: SessionStore) throws -> DictationSession {
+    public func beginInsertion(
+        using store: SessionStore,
+        requiresCleanup: Bool = false
+    ) throws -> DictationSession {
         guard state == .complete,
               let session = currentSession,
               session.metadata.state == .completed,
@@ -563,7 +566,20 @@ public final class DictationCoordinator {
         }
         sessionStore = store
         _ = try apply(.finalized)
+        if !requiresCleanup {
+            _ = try apply(.cleaned)
+        }
+        return session
+    }
+
+    @discardableResult
+    public func finishCleanup() throws -> DictationSession {
+        guard state == .cleaning,
+              let session = currentSession else {
+            throw DictationCoordinatorError.recordingNotActive
+        }
         _ = try apply(.cleaned)
+        diagnostics.record("transcript cleanup finished")
         return session
     }
 
@@ -571,6 +587,8 @@ public final class DictationCoordinator {
     public func finishInsertion(
         outcome: InsertionOutcome,
         reason: String? = nil,
+        insertionSource: TranscriptInsertionSource? = nil,
+        cleanupFallbackReason: String? = nil,
         at date: Date = Date()
     ) throws -> DictationSession {
         guard state == .inserting,
@@ -583,7 +601,9 @@ public final class DictationCoordinator {
             state: .completed,
             at: date,
             insertionOutcome: outcome,
-            insertionFailureReason: reason
+            insertionFailureReason: reason,
+            insertionTextSource: insertionSource,
+            cleanupFallbackReason: cleanupFallbackReason
         )
         _ = try apply(.inserted)
         currentSession = completedSession
@@ -596,7 +616,7 @@ public final class DictationCoordinator {
         reason: String,
         at date: Date = Date()
     ) -> DictationSession? {
-        guard state == .inserting,
+        guard [.cleaning, .inserting].contains(state),
               let session = currentSession,
               let sessionStore else {
             return nil
@@ -613,7 +633,11 @@ public final class DictationCoordinator {
             _ = try? apply(.fail)
             return nil
         }
-        _ = try? apply(.inserted)
+        if state == .inserting {
+            _ = try? apply(.inserted)
+        } else {
+            _ = try? apply(.fail)
+        }
         currentSession = failedSession
         lastFailureReason = reason
         diagnostics.record("transcript insertion failed: " + reason)

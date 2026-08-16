@@ -29,6 +29,20 @@ public final class InsertionService {
         store: SessionStore,
         target: InsertionTargetSnapshot
     ) -> InsertionResult {
+        insertText(
+            for: session,
+            source: .raw,
+            store: store,
+            target: target
+        )
+    }
+
+    public func insertText(
+        for session: DictationSession,
+        source: TranscriptInsertionSource,
+        store: SessionStore,
+        target: InsertionTargetSnapshot
+    ) -> InsertionResult {
         guard attemptedSessionID != session.id else {
             return InsertionResult(
                 outcome: .failed,
@@ -36,19 +50,19 @@ public final class InsertionService {
             )
         }
 
-        let rawText: String
+        let text: String
         do {
-            rawText = try store.readRawText(for: session)
+            text = try readText(source: source, for: session, store: store)
         } catch {
             return InsertionResult(
                 outcome: .failed,
-                reason: "raw transcript could not be read: " + String(describing: error)
+                reason: source.rawValue + " transcript could not be read: " + String(describing: error)
             )
         }
-        guard !rawText.isEmpty else {
+        guard !text.isEmpty else {
             return InsertionResult(
                 outcome: .failed,
-                reason: "raw transcript was empty"
+                reason: source.rawValue + " transcript was empty"
             )
         }
         do {
@@ -65,10 +79,10 @@ public final class InsertionService {
             )
         }
         attemptedSessionID = session.id
-        guard pasteboard.write(rawText) else {
+        guard pasteboard.write(text) else {
             return InsertionResult(
                 outcome: .failed,
-                reason: "raw transcript could not be written to the clipboard"
+                reason: source.rawValue + " transcript could not be written to the clipboard"
             )
         }
 
@@ -80,28 +94,55 @@ public final class InsertionService {
         store: SessionStore,
         target: InsertionTargetSnapshot
     ) -> InsertionResult {
-        let rawText: String
+        pasteAgain(
+            for: session,
+            source: .raw,
+            store: store,
+            target: target
+        )
+    }
+
+    public func pasteAgain(
+        for session: DictationSession,
+        source: TranscriptInsertionSource,
+        store: SessionStore,
+        target: InsertionTargetSnapshot
+    ) -> InsertionResult {
+        let text: String
         do {
-            rawText = try store.readRawText(for: session)
+            text = try readText(source: source, for: session, store: store)
         } catch {
             return InsertionResult(
                 outcome: .failed,
-                reason: "raw transcript could not be read: " + String(describing: error)
+                reason: source.rawValue + " transcript could not be read: " + String(describing: error)
             )
         }
-        guard !rawText.isEmpty else {
+        guard !text.isEmpty else {
             return InsertionResult(
                 outcome: .failed,
-                reason: "raw transcript was empty"
+                reason: source.rawValue + " transcript was empty"
             )
         }
-        guard pasteboard.write(rawText) else {
+        guard pasteboard.write(text) else {
             return InsertionResult(
                 outcome: .failed,
-                reason: "raw transcript could not be written to the clipboard"
+                reason: source.rawValue + " transcript could not be written to the clipboard"
             )
         }
         return performPaste(target: target)
+    }
+
+    private func readText(
+        source: TranscriptInsertionSource,
+        for session: DictationSession,
+        store: SessionStore
+    ) throws -> String {
+        switch source {
+        case .raw:
+            try store.readRawText(for: session)
+        case .clean:
+            try store.readCleanText(for: session)
+        }
     }
 
     private func performPaste(

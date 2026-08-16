@@ -54,11 +54,11 @@ Evidence: `/Users/douglasjarquin/.codex/evidence/oigo-issue-2/capabilities-final
 
 ## CI verification boundary
 
-Pull requests run `swift build` and `swift run oigo-spike-contract-tests` on a macOS 26 GitHub Actions runner through `.github/workflows/verify.yml`.
+Pull requests run SwiftPM compilation, the Oigo product build, and the spike plus issue #3 through issue #8 contract harnesses on a macOS 26 GitHub Actions runner through `.github/workflows/verify.yml`.
 
 This check intentionally uses SwiftPM and does not invoke `xcodebuild`.
 
-The CI check proves compilation and the dependency-free contract harness only.
+The CI check proves SwiftPM compilation, the Oigo product build, and the deterministic contract harnesses only.
 
 It does not remove the local Command Line Tools-only limitation described above, and it does not claim to validate live microphone/TCC behavior from an application bundle, Apple Intelligence availability, network-disabled Speech execution, or native Speech/Foundation Models resource measurements.
 
