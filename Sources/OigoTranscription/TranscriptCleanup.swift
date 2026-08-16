@@ -346,11 +346,16 @@ private enum TranscriptCleanupOutputGuard {
     static func accepts(rawText: String, cleanedText: String) -> Bool {
         let rawTokens = semanticTokenSequence(in: rawText)
         let cleanedTokens = semanticTokenSequence(in: cleanedText)
-        guard isSubsequence(cleanedTokens, of: rawTokens) else {
-            return false
-        }
-        let requiredRawTokens = rawTokens.filter { !removableFillers.contains($0) }
-        guard isSubsequence(requiredRawTokens, of: cleanedTokens) else {
+        guard !cleanedTokens.isEmpty,
+              isSubsequence(cleanedTokens, of: rawTokens),
+              isSubsequence(
+                  rawTokens.filter { !removableFillers.contains($0.lowercased()) },
+                  of: cleanedTokens
+              ),
+              isSubsequence(
+                  punctuationSequence(in: rawText),
+                  of: punctuationSequence(in: cleanedText)
+              ) else {
             return false
         }
 
@@ -369,19 +374,54 @@ private enum TranscriptCleanupOutputGuard {
     }
 
     private static func semanticTokenSequence(in text: String) -> [String] {
-        guard let expression = try? NSRegularExpression(pattern: "[A-Za-z0-9_]+") else {
-            return []
+        var tokens: [String] = []
+        var current = ""
+        for character in text {
+            if character.isLetter || character.isNumber || character == "_" {
+                current.append(character)
+            } else if !current.isEmpty {
+                tokens.append(current)
+                current = ""
+            }
         }
-        let value = text as NSString
-        return expression.matches(in: text, range: NSRange(location: 0, length: value.length)).map {
-            value.substring(with: $0.range).lowercased()
+        if !current.isEmpty {
+            tokens.append(current)
         }
+        return tokens
     }
 
     private static func isSubsequence(_ candidate: [String], of source: [String]) -> Bool {
         var sourceIndex = source.startIndex
         for token in candidate {
-            guard let matchIndex = source[sourceIndex...].firstIndex(of: token) else {
+            guard let matchIndex = source[sourceIndex...].firstIndex(where: {
+                tokenMatches(raw: $0, cleaned: token)
+            }) else {
+                return false
+            }
+            sourceIndex = source.index(after: matchIndex)
+        }
+        return true
+    }
+
+    private static func tokenMatches(raw: String, cleaned: String) -> Bool {
+        guard raw.lowercased() == cleaned.lowercased() else {
+            return false
+        }
+        let requiresExactCase = raw.contains(where: { $0.isUppercase || $0.isNumber })
+            || raw.contains("_")
+        return !requiresExactCase || raw == cleaned
+    }
+
+    private static func punctuationSequence(in text: String) -> [Character] {
+        text.filter {
+            !$0.isWhitespace && !$0.isLetter && !$0.isNumber && $0 != "_"
+        }
+    }
+
+    private static func isSubsequence(_ candidate: [Character], of source: [Character]) -> Bool {
+        var sourceIndex = source.startIndex
+        for character in candidate {
+            guard let matchIndex = source[sourceIndex...].firstIndex(of: character) else {
                 return false
             }
             sourceIndex = source.index(after: matchIndex)

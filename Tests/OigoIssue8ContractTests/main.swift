@@ -204,6 +204,36 @@ private struct OigoIssue8ContractTests {
               meaningDecision.fallbackReason == .unsafeOutput else {
             throw ContractFailure(message: "meaning-bearing deletion was accepted instead of falling back")
         }
+
+        let punctuationCoordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: {
+                FixedResultCleaner(result: .success("Let's eat grandma"))
+            }
+        )
+        let punctuationDecision = await punctuationCoordinator.resolve(
+            mode: .clean,
+            rawText: "Let's eat, grandma",
+            deadlineNanoseconds: 100_000_000
+        )
+        guard punctuationDecision.insertionSource == .raw,
+              punctuationDecision.fallbackReason == .unsafeOutput else {
+            throw ContractFailure(message: "meaning-bearing punctuation deletion was accepted")
+        }
+
+        let unicodeCoordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: {
+                FixedResultCleaner(result: .success("проверь файл cafe"))
+            }
+        )
+        let unicodeDecision = await unicodeCoordinator.resolve(
+            mode: .clean,
+            rawText: "проверь файл café",
+            deadlineNanoseconds: 100_000_000
+        )
+        guard unicodeDecision.insertionSource == .raw,
+              unicodeDecision.fallbackReason == .unsafeOutput else {
+            throw ContractFailure(message: "unsafe Unicode cleanup output was accepted")
+        }
     }
 
     private static func testLongTranscriptChunksSequentiallyAtStableBoundaries() async throws {
