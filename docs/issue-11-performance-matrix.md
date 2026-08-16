@@ -96,7 +96,7 @@ It must not contain transcript text, audio paths, audio data, logs, credentials,
     {"measurement": "idle_physical_footprint_bytes", "status": "available", "value": 65000000},
     {"measurement": "shortcut_to_recording_p95_ms", "status": "available", "value": 90},
     {"measurement": "first_volatile_transcript_p95_ms", "status": "available", "value": 600},
-    {"measurement": "stop_to_raw_final_transcript_p95_ms", "status": "available", "value": 700},
+    {"measurement": "stop_to_raw_final_transcript_p95_ms", "status": "available", "value": 700, "recording_duration_seconds": 60},
     {"measurement": "stop_to_clean_insertion_p95_ms", "status": "available", "value": 2200},
     {"measurement": "memory_after_processing_delta_bytes", "status": "available", "value": 8000000},
     {"measurement": "memory_drift_after_100_dictations_bytes", "status": "available", "value": 9000000},
@@ -174,7 +174,11 @@ Measure shortcut-to-recording-state across at least 100 starts and report p50 an
 
 Measure first-volatile-result latency across at least 100 ten-second dictations and report p50 and p95.
 
-Measure stop-to-raw-final-transcript across at least 10 five-minute dictations and report p50 and p95.
+Measure stop-to-raw-final-transcript across at least 10 sixty-second dictations and report p50 and p95.
+
+Set `recording_duration_seconds` to `60` on the raw-final measurement record.
+
+The release checker rejects available raw-final evidence without this exact scenario metadata.
 
 Measure stop-to-Clean insertion across at least 10 synthetic recordings of roughly 300 words and report p50 and p95.
 
@@ -187,6 +191,8 @@ Repeat the lifecycle matrix after a microphone/device change, AirPods connect/di
 Run one 30-minute recording under profiling load and verify that the recoverable audio file remains present after a forced failure or quit.
 
 Run 100 consecutive ten-second dictations and ten consecutive five-minute dictations.
+
+The five-minute run covers the long-form scenario separately from the 60-second raw-final hard gate.
 
 Extract process memory after processing and after ten seconds of idle recovery.
 

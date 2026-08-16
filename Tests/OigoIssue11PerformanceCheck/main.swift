@@ -140,11 +140,21 @@ private struct OigoIssue11PerformanceCheck {
             throw ContractFailure(message: "required issue #11 event catalog is incomplete")
         }
 
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
         let recorder = RecordingPerformanceInstrumentation()
-        recorder.mark(.shortcutReceived)
-        recorder.mark(.resourcesReleased)
-        guard recorder.events == [.shortcutReceived, .resourcesReleased] else {
-            throw ContractFailure(message: "performance instrumentation did not remain payload-free")
+        let diagnostics = DictationDiagnostics(instrumentation: recorder)
+        let coordinator = DictationCoordinator(diagnostics: diagnostics)
+        let store = try SessionStore(rootDirectory: root)
+        let capture = ScriptedAudioCapture()
+        _ = try coordinator.startRecording(
+            using: capture,
+            store: store,
+            now: Date(timeIntervalSince1970: 100_000)
+        )
+        _ = try coordinator.cancelRecording(at: Date(timeIntervalSince1970: 100_000.5))
+        guard recorder.events == [.sessionPersisted, .recordingStopped, .resourcesReleased] else {
+            throw ContractFailure(message: "production lifecycle instrumentation did not emit the expected payload-free events")
         }
     }
 
@@ -170,7 +180,11 @@ private struct OigoIssue11PerformanceCheck {
         }
 
         let available = PerformanceBudgetCatalog.allMeasurements.map { measurement in
-            PerformanceMeasurementRecord(measurement: measurement, value: 0)
+            PerformanceMeasurementRecord(
+                measurement: measurement,
+                value: 0,
+                recordingDurationSeconds: measurement == .stopToRawFinalTranscriptP95Milliseconds ? 60 : nil
+            )
         }
         guard PerformanceReleaseCheck.evaluate(available).status == .pass else {
             throw ContractFailure(message: "available budget evidence did not pass")
@@ -210,6 +224,19 @@ private struct OigoIssue11PerformanceCheck {
         }
         guard PerformanceReleaseCheck.evaluate(missingValue).status == .fail else {
             throw ContractFailure(message: "available evidence without a value did not fail the release check")
+        }
+
+        let wrongDuration = available.map { record in
+            record.measurement == .stopToRawFinalTranscriptP95Milliseconds
+                ? PerformanceMeasurementRecord(
+                    measurement: record.measurement,
+                    value: record.value,
+                    recordingDurationSeconds: 300
+                )
+                : record
+        }
+        guard PerformanceReleaseCheck.evaluate(wrongDuration).status == .fail else {
+            throw ContractFailure(message: "raw-final evidence from the wrong recording duration did not fail the release check")
         }
 
         var duplicate = available

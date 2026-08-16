@@ -128,17 +128,28 @@ public struct PerformanceMeasurementRecord: Codable, Equatable, Sendable {
     public let value: Double?
     public let status: PerformanceMeasurementStatus
     public let note: String?
+    public let recordingDurationSeconds: Double?
 
     public init(
         measurement: PerformanceMeasurement,
         value: Double?,
         status: PerformanceMeasurementStatus = .available,
-        note: String? = nil
+        note: String? = nil,
+        recordingDurationSeconds: Double? = nil
     ) {
         self.measurement = measurement
         self.value = value
         self.status = status
         self.note = note
+        self.recordingDurationSeconds = recordingDurationSeconds
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case measurement
+        case value
+        case status
+        case note
+        case recordingDurationSeconds = "recording_duration_seconds"
     }
 }
 
@@ -244,6 +255,20 @@ public enum PerformanceReleaseCheck {
                 )
                 continue
             }
+            guard Self.hasRequiredScenarioMetadata(
+                measurement: measurement,
+                record: record
+            ) else {
+                results.append(
+                    PerformanceGateResult(
+                        measurement: measurement,
+                        status: .fail,
+                        value: value,
+                        note: "raw-final evidence must come from a 60-second recording"
+                    )
+                )
+                continue
+            }
             if let budget = budgets[measurement] {
                 let status: PerformanceReleaseStatus = budget.comparison.accepts(
                     value,
@@ -290,6 +315,19 @@ public enum PerformanceReleaseCheck {
         default:
             return true
         }
+    }
+
+    private static func hasRequiredScenarioMetadata(
+        measurement: PerformanceMeasurement,
+        record: PerformanceMeasurementRecord
+    ) -> Bool {
+        guard measurement == .stopToRawFinalTranscriptP95Milliseconds else {
+            return true
+        }
+        guard let duration = record.recordingDurationSeconds else {
+            return false
+        }
+        return duration.isFinite && duration == 60
     }
 
     public static func load(from url: URL) throws -> PerformanceReleaseReport {
