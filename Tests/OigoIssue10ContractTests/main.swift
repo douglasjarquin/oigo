@@ -25,6 +25,7 @@ private struct OigoIssue10ContractTests {
             ("rapid cancellation cycles release capture", testRapidCancellationCyclesReleaseCapture),
             ("cancellation terminalizes processing without paste", testCancellationTerminalizesProcessingWithoutPaste),
             ("cancellation metadata failure retains terminal state", testCancellationMetadataFailureRetainsTerminalState),
+            ("cancellation covers every active processing state", testCancellationCoversEveryActiveProcessingState),
             ("fault injection matrix is isolated", testFaultInjectionMatrix),
             ("shutdown waits for registered task", testShutdownWaitsForRegisteredTask),
             ("transcription shutdown waits for registered task", testTranscriptionShutdownWaitsForRegisteredTask),
@@ -225,6 +226,84 @@ private struct OigoIssue10ContractTests {
               coordinator.state == .failed,
               !coordinator.hasActiveWork else {
             throw ContractFailure(message: "cancellation metadata failure did not retain an in-memory terminal insertion result")
+        }
+    }
+
+    private static func testCancellationCoversEveryActiveProcessingState() async throws {
+        let preparingRoot = try temporaryDirectory()
+        defer { cleanup(preparingRoot) }
+        let preparingStore = try SessionStore(rootDirectory: preparingRoot)
+        let preparingCapture = ScriptedAudioCapture()
+        let preparingTranscription = BlockingTranscriptionController(blockStart: true)
+        let preparingCoordinator = DictationCoordinator()
+        let preparingTask = Task { @MainActor in
+            _ = try? await preparingCoordinator.startRecordingWithTranscription(
+                using: preparingCapture,
+                store: preparingStore,
+                transcription: preparingTranscription,
+                format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+            )
+        }
+        while !preparingTranscription.isStartingForTesting {
+            await Task.yield()
+        }
+        guard preparingCoordinator.state == .preparing else {
+            throw ContractFailure(message: "preparing cancellation fixture did not reach preparing")
+        }
+        preparingTask.cancel()
+        await preparingTask.value
+        guard preparingCoordinator.state == .cancelled,
+              !preparingCoordinator.hasActiveWork,
+              !preparingTranscription.isRunningForTesting else {
+            throw ContractFailure(message: "preparing cancellation did not terminalize and release work")
+        }
+
+        let finalizingRoot = try temporaryDirectory()
+        defer { cleanup(finalizingRoot) }
+        let finalizingStore = try SessionStore(rootDirectory: finalizingRoot)
+        let finalizingCapture = ScriptedAudioCapture()
+        let finalizingTranscription = BlockingTranscriptionController(blockFinish: true)
+        let finalizingCoordinator = DictationCoordinator()
+        _ = try await finalizingCoordinator.startRecordingWithTranscription(
+            using: finalizingCapture,
+            store: finalizingStore,
+            transcription: finalizingTranscription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        let stopTask = Task { @MainActor in
+            _ = try? await finalizingCoordinator.stopRecordingWithTranscription()
+        }
+        while finalizingCoordinator.state != .finalizing {
+            await Task.yield()
+        }
+        await finalizingCoordinator.cancelActiveWork()
+        await stopTask.value
+        guard finalizingCoordinator.state == .cancelled,
+              !finalizingCoordinator.hasActiveWork,
+              !finalizingTranscription.isRunningForTesting else {
+            throw ContractFailure(message: "finalizing cancellation did not terminalize and release work")
+        }
+
+        let insertingRoot = try temporaryDirectory()
+        defer { cleanup(insertingRoot) }
+        let insertingStore = try SessionStore(rootDirectory: insertingRoot)
+        let insertingCapture = ScriptedAudioCapture()
+        let insertingTranscription = ProcessingTranscriptionController()
+        let insertingCoordinator = DictationCoordinator()
+        let insertingSession = try await insertingCoordinator.startRecordingWithTranscription(
+            using: insertingCapture,
+            store: insertingStore,
+            transcription: insertingTranscription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        _ = try await insertingCoordinator.stopRecordingWithTranscription()
+        _ = try insertingCoordinator.beginInsertion(using: insertingStore, requiresCleanup: false)
+        await insertingCoordinator.cancelActiveWork()
+        guard insertingCoordinator.state == .failed,
+              insertingCoordinator.currentSession?.id == insertingSession.id,
+              insertingCoordinator.currentSession?.metadata.insertionOutcome == .failed,
+              !insertingCoordinator.hasActiveWork else {
+            throw ContractFailure(message: "inserting cancellation did not leave a terminal failed insertion")
         }
     }
 
@@ -513,6 +592,137 @@ private final class TestEventSender: InsertionEventSender {
 
 private final class ShutdownReceipt: @unchecked Sendable {
     var finished = false
+}
+
+@available(macOS 26.0, *)
+private final class BlockingTranscriptionController: TranscriptionController, @unchecked Sendable {
+    private let lock = NSLock()
+    private let blockStart: Bool
+    private let blockFinish: Bool
+    private var cancellationRequested = false
+    private var starting = false
+    private var finishing = false
+    private var running = false
+    private var session: DictationSession?
+    private var store: SessionStore?
+
+    init(blockStart: Bool = false, blockFinish: Bool = false) {
+        self.blockStart = blockStart
+        self.blockFinish = blockFinish
+    }
+
+    var isStartingForTesting: Bool {
+        withState { starting }
+    }
+
+    var isRunningForTesting: Bool {
+        withState { starting || finishing || running }
+    }
+
+    func start(
+        session: DictationSession,
+        format: AudioCaptureFormat,
+        store: SessionStore,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+    ) async throws {
+        guard format.isValid else {
+            throw TranscriptionError.invalidCaptureFormat
+        }
+        _ = onUpdate
+        let shouldBlock = withState {
+            self.session = session
+            self.store = store
+            starting = true
+            return blockStart
+        }
+        if shouldBlock {
+            while true {
+                let cancelled = withState { cancellationRequested }
+                if cancelled {
+                    withState { starting = false }
+                    throw TranscriptionError.cancelled
+                }
+                await Task.yield()
+            }
+        }
+        let cancelled = withState {
+            starting = false
+            let cancelled = cancellationRequested
+            running = !cancelled
+            return cancelled
+        }
+        if cancelled {
+            throw TranscriptionError.cancelled
+        }
+    }
+
+    func append(_ buffer: AudioCaptureBuffer) {
+        _ = buffer
+    }
+
+    func finish() async throws -> TranscriptionResult {
+        let (shouldBlock, cancelledBeforeStart, session, store) = withState {
+            finishing = true
+            return (blockFinish, cancellationRequested, self.session, self.store)
+        }
+        if shouldBlock {
+            while true {
+                let cancelled = withState { cancellationRequested }
+                if cancelled {
+                    withState {
+                        finishing = false
+                        running = false
+                    }
+                    throw TranscriptionError.cancelled
+                }
+                await Task.yield()
+            }
+        }
+        guard !cancelledBeforeStart,
+              let session,
+              let store else {
+            withState {
+                finishing = false
+                running = false
+            }
+            throw TranscriptionError.cancelled
+        }
+        let text = "finalize me"
+        _ = try store.persistRawText(text, for: session)
+        withState {
+            finishing = false
+            running = false
+        }
+        return TranscriptionResult(
+            finalizedText: text,
+            rawTextByteCount: Int64(text.utf8.count)
+        )
+    }
+
+    func cancel() async throws -> TranscriptionResult? {
+        withState {
+            cancellationRequested = true
+            starting = false
+            finishing = false
+            running = false
+        }
+        return nil
+    }
+
+    private func withState<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+
+    func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult {
+        _ = session
+        _ = store
+        throw TranscriptionError.notRunning
+    }
 }
 
 @available(macOS 26.0, *)

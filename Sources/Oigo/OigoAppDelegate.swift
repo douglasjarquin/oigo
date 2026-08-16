@@ -50,6 +50,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var toggleTask: Task<Void, Never>?
     private var cleanAgainTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
+    private var workspaceInterruptionTask: Task<Void, Never>?
+    private var workspaceObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
@@ -59,6 +61,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             showOnboarding(support)
             return
         }
+        installWorkspaceInterruptionObservers()
         prepareSessionStore()
         configureStatusItem()
         if onboardingStore.load().isComplete {
@@ -72,17 +75,20 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
         shortcutRegistrar.unregister()
+        removeWorkspaceInterruptionObservers()
         statusSurface.hide()
         playback.stop()
         let activeToggleTask = toggleTask
         let activeCleanAgainTask = cleanAgainTask
         let activeRetryTask = retryTask
+        let activeWorkspaceInterruptionTask = workspaceInterruptionTask
         activeToggleTask?.cancel()
         activeCleanAgainTask?.cancel()
         if coordinator.hasActiveWork
             || activeToggleTask != nil
             || activeCleanAgainTask != nil
-            || activeRetryTask != nil {
+            || activeRetryTask != nil
+            || activeWorkspaceInterruptionTask != nil {
             Task { @MainActor [weak self] in
                 if let activeToggleTask {
                     await activeToggleTask.value
@@ -97,6 +103,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 if let activeRetryTask {
                     await activeRetryTask.value
+                }
+                if let activeWorkspaceInterruptionTask {
+                    await activeWorkspaceInterruptionTask.value
                 }
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
@@ -386,6 +395,64 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func installWorkspaceInterruptionObservers() {
+        removeWorkspaceInterruptionObservers()
+        let center = NSWorkspace.shared.notificationCenter
+        workspaceObservers = [
+            NSWorkspace.willSleepNotification,
+            NSWorkspace.sessionDidResignActiveNotification
+        ].map { name in
+            center.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                let reason = name == NSWorkspace.willSleepNotification
+                    ? "system sleep interrupted dictation operation"
+                    : "screen lock interrupted dictation operation"
+                Task { @MainActor [weak self] in
+                    self?.handleWorkspaceInterruption(reason)
+                }
+            }
+        }
+    }
+
+    private func removeWorkspaceInterruptionObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+        workspaceObservers.forEach(center.removeObserver)
+        workspaceObservers.removeAll(keepingCapacity: false)
+    }
+
+    private func handleWorkspaceInterruption(_ reason: String) {
+        workspaceInterruptionTask?.cancel()
+        workspaceInterruptionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let activeToggleTask = toggleTask
+            let activeCleanAgainTask = cleanAgainTask
+            let activeRetryTask = retryTask
+            activeToggleTask?.cancel()
+            activeCleanAgainTask?.cancel()
+            activeRetryTask?.cancel()
+            await coordinator.cancelActiveWork(reason: reason)
+            if let activeToggleTask {
+                await activeToggleTask.value
+            }
+            if let activeCleanAgainTask {
+                await activeCleanAgainTask.value
+            }
+            if let activeRetryTask {
+                await activeRetryTask.value
+            }
+            lastSession = coordinator.currentSession ?? lastSession
+            recordingStartedAt = nil
+            targetSnapshot = nil
+            livePreview = ""
+            insertionDisplayStatus = nil
+            updateSurface()
+            workspaceInterruptionTask = nil
+        }
+    }
+
     private func handleToggle(allowBeforeSetup: Bool = false) {
         guard allowBeforeSetup || onboardingStore.load().isComplete else {
             showOnboarding(OigoSystemSupportEvaluator.current())
@@ -440,8 +507,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 insertionDisplayStatus = nil
                 try await ensureMicrophonePermission()
+                try Task.checkCancellation()
                 targetSnapshot = insertion.captureTarget()
                 let format = try recorder.captureFormat()
+                try Task.checkCancellation()
                 let service = transcriptionService()
                 recordingStartedAt = Date()
                 previewThrottle = OigoHUDPreviewThrottle()

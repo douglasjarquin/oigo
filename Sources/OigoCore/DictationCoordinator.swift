@@ -356,19 +356,26 @@ public final class DictationCoordinator {
             sessionStore = store
             currentSession = session
 
-            try await transcription.start(
-                session: session,
-                format: format,
-                store: store,
-                onUpdate: { [weak self] update in
-                    Task { @MainActor [weak self] in
-                        guard self?.activeOperationID == operationID else {
-                            return
+            try await withTaskCancellationHandler(operation: {
+                try await transcription.start(
+                    session: session,
+                    format: format,
+                    store: store,
+                    onUpdate: { [weak self] update in
+                        Task { @MainActor [weak self] in
+                            guard self?.activeOperationID == operationID else {
+                                return
+                            }
+                            onUpdate(update)
                         }
-                        onUpdate(update)
                     }
+                )
+            }, onCancel: {
+                Task { @MainActor in
+                    _ = try? await transcription.cancel()
                 }
-            )
+            })
+            try Task.checkCancellation()
             preparedSession = try store.update(
                 session,
                 state: .recording,
@@ -411,10 +418,26 @@ public final class DictationCoordinator {
         } catch {
             let terminalRequested = pendingTranscriptionTerminalState != nil
                 || [.cancelled, .interrupted].contains(state)
+            let cancellationRequested = Task.isCancelled
             capture.cancel()
             _ = try? await transcription.cancel()
             if terminalRequested {
                 currentSession = (try? store.load(id: preparedSession.id)) ?? preparedSession
+                releaseCapture()
+                throw error
+            }
+            if cancellationRequested {
+                let cancelledSession = persistTerminalState(
+                    preparedSession,
+                    in: store,
+                    state: .cancelled,
+                    reason: "dictation operation cancelled",
+                    failureCode: .cancelled
+                )
+                if [.preparing, .recording].contains(state) {
+                    _ = try? apply(.cancel)
+                }
+                currentSession = cancelledSession
                 releaseCapture()
                 throw error
             }
@@ -577,7 +600,13 @@ public final class DictationCoordinator {
         do {
             stoppingSession = try store.update(session, state: .stopping, at: date)
             try capture.stop()
-            let result = try await transcription.finish()
+            let result = try await withTaskCancellationHandler(operation: {
+                try await transcription.finish()
+            }, onCancel: {
+                Task { @MainActor in
+                    _ = try? await transcription.cancel()
+                }
+            })
             let completedSession = try store.update(
                 stoppingSession,
                 state: .completed,
@@ -592,6 +621,19 @@ public final class DictationCoordinator {
             return completedSession
         } catch {
             _ = try? await transcription.cancel()
+            if Task.isCancelled || pendingTranscriptionTerminalState == .cancelled {
+                let cancelledSession = persistTerminalState(
+                    stoppingSession,
+                    in: store,
+                    state: .cancelled,
+                    reason: "dictation operation cancelled",
+                    failureCode: .cancelled
+                )
+                _ = try? apply(.cancel)
+                currentSession = cancelledSession
+                releaseCapture()
+                throw error
+            }
             let reason = String(describing: error)
             lastFailureReason = reason
             lastFailureCode = DictationFailureCode.infer(from: reason)
@@ -736,6 +778,11 @@ public final class DictationCoordinator {
     public func cancelActiveWork(
         reason: String = "dictation operation cancelled"
     ) async {
+        if terminalOperationInFlight, let activeTranscription {
+            pendingTranscriptionTerminalState = .cancelled
+            _ = try? await activeTranscription.cancel()
+            return
+        }
         if activeTranscription != nil {
             _ = try? await cancelRecordingWithTranscription()
             return
