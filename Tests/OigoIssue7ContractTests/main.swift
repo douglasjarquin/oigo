@@ -13,6 +13,7 @@ private struct ContractFailure: Error, CustomStringConvertible {
 }
 
 @main
+@available(macOS 26.0, *)
 @MainActor
 private struct OigoIssue7ContractTests {
     static func main() async {
