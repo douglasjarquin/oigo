@@ -113,7 +113,8 @@ private struct OigoIssue8ContractTests {
                 deadlineNanoseconds: 5_000_000_000
             )
         }
-        guard waitForFile(markerURL, timeoutNanoseconds: 1_000_000_000) else {
+        guard waitForFile(markerURL, timeoutNanoseconds: 1_000_000_000),
+              waitForFile(pidURL, timeoutNanoseconds: 1_000_000_000) else {
             cleaner.cancel()
             _ = await generationTask.value
             throw ContractFailure(message: "the controllable cleanup worker did not start")
@@ -121,11 +122,17 @@ private struct OigoIssue8ContractTests {
 
         cleaner.cancel()
         let generation = await generationTask.value
-        guard generation == .cancelled,
-              let pid = Int32(try String(contentsOf: pidURL, encoding: .utf8)),
-              waitForProcessExit(pid, timeoutNanoseconds: 1_000_000_000),
-              metrics.snapshot().resourceReleaseCount == 1 else {
-            throw ContractFailure(message: "worker cancellation did not release the process and resource metric")
+        guard generation == .cancelled else {
+            throw ContractFailure(message: "worker cancellation returned " + String(describing: generation))
+        }
+        guard let pid = Int32(try String(contentsOf: pidURL, encoding: .utf8)) else {
+            throw ContractFailure(message: "worker cancellation fixture did not publish a valid PID")
+        }
+        guard waitForProcessExit(pid, timeoutNanoseconds: 1_000_000_000) else {
+            throw ContractFailure(message: "worker cancellation did not reap the child process")
+        }
+        guard metrics.snapshot().resourceReleaseCount == 1 else {
+            throw ContractFailure(message: "worker cancellation did not record exactly one resource release")
         }
     }
 
