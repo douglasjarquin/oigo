@@ -33,6 +33,11 @@ public enum SessionTextSource: String, Codable, CaseIterable, Equatable, Sendabl
     case processed
 }
 
+public enum TranscriptInsertionSource: String, Codable, CaseIterable, Equatable, Sendable {
+    case raw
+    case clean
+}
+
 public struct SessionRetentionPolicy: Equatable, Sendable {
     public static let `default` = SessionRetentionPolicy()
 
@@ -66,6 +71,8 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         case rawTextByteCount
         case insertionOutcome
         case insertionFailureReason
+        case insertionTextSource
+        case cleanupFallbackReason
         case insertionAttemptedAt
         case firstTranscriptLine
         case transcriptionAttemptCount
@@ -87,6 +94,8 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
     public var rawTextByteCount: Int64?
     public var insertionOutcome: InsertionOutcome?
     public var insertionFailureReason: String?
+    public var insertionTextSource: TranscriptInsertionSource?
+    public var cleanupFallbackReason: String?
     public var insertionAttemptedAt: Date?
     public var firstTranscriptLine: String?
     public var transcriptionAttemptCount: Int
@@ -108,6 +117,8 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         rawTextByteCount: Int64? = nil,
         insertionOutcome: InsertionOutcome? = nil,
         insertionFailureReason: String? = nil,
+        insertionTextSource: TranscriptInsertionSource? = nil,
+        cleanupFallbackReason: String? = nil,
         insertionAttemptedAt: Date? = nil,
         firstTranscriptLine: String? = nil,
         transcriptionAttemptCount: Int = 0,
@@ -128,6 +139,8 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         self.rawTextByteCount = rawTextByteCount
         self.insertionOutcome = insertionOutcome
         self.insertionFailureReason = insertionFailureReason
+        self.insertionTextSource = insertionTextSource
+        self.cleanupFallbackReason = cleanupFallbackReason
         self.insertionAttemptedAt = insertionAttemptedAt
         self.firstTranscriptLine = firstTranscriptLine
         self.transcriptionAttemptCount = max(0, transcriptionAttemptCount)
@@ -152,6 +165,8 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
             rawTextByteCount: container.decodeIfPresent(Int64.self, forKey: .rawTextByteCount),
             insertionOutcome: container.decodeIfPresent(InsertionOutcome.self, forKey: .insertionOutcome),
             insertionFailureReason: container.decodeIfPresent(String.self, forKey: .insertionFailureReason),
+            insertionTextSource: container.decodeIfPresent(TranscriptInsertionSource.self, forKey: .insertionTextSource),
+            cleanupFallbackReason: container.decodeIfPresent(String.self, forKey: .cleanupFallbackReason),
             insertionAttemptedAt: container.decodeIfPresent(Date.self, forKey: .insertionAttemptedAt),
             firstTranscriptLine: container.decodeIfPresent(String.self, forKey: .firstTranscriptLine),
             transcriptionAttemptCount: container.decodeIfPresent(Int.self, forKey: .transcriptionAttemptCount) ?? 0,
@@ -424,7 +439,9 @@ public final class SessionStore: @unchecked Sendable {
         audioByteCount: Int64? = nil,
         rawTextByteCount: Int64? = nil,
         insertionOutcome: InsertionOutcome? = nil,
-        insertionFailureReason: String? = nil
+        insertionFailureReason: String? = nil,
+        insertionTextSource: TranscriptInsertionSource? = nil,
+        cleanupFallbackReason: String? = nil
     ) throws -> DictationSession {
         lock.lock()
         defer { lock.unlock() }
@@ -457,6 +474,8 @@ public final class SessionStore: @unchecked Sendable {
             if let insertionOutcome {
                 metadata.insertionOutcome = insertionOutcome
                 metadata.insertionFailureReason = insertionFailureReason
+                metadata.insertionTextSource = insertionTextSource
+                metadata.cleanupFallbackReason = cleanupFallbackReason
             }
 
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
@@ -884,6 +903,67 @@ public final class SessionStore: @unchecked Sendable {
                 throw SessionStoreError.invalidMetadata(current.rawTextURL)
             }
             return rawText
+        }
+    }
+
+    @discardableResult
+    public func persistCleanText(
+        _ cleanText: String,
+        for session: DictationSession,
+        at date: Date = Date()
+    ) throws -> DictationSession {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            let data = Data(cleanText.utf8)
+            guard data.count <= Self.maxTranscriptBytes else {
+                throw SessionStoreError.transcriptTooLarge(current.cleanTextURL)
+            }
+            try rejectSymlink(
+                named: "clean.txt",
+                in: directoryFD,
+                at: current.cleanTextURL,
+                allowMissing: true
+            )
+            try atomicWrite(
+                data,
+                named: "clean.txt",
+                in: directoryFD,
+                at: current.cleanTextURL
+            )
+            var metadata = current.metadata
+            metadata.updatedAt = date
+            try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
+            return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
+        }
+    }
+
+    public func readCleanText(for session: DictationSession) throws -> String {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            let data: Data?
+            do {
+                data = try readDataIfPresent(
+                    named: "clean.txt",
+                    in: directoryFD,
+                    at: current.cleanTextURL,
+                    maxBytes: Self.maxTranscriptBytes
+                )
+            } catch SessionStoreError.invalidMetadata {
+                throw SessionStoreError.transcriptTooLarge(current.cleanTextURL)
+            }
+            guard let data else {
+                return ""
+            }
+            guard let cleanText = String(data: data, encoding: .utf8) else {
+                throw SessionStoreError.invalidMetadata(current.cleanTextURL)
+            }
+            return cleanText
         }
     }
 
