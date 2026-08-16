@@ -36,6 +36,7 @@ private struct CLIOptions {
 }
 
 @main
+@available(macOS 26.0, *)
 private struct OigoSpikeCLI {
     static func main() async {
         do {

@@ -224,7 +224,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         bodyLabel.stringValue = isSupported ? body(for: currentStep) : support.reason
         languagePopup.isHidden = currentStep != .language
         keyCodeField.superview?.isHidden = currentStep != .shortcut
-        testField.isHidden = currentStep != .testDictation
+        testField.isHidden = !isSupported || currentStep != .testDictation
         historyButton.isHidden = currentStep != .recovery
         statusLabel.stringValue = status(for: currentStep)
         actionButton.isHidden = !isSupported || ![.language, .microphone, .insertion, .testDictation, .recovery].contains(currentStep)
