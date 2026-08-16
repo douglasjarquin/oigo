@@ -21,6 +21,8 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Instant mode does not initialize Foundation Models")
             try await testFoundationModelsAdapterUsesFixedInstructionAndReportsAvailability()
             print("GREEN: Foundation Models adapter exposes the fixed instruction and availability reason")
+            try testWorkerRejectsMalformedRequestsWithoutOutput()
+            print("GREEN: Foundation Models worker rejects malformed requests without transcript output")
             try await testCleanupFailuresFallBackToRaw()
             print("GREEN: Cleanup failures fall back to raw without partial output")
             try await testLongTranscriptChunksSequentiallyAtStableBoundaries()
@@ -83,6 +85,33 @@ private struct OigoIssue8ContractTests {
         }
     }
 
+    private static func testWorkerRejectsMalformedRequestsWithoutOutput() throws {
+        let testExecutable = URL(fileURLWithPath: CommandLine.arguments[0])
+            .standardizedFileURL
+        let workerExecutable = testExecutable
+            .deletingLastPathComponent()
+            .appendingPathComponent("Oigo")
+        guard FileManager.default.isExecutableFile(atPath: workerExecutable.path) else {
+            throw ContractFailure(message: "the native cleanup worker executable was not built")
+        }
+        let input = Pipe()
+        let output = Pipe()
+        let process = Process()
+        process.executableURL = workerExecutable
+        process.arguments = ["--oigo-transcript-cleanup-worker"]
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        try input.fileHandleForWriting.write(contentsOf: Data("not-json".utf8))
+        try input.fileHandleForWriting.close()
+        let response = try output.fileHandleForReading.readToEnd() ?? Data()
+        process.waitUntilExit()
+        guard process.terminationStatus != 0, response.isEmpty else {
+            throw ContractFailure(message: "malformed worker input produced output or a successful exit")
+        }
+    }
+
     private static func testCleanupFailuresFallBackToRaw() async throws {
         let rawText = "deploy oigo --config /tmp/oigo.yaml"
         let failures: [TranscriptCleanupGeneration] = [
@@ -127,12 +156,13 @@ private struct OigoIssue8ContractTests {
             rawText: rawText,
             deadlineNanoseconds: 1_000_000_000
         )
-        let expectedChunks = TranscriptChunker.split(rawText)
         let recordedChunks = await recorder.values()
-        guard expectedChunks.count > 1,
-              recordedChunks == expectedChunks.map(\.text),
+        let recordedSentenceNumbers = recordedChunks.flatMap(Self.sentenceNumbers)
+        guard recordedChunks.count > 1,
               recordedChunks.allSatisfy({ TranscriptChunk(text: $0).estimatedTokenCount <= TranscriptChunker.maxTokenCount }),
+              recordedSentenceNumbers == Array(1...280),
               decision.insertionSource == .clean,
+              decision.cleanText == rawText,
               decision.cleanText?.contains("\n\n") == true else {
             throw ContractFailure(message: "long cleanup did not preserve sequential chunk order or paragraph boundaries")
         }
@@ -157,7 +187,7 @@ private struct OigoIssue8ContractTests {
               recordedChunks.dropFirst().allSatisfy({
                   TranscriptChunk(text: $0).estimatedTokenCount <= 1_000
               }),
-              recordedChunks.count > TranscriptChunker.split(rawText).count,
+              recordedChunks.count >= 3,
               decision.insertionSource == .clean,
               decision.fallbackReason == nil,
               decision.cleanText == rawText else {
@@ -355,6 +385,19 @@ private struct OigoIssue8ContractTests {
                     )
                 }
             }
+        }
+    }
+
+    private static func sentenceNumbers(in text: String) -> [Int] {
+        guard let expression = try? NSRegularExpression(pattern: "Sentence ([0-9]+)") else {
+            return []
+        }
+        let value = text as NSString
+        return expression.matches(
+            in: text,
+            range: NSRange(location: 0, length: value.length)
+        ).compactMap { match in
+            Int(value.substring(with: match.range(at: 1)))
         }
     }
 }
