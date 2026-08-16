@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import OigoCore
 import OigoInsertion
 import OigoTranscription
@@ -28,6 +29,8 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Context overflow re-splits oversized chunks sequentially")
             try await testAutomaticDeadlineCancelsSlowCleanup()
             print("GREEN: Automatic cleanup deadline cancels and releases slow generation")
+            try await testDeadlineUsesCleanerCancellationHook()
+            print("GREEN: Automatic cleanup deadline stops cancellation-resistant generation")
             try await testCleanupInstrumentationRecordsLifecycleMetrics()
             print("GREEN: Cleanup availability, start, completion, and fallback metrics are recorded")
             try testCleanPersistenceLeavesRawUntouchedAndRecordsInsertionSource()
@@ -61,17 +64,11 @@ private struct OigoIssue8ContractTests {
     }
 
     private static func testFoundationModelsAdapterUsesFixedInstructionAndReportsAvailability() async throws {
-        let expectedInstruction = """
-Lightly clean the following speech transcript.
-
-Correct punctuation, capitalization, and obvious speech-recognition errors.
-Remove filler sounds and abandoned false starts only when unambiguous.
-Do not summarize, add information, or change intent, tone, or detail.
-Preserve commands, source code, URLs, filenames, paths, package names,
-product names, identifiers, numbers, and quoted text exactly.
-Return only the cleaned transcript.
-"""
-        guard TranscriptCleanerInstruction.v1 == expectedInstruction else {
+        let instructionData = Data(TranscriptCleanerInstruction.v1.utf8)
+        let instructionDigest = SHA256.hash(data: instructionData)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        guard instructionDigest == "a3384f019de02d823305bd2c292b8d7e62dad8e0ed4dd3727a342a0249e4beea" else {
             throw ContractFailure(message: "the v1 cleanup instruction changed")
         }
 
@@ -185,6 +182,27 @@ Return only the cleaned transcript.
               await cancellationRecorder.wasCancelledValue(),
               await cancellationRecorder.wasFinishedValue() else {
             throw ContractFailure(message: "deadline did not produce raw fallback and release the cancelled operation")
+        }
+    }
+
+    private static func testDeadlineUsesCleanerCancellationHook() async throws {
+        let box = CancellationHookBox()
+        let coordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: { CancellationResistantCleaner(box: box) }
+        )
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let decision = await coordinator.resolve(
+            mode: .clean,
+            rawText: "a cancellation-resistant transcript",
+            deadlineNanoseconds: 5_000_000
+        )
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
+        guard decision.insertionSource == .raw,
+              decision.fallbackReason == .timeout,
+              elapsedNanoseconds < 100_000_000,
+              box.wasCancelled(),
+              box.waitForFinished(timeout: 100_000_000) else {
+            throw ContractFailure(message: "deadline did not stop a cancellation-resistant cleaner")
         }
     }
 
@@ -381,6 +399,8 @@ private struct RecordingCleaner: TranscriptCleaner {
         .available
     }
 
+    func cancel() {}
+
     func clean(
         chunk: String,
         deadlineNanoseconds: UInt64
@@ -397,6 +417,8 @@ private struct OverflowThenSuccessCleaner: TranscriptCleaner {
     func availability() -> TranscriptCleanupAvailability {
         .available
     }
+
+    func cancel() {}
 
     func clean(
         chunk: String,
@@ -416,6 +438,8 @@ private struct FixedResultCleaner: TranscriptCleaner, Sendable {
     func availability() -> TranscriptCleanupAvailability {
         .available
     }
+
+    func cancel() {}
 
     func clean(
         chunk: String,
@@ -456,6 +480,8 @@ private struct SlowCleaner: TranscriptCleaner {
         .available
     }
 
+    func cancel() {}
+
     func clean(
         chunk: String,
         deadlineNanoseconds: UInt64
@@ -471,6 +497,70 @@ private struct SlowCleaner: TranscriptCleaner {
             await recorder.markFinished()
             return .cancelled
         }
+    }
+}
+
+private final class CancellationHookBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    private var finished = false
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+
+    func wasCancelled() -> Bool {
+        lock.lock()
+        let result = cancelled
+        lock.unlock()
+        return result
+    }
+
+    func markFinished() {
+        lock.lock()
+        finished = true
+        lock.unlock()
+    }
+
+    func waitForFinished(timeout: UInt64) -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeout
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            lock.lock()
+            let result = finished
+            lock.unlock()
+            if result {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        return false
+    }
+}
+
+private struct CancellationResistantCleaner: TranscriptCleaner {
+    let box: CancellationHookBox
+
+    func availability() -> TranscriptCleanupAvailability {
+        .available
+    }
+
+    func cancel() {
+        box.cancel()
+    }
+
+    func clean(
+        chunk: String,
+        deadlineNanoseconds: UInt64
+    ) async -> TranscriptCleanupGeneration {
+        _ = chunk
+        _ = deadlineNanoseconds
+        while !box.wasCancelled() {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        box.markFinished()
+        return .cancelled
     }
 }
 
