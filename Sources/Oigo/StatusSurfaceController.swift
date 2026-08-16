@@ -1,24 +1,38 @@
 import AppKit
 import OigoCore
 
+private final class OigoHUDPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
 @MainActor
 final class StatusSurfaceController {
-    private let panel: NSPanel
+    private let panel: OigoHUDPanel
     private let label: NSTextField
+    private let detailLabel: NSTextField
     private var dismissalTask: Task<Void, Never>?
+    private var recordingTimer: Timer?
+    private var recordingStartedAt: Date?
+    private var recordingPreview = ""
+    private var resourceLedger = OigoHUDResourceLedger()
     private var displayGeneration = 0
 
-    private static let briefMessages: Set<String> = ["Pasted", "Copied", "Failed"]
-
     init() {
-        label = NSTextField(labelWithString: "Oigo: Idle")
-        panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 220, height: 48),
+        label = NSTextField(labelWithString: "")
+        detailLabel = NSTextField(labelWithString: "")
+        panel = OigoHUDPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 72),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: true
         )
 
+        label.font = .boldSystemFont(ofSize: 14)
+        detailLabel.font = .systemFont(ofSize: 12)
+        detailLabel.textColor = .secondaryLabelColor
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.maximumNumberOfLines = 2
         panel.isFloatingPanel = true
         panel.level = .statusBar
         panel.hidesOnDeactivate = false
@@ -30,13 +44,17 @@ final class StatusSurfaceController {
         contentView.wantsLayer = true
         contentView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         contentView.layer?.cornerRadius = 10
-        contentView.addSubview(label)
+        let stack = NSStackView(views: [label, detailLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 3
+        contentView.addSubview(stack)
 
-        label.translatesAutoresizingMaskIntoConstraints = false
+        stack.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
+            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            stack.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
         ])
         panel.contentView = contentView
         panel.orderOut(nil)
@@ -46,15 +64,90 @@ final class StatusSurfaceController {
         displayGeneration &+= 1
         dismissalTask?.cancel()
         dismissalTask = nil
+        stopRecordingTimer()
+        resourceLedger.close()
+        recordingStartedAt = nil
+        recordingPreview = ""
         panel.orderOut(nil)
     }
 
-    func show(message: String, anchoredTo button: NSStatusBarButton?) {
+    func showRecording(
+        startedAt: Date,
+        preview: String,
+        anchoredTo button: NSStatusBarButton?
+    ) {
+        displayGeneration &+= 1
+        dismissalTask?.cancel()
+        dismissalTask = nil
+        if recordingStartedAt == nil {
+            recordingStartedAt = startedAt
+            recordingPreview = preview
+            resourceLedger.beginRecording()
+            recordingTimer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.refreshRecordingLabel()
+                }
+            }
+            if let recordingTimer {
+                RunLoop.main.add(recordingTimer, forMode: .common)
+            }
+        }
+        recordingPreview = preview
+        refreshRecordingLabel()
+        position(anchoredTo: button)
+        panel.orderFront(nil)
+    }
+
+    func showProcessing(
+        _ state: OigoHUDProcessingState,
+        detail: String,
+        anchoredTo button: NSStatusBarButton?
+    ) {
         displayGeneration &+= 1
         let generation = displayGeneration
         dismissalTask?.cancel()
         dismissalTask = nil
-        label.stringValue = "Oigo: " + message
+        stopRecordingTimer()
+        recordingStartedAt = nil
+        label.stringValue = state.rawValue
+        detailLabel.stringValue = detail
+        position(anchoredTo: button)
+        panel.orderFront(nil)
+        guard [.pasted, .copied, .failed].contains(state) else {
+            return
+        }
+        dismissalTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 1_800_000_000)
+            } catch {
+                return
+            }
+            guard let self, self.displayGeneration == generation else {
+                return
+            }
+            self.hide()
+        }
+    }
+
+    private func refreshRecordingLabel() {
+        guard let recordingStartedAt else {
+            return
+        }
+        let elapsed = max(0, Date().timeIntervalSince(recordingStartedAt))
+        let minutes = Int(elapsed) / 60
+        let seconds = Int(elapsed) % 60
+        label.stringValue = "● Recording  " + String(format: "%02d:%02d", minutes, seconds)
+        detailLabel.stringValue = OigoHUDPreviewPolicy.bounded(recordingPreview)
+    }
+
+    private func stopRecordingTimer() {
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        recordingPreview = ""
+        resourceLedger.endRecording()
+    }
+
+    private func position(anchoredTo button: NSStatusBarButton?) {
         if let button, let window = button.window {
             let buttonFrame = window.convertToScreen(button.convert(button.bounds, to: nil))
             var origin = NSPoint(
@@ -73,22 +166,6 @@ final class StatusSurfaceController {
                 )
             }
             panel.setFrameOrigin(origin)
-        }
-        panel.orderFront(nil)
-        guard Self.briefMessages.contains(message) else {
-            return
-        }
-        dismissalTask = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(nanoseconds: 2_000_000_000)
-            } catch {
-                return
-            }
-            guard let self, self.displayGeneration == generation else {
-                return
-            }
-            self.panel.orderOut(nil)
-            self.dismissalTask = nil
         }
     }
 }

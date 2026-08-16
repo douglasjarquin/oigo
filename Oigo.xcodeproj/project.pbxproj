@@ -44,6 +44,10 @@
         A00000010000000000000023 /* HistoryWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000020 /* HistoryWindowController.swift */; };
         A00000010000000000000024 /* TranscriptCleanup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000021 /* TranscriptCleanup.swift */; };
         A00000010000000000000025 /* FoundationModels.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000022 /* FoundationModels.framework */; };
+        A00000010000000000000026 /* ServiceManagement.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000023 /* ServiceManagement.framework */; };
+        A00000010000000000000027 /* LaunchAtLoginService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000024 /* LaunchAtLoginService.swift */; };
+        A00000010000000000000028 /* OnboardingWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000025 /* OnboardingWindowController.swift */; };
+        A00000010000000000000029 /* ProductContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000026 /* ProductContracts.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -126,6 +130,10 @@
         B00000010000000000000020 /* HistoryWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryWindowController.swift; sourceTree = "<group>"; };
         B00000010000000000000021 /* TranscriptCleanup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptCleanup.swift; sourceTree = "<group>"; };
         B00000010000000000000022 /* FoundationModels.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = FoundationModels.framework; path = System/Library/Frameworks/FoundationModels.framework; sourceTree = SDKROOT; };
+        B00000010000000000000023 /* ServiceManagement.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ServiceManagement.framework; path = System/Library/Frameworks/ServiceManagement.framework; sourceTree = SDKROOT; };
+        B00000010000000000000024 /* LaunchAtLoginService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginService.swift; sourceTree = "<group>"; };
+        B00000010000000000000025 /* OnboardingWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWindowController.swift; sourceTree = "<group>"; };
+        B00000010000000000000026 /* ProductContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductContracts.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -141,6 +149,7 @@
                 A00000010000000000000011 /* libOigoCapture.a in Frameworks */,
                 A00000010000000000000013 /* libOigoTranscription.a in Frameworks */,
                 A00000010000000000000021 /* libOigoInsertion.a in Frameworks */,
+                A00000010000000000000026 /* ServiceManagement.framework in Frameworks */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -211,6 +220,8 @@
                 B00000010000000000000004 /* GlobalHotKeyRegistrar.swift */,
                 B00000010000000000000005 /* SettingsWindowController.swift */,
                 B00000010000000000000020 /* HistoryWindowController.swift */,
+                B00000010000000000000024 /* LaunchAtLoginService.swift */,
+                B00000010000000000000025 /* OnboardingWindowController.swift */,
             );
             path = Sources/Oigo;
             sourceTree = "<group>";
@@ -222,6 +233,7 @@
                 B00000010000000000000011 /* AudioCapturing.swift */,
                 B00000010000000000000012 /* SessionStore.swift */,
                 B00000010000000000000016 /* TranscriptionContracts.swift */,
+                B00000010000000000000026 /* ProductContracts.swift */,
             );
             path = Sources/OigoCore;
             sourceTree = "<group>";
@@ -265,6 +277,7 @@
                 B00000010000000000000009 /* Carbon.framework */,
                 B0000001000000000000000D /* AVFAudio.framework */,
                 B00000010000000000000015 /* Speech.framework */,
+                B00000010000000000000023 /* ServiceManagement.framework */,
             );
             name = Frameworks;
             sourceTree = "<group>";
@@ -444,6 +457,8 @@
                 A00000010000000000000004 /* GlobalHotKeyRegistrar.swift in Sources */,
                 A00000010000000000000005 /* SettingsWindowController.swift in Sources */,
                 A00000010000000000000023 /* HistoryWindowController.swift in Sources */,
+                A00000010000000000000027 /* LaunchAtLoginService.swift in Sources */,
+                A00000010000000000000028 /* OnboardingWindowController.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -455,6 +470,7 @@
                 A0000001000000000000000E /* AudioCapturing.swift in Sources */,
                 A0000001000000000000000F /* SessionStore.swift in Sources */,
                 A00000010000000000000016 /* TranscriptionContracts.swift in Sources */,
+                A00000010000000000000029 /* ProductContracts.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -533,7 +549,8 @@
         G00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                ONLY_ACTIVE_ARCH = NO;
                 SWIFT_VERSION = 6.0;
             };
             name = Debug;
@@ -541,7 +558,8 @@
         G00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                ONLY_ACTIVE_ARCH = NO;
                 SWIFT_VERSION = 6.0;
             };
             name = Release;
@@ -549,11 +567,12 @@
         H00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
+                ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
                 INFOPLIST_FILE = Oigo/Info.plist;
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                ONLY_ACTIVE_ARCH = NO;
                 PRODUCT_BUNDLE_IDENTIFIER = com.oigo.app;
                 PRODUCT_NAME = Oigo;
                 SWIFT_STRICT_CONCURRENCY = complete;
@@ -563,11 +582,12 @@
         H00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
+                ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
                 INFOPLIST_FILE = Oigo/Info.plist;
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                ONLY_ACTIVE_ARCH = NO;
                 PRODUCT_BUNDLE_IDENTIFIER = com.oigo.app;
                 PRODUCT_NAME = Oigo;
                 SWIFT_STRICT_CONCURRENCY = complete;
@@ -577,10 +597,10 @@
         I00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
+                ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoCore;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -589,8 +609,8 @@
         I00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                ARCHS = "$(ARCHS_STANDARD)";
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoCore;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -599,10 +619,10 @@
         L00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
+                ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoCapture;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -611,8 +631,8 @@
         L00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                ARCHS = "$(ARCHS_STANDARD)";
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoCapture;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -621,10 +641,10 @@
         M00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
+                ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoTranscription;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -633,8 +653,8 @@
         M00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                ARCHS = "$(ARCHS_STANDARD)";
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoTranscription;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -643,10 +663,10 @@
         N00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
+                ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoInsertion;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -655,8 +675,8 @@
         N00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                ARCHS = arm64;
-                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                ARCHS = "$(ARCHS_STANDARD)";
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
                 PRODUCT_NAME = OigoInsertion;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };

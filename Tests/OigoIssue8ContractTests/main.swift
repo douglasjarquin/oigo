@@ -12,6 +12,7 @@ private struct ContractFailure: Error, CustomStringConvertible {
 }
 
 @main
+@available(macOS 26.0, *)
 @MainActor
 private struct OigoIssue8ContractTests {
     static func main() async {
@@ -774,6 +775,7 @@ private actor ModelRecorder {
     }
 }
 
+@available(macOS 26.0, *)
 private struct RecordingModel: TranscriptCleanupModel {
     let recorder: ModelRecorder
 
@@ -785,6 +787,7 @@ private struct RecordingModel: TranscriptCleanupModel {
     }
 }
 
+@available(macOS 26.0, *)
 private struct SlowRecordingModel: TranscriptCleanupModel {
     let recorder: ModelRecorder
 
@@ -811,6 +814,7 @@ private struct PendingRawPersistenceFixture: Codable {
     let targetRawTextByteCount: Int64
 }
 
+@available(macOS 26.0, *)
 private final class RecordingCleanerFactory: @unchecked Sendable {
     private let lock = NSLock()
     private(set) var instantiationCount = 0
@@ -835,6 +839,7 @@ private actor ChunkRecorder {
     }
 }
 
+@available(macOS 26.0, *)
 private struct RecordingCleaner: TranscriptCleaner {
     let recorder: ChunkRecorder
 
@@ -854,6 +859,7 @@ private struct RecordingCleaner: TranscriptCleaner {
     }
 }
 
+@available(macOS 26.0, *)
 private struct OverflowThenSuccessCleaner: TranscriptCleaner {
     let recorder: ChunkRecorder
 
@@ -875,6 +881,7 @@ private struct OverflowThenSuccessCleaner: TranscriptCleaner {
     }
 }
 
+@available(macOS 26.0, *)
 private struct FixedResultCleaner: TranscriptCleaner, Sendable {
     let result: TranscriptCleanupGeneration
 
@@ -916,6 +923,7 @@ private actor CancellationRecorder {
     private var didFinish = false
 }
 
+@available(macOS 26.0, *)
 private struct SlowCleaner: TranscriptCleaner {
     let recorder: CancellationRecorder
 
@@ -982,6 +990,7 @@ private final class CancellationHookBox: @unchecked Sendable {
     }
 }
 
+@available(macOS 26.0, *)
 private struct CancellationResistantCleaner: TranscriptCleaner {
     let box: CancellationHookBox
 

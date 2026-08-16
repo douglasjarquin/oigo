@@ -12,6 +12,7 @@ private struct ContractFailure: Error, CustomStringConvertible {
 }
 
 @main
+@available(macOS 26.0, *)
 private struct OigoSpikeContractTests {
     static func main() async {
         let cases: [(String, () async throws -> Void)] = [

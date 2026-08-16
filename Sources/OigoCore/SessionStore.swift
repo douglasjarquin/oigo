@@ -26,6 +26,10 @@ public enum InsertionOutcome: String, Codable, CaseIterable, Equatable, Sendable
     case copied
     case secureRejected
     case failed
+
+    public var clipboardOutputAvailable: Bool {
+        self != .failed
+    }
 }
 
 public enum SessionTextSource: String, Codable, CaseIterable, Equatable, Sendable {
@@ -263,6 +267,7 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
     case insertionAlreadyAttempted(UUID)
     case activeSession(UUID)
     case rawTextChanged(URL)
+    case deletionConfirmationRequired
 
     public var description: String {
         switch self {
@@ -280,6 +285,8 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
             "dictation session is active and cannot be deleted: " + id.uuidString
         case .rawTextChanged(let url):
             "raw transcript changed while derived text was pending: " + url.path
+        case .deletionConfirmationRequired:
+            "Delete All History requires deliberate confirmation"
         }
     }
 }
@@ -1107,6 +1114,26 @@ public final class SessionStore: @unchecked Sendable {
             throw SessionStoreError.activeSession(id)
         }
         try removeSessionDirectory(at: session.directoryURL)
+    }
+
+    @discardableResult
+    public func deleteAllHistory(confirmed: Bool) throws -> [UUID] {
+        guard confirmed else {
+            throw SessionStoreError.deletionConfirmationRequired
+        }
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        var removedIDs: [UUID] = []
+        try forEachTolerantSession { session in
+            guard !session.metadata.state.isUnfinished else {
+                return
+            }
+            try removeSessionDirectory(at: session.directoryURL)
+            removedIDs.append(session.id)
+        }
+        return removedIDs
     }
 
     public func performIdleMaintenance(
