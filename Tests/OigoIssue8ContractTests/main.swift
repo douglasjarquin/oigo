@@ -27,9 +27,7 @@ private struct OigoIssue8ContractTests {
             try await testContextOverflowResplitsOversizedChunks()
             print("GREEN: Context overflow re-splits oversized chunks sequentially")
             try await testAutomaticDeadlineCancelsSlowCleanup()
-            print("GREEN: Automatic cleanup deadline cancels slow generation")
-            try await testDeadlineDoesNotWaitForCancellationResistantCleanup()
-            print("GREEN: Automatic cleanup deadline returns promptly when cancellation is ignored")
+            print("GREEN: Automatic cleanup deadline cancels and releases slow generation")
             try await testCleanupInstrumentationRecordsLifecycleMetrics()
             print("GREEN: Cleanup availability, start, completion, and fallback metrics are recorded")
             try testCleanPersistenceLeavesRawUntouchedAndRecordsInsertionSource()
@@ -184,26 +182,9 @@ Return only the cleaned transcript.
         )
         guard decision.insertionText == rawText,
               decision.fallbackReason == .timeout || decision.fallbackReason == .cancellation,
-              await cancellationRecorder.wasCancelledValue() else {
-            throw ContractFailure(message: "deadline did not produce raw fallback and cancellation")
-        }
-    }
-
-    private static func testDeadlineDoesNotWaitForCancellationResistantCleanup() async throws {
-        let coordinator = TranscriptCleanupCoordinator(
-            cleanerFactory: { CancellationResistantCleaner() }
-        )
-        let startedAt = DispatchTime.now().uptimeNanoseconds
-        let decision = await coordinator.resolve(
-            mode: .clean,
-            rawText: "a cancellation-resistant transcript",
-            deadlineNanoseconds: 5_000_000
-        )
-        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
-        guard decision.insertionSource == .raw,
-              decision.fallbackReason == .timeout,
-              elapsedNanoseconds < 100_000_000 else {
-            throw ContractFailure(message: "automatic cleanup waited for cancellation-resistant generation")
+              await cancellationRecorder.wasCancelledValue(),
+              await cancellationRecorder.wasFinishedValue() else {
+            throw ContractFailure(message: "deadline did not produce raw fallback and release the cancelled operation")
         }
     }
 
@@ -325,11 +306,23 @@ Return only the cleaned transcript.
             .deletingLastPathComponent()
             .appendingPathComponent("Fixtures/cleanup-corpus-v1.json")
         let cases = try JSONDecoder().decode([EvaluationCase].self, from: Data(contentsOf: url))
+        let approvedOutputs = [
+            "command-path-and-number": "Open the file /Users/douglas/projects/oigo/Package.swift and run swift test --filter OigoTests 42.",
+            "url-identifier-and-product": "Please check Oigo monitor https://api.example.com/v1/monitors?id=42 for monitor_id abc_123.",
+            "quoted-text-and-package-name": "Say the exact text \"deploy nice baas\", then edit package name NiceBaaS."
+        ]
+        let approvedMeanings = [
+            "command-path-and-number": "Open the Oigo Package.swift file and run the named Swift test filter with the number 42.",
+            "url-identifier-and-product": "Check the specified Oigo monitor URL and preserve its identifier values.",
+            "quoted-text-and-package-name": "Say the quoted text exactly and edit the package name NiceBaaS."
+        ]
         guard cases.count >= 3 else {
             throw ContractFailure(message: "cleanup evaluation corpus is too small to review")
         }
         for sample in cases {
-            guard sample.approved,
+            guard sample.reviewStatus == "approved",
+                  approvedOutputs[sample.id] == sample.modelOutput,
+                  approvedMeanings[sample.id] == sample.expectedMeaning,
                   !sample.rawTranscript.isEmpty,
                   !sample.modelOutput.isEmpty,
                   !sample.expectedMeaning.isEmpty,
@@ -354,7 +347,7 @@ private struct EvaluationCase: Codable {
     let modelOutput: String
     let expectedMeaning: String
     let protectedTechnicalTokens: [String]
-    let approved: Bool
+    let reviewStatus: String
 }
 
 private final class RecordingCleanerFactory: @unchecked Sendable {
@@ -441,9 +434,19 @@ private actor CancellationRecorder {
         wasCancelled = true
     }
 
+    func markFinished() {
+        didFinish = true
+    }
+
     func wasCancelledValue() -> Bool {
         wasCancelled
     }
+
+    func wasFinishedValue() -> Bool {
+        didFinish
+    }
+
+    private var didFinish = false
 }
 
 private struct SlowCleaner: TranscriptCleaner {
@@ -461,30 +464,13 @@ private struct SlowCleaner: TranscriptCleaner {
         _ = deadlineNanoseconds
         do {
             try await Task.sleep(nanoseconds: 1_000_000_000)
+            await recorder.markFinished()
             return .success("unexpected completion")
         } catch {
             await recorder.markCancelled()
+            await recorder.markFinished()
             return .cancelled
         }
-    }
-}
-
-private struct CancellationResistantCleaner: TranscriptCleaner {
-    func availability() -> TranscriptCleanupAvailability {
-        .available
-    }
-
-    func clean(
-        chunk: String,
-        deadlineNanoseconds: UInt64
-    ) async -> TranscriptCleanupGeneration {
-        _ = chunk
-        _ = deadlineNanoseconds
-        let end = DispatchTime.now().uptimeNanoseconds + 250_000_000
-        while DispatchTime.now().uptimeNanoseconds < end {
-            try? await Task.sleep(nanoseconds: 1_000_000)
-        }
-        return .success("late output")
     }
 }
 

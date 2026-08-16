@@ -9,7 +9,7 @@
       "swift test --filter OigoTests",
       "42"
     ],
-    "approved": true
+    "reviewStatus": "approved"
   },
   {
     "id": "url-identifier-and-product",
@@ -23,7 +23,7 @@
       "abc_123",
       "42"
     ],
-    "approved": true
+    "reviewStatus": "approved"
   },
   {
     "id": "quoted-text-and-package-name",
@@ -34,6 +34,6 @@
       "\"deploy nice baas\"",
       "NiceBaaS"
     ],
-    "approved": true
+    "reviewStatus": "approved"
   }
 ]

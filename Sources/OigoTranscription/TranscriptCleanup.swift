@@ -189,7 +189,7 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
                 return fallback(rawText: rawText, reason: .timeout)
             }
 
-            let generation = await TranscriptCleanupDeadline.run(
+            let generationResult = await TranscriptCleanupDeadline.run(
                 deadlineNanoseconds: deadline
             ) {
                 await cleaner.clean(
@@ -197,6 +197,9 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
                     deadlineNanoseconds: deadline - now
                 )
             }
+            let generation: TranscriptCleanupGeneration = DispatchTime.now().uptimeNanoseconds < deadline
+                ? generationResult
+                : .timedOut
             switch generation {
             case .success(let cleanedText):
                 guard !cleanedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -464,77 +467,31 @@ public enum TranscriptChunker {
 }
 
 @available(macOS 26.0, *)
-private final class TranscriptCleanupResolution: @unchecked Sendable {
-    private let lock = NSLock()
-    private let deadlineNanoseconds: UInt64
-    private var continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>?
-    private var result: TranscriptCleanupGeneration?
-
-    init(deadlineNanoseconds: UInt64) {
-        self.deadlineNanoseconds = deadlineNanoseconds
-    }
-
-    func install(_ continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>) {
-        lock.lock()
-        if let result {
-            lock.unlock()
-            continuation.resume(returning: result)
-            return
-        }
-        self.continuation = continuation
-        lock.unlock()
-    }
-
-    func resolve(_ result: TranscriptCleanupGeneration) {
-        let result = DispatchTime.now().uptimeNanoseconds < deadlineNanoseconds
-            ? result
-            : .timedOut
-        lock.lock()
-        guard self.result == nil else {
-            lock.unlock()
-            return
-        }
-        self.result = result
-        let continuation = self.continuation
-        lock.unlock()
-        continuation?.resume(returning: result)
-    }
-}
-
-@available(macOS 26.0, *)
 private enum TranscriptCleanupDeadline {
     static func run(
         deadlineNanoseconds: UInt64,
         operation: @escaping @Sendable () async -> TranscriptCleanupGeneration
     ) async -> TranscriptCleanupGeneration {
-        let resolution = TranscriptCleanupResolution(deadlineNanoseconds: deadlineNanoseconds)
-        let responseTask = Task {
-            resolution.resolve(await operation())
+        await withTaskGroup(of: TranscriptCleanupGeneration.self) { group in
+            group.addTask {
+                await operation()
+            }
+            group.addTask {
+                let now = DispatchTime.now().uptimeNanoseconds
+                guard now < deadlineNanoseconds else {
+                    return .timedOut
+                }
+                do {
+                    try await Task.sleep(nanoseconds: deadlineNanoseconds - now)
+                    return .timedOut
+                } catch {
+                    return .cancelled
+                }
+            }
+            let result = await group.next() ?? .cancelled
+            group.cancelAll()
+            return result
         }
-        let timeoutTask = Task {
-            let now = DispatchTime.now().uptimeNanoseconds
-            guard now < deadlineNanoseconds else {
-                resolution.resolve(.timedOut)
-                return
-            }
-            do {
-                try await Task.sleep(nanoseconds: deadlineNanoseconds - now)
-                resolution.resolve(.timedOut)
-            } catch {
-            }
-        }
-        let result = await withTaskCancellationHandler(operation: {
-            await withCheckedContinuation { continuation in
-                resolution.install(continuation)
-            }
-        }, onCancel: {
-            responseTask.cancel()
-            timeoutTask.cancel()
-            resolution.resolve(.cancelled)
-        })
-        responseTask.cancel()
-        timeoutTask.cancel()
-        return result
     }
 }
 
