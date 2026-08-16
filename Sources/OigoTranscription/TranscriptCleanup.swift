@@ -635,6 +635,7 @@ public final class FoundationModelsTranscriptCleaner: TranscriptCleaner, @unchec
         chunk: String,
         deadlineNanoseconds: UInt64
     ) async -> TranscriptCleanupGeneration {
+        _ = deadlineNanoseconds
         let currentAvailability = availability()
         guard case .available = currentAvailability else {
             if case .unavailable(let reason) = currentAvailability {
@@ -649,23 +650,21 @@ public final class FoundationModelsTranscriptCleaner: TranscriptCleaner, @unchec
             instructions: TranscriptCleanerInstruction.v1
         )
         defer { instrumentation.record(.resourceRelease) }
-        return await TranscriptCleanupDeadline.run(
-            timeoutNanoseconds: deadlineNanoseconds
-        ) {
-            do {
-                let response = try await session.respond(to: chunk)
-                return .success(response.content)
-            } catch is CancellationError {
-                return .cancelled
-            } catch {
-                let description = String(describing: error).lowercased()
-                if description.contains("context")
-                    || description.contains("token")
-                    || description.contains("window") {
-                    return .contextOverflow
-                }
-                return .failed("model generation failed")
+        do {
+            try Task.checkCancellation()
+            let response = try await session.respond(to: chunk)
+            try Task.checkCancellation()
+            return .success(response.content)
+        } catch is CancellationError {
+            return .cancelled
+        } catch {
+            let description = String(describing: error).lowercased()
+            if description.contains("context")
+                || description.contains("token")
+                || description.contains("window") {
+                return .contextOverflow
             }
+            return .failed("model generation failed")
         }
     }
 }
