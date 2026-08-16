@@ -52,6 +52,7 @@ public enum TranscriptCleanupFallbackReason: Equatable, Sendable, CustomStringCo
     case incompleteChunks
     case generationFailure(String)
     case emptyOutput
+    case unsafeOutput
     case persistenceFailure(String)
 
     public var description: String {
@@ -70,6 +71,8 @@ public enum TranscriptCleanupFallbackReason: Equatable, Sendable, CustomStringCo
             "cleanup generation failed: " + reason
         case .emptyOutput:
             "cleanup returned no transcript"
+        case .unsafeOutput:
+            "cleanup changed protected transcript content"
         case .persistenceFailure(let reason):
             "clean transcript could not be persisted: " + reason
         }
@@ -213,14 +216,25 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
                 : .timedOut
             switch generation {
             case .success(let cleanedText):
-                guard !cleanedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                let trimmedCleanedText = cleanedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmedCleanedText.isEmpty else {
                     return fallback(
                         rawText: rawText,
                         reason: .emptyOutput,
                         chunkCount: chunks.count
                     )
                 }
-                cleanedParts.append(cleanedText.trimmingCharacters(in: .whitespacesAndNewlines))
+                guard TranscriptCleanupOutputGuard.accepts(
+                    rawText: chunk.text,
+                    cleanedText: trimmedCleanedText
+                ) else {
+                    return fallback(
+                        rawText: rawText,
+                        reason: .unsafeOutput,
+                        chunkCount: chunks.count
+                    )
+                }
+                cleanedParts.append(trimmedCleanedText)
                 chunkIndex += 1
             case .unavailable(let reason):
                 return fallback(
@@ -281,6 +295,12 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
                 chunkCount: chunks.count
             )
         }
+        guard TranscriptCleanupOutputGuard.accepts(
+            rawText: rawText,
+            cleanedText: cleanedText
+        ) else {
+            return fallback(rawText: rawText, reason: .unsafeOutput, chunkCount: chunks.count)
+        }
         instrumentation.record(.cleanupCompletion)
         return TranscriptCleanupDecision(
             rawText: rawText,
@@ -305,6 +325,89 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
             fallbackReason: reason,
             chunkCount: chunkCount
         )
+    }
+}
+
+@available(macOS 26.0, *)
+private enum TranscriptCleanupOutputGuard {
+    private static let protectedPatterns = [
+        "\"(?:\\\\.|[^\"])*\"",
+        "https?://[^\\s]+",
+        "(?<![A-Za-z0-9])/(?:[A-Za-z0-9._-]+/)+[A-Za-z0-9._-]+",
+        "--[A-Za-z0-9][A-Za-z0-9-]*",
+        "\\b\\d+(?:[.,]\\d+)*\\b",
+        "\\b[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+\\b",
+        "\\b[A-Za-z][A-Za-z0-9_./-]*[0-9_./-][A-Za-z0-9_./-]*\\b",
+        "\\b[A-Z][A-Za-z0-9_./-]*[A-Z][A-Za-z0-9_./-]*\\b",
+        "\\b[A-Z][a-z][A-Za-z0-9_./-]+\\b"
+    ]
+
+    static func accepts(rawText: String, cleanedText: String) -> Bool {
+        let rawTokens = semanticTokens(in: rawText)
+        let cleanedTokens = semanticTokens(in: cleanedText)
+        guard cleanedTokens.isSubset(of: rawTokens) else {
+            return false
+        }
+
+        var searchStart = cleanedText.startIndex
+        for token in protectedTokens(in: rawText) {
+            guard let range = cleanedText.range(
+                of: token,
+                options: [.literal],
+                range: searchStart..<cleanedText.endIndex
+            ) else {
+                return false
+            }
+            searchStart = range.upperBound
+        }
+        return true
+    }
+
+    private static func semanticTokens(in text: String) -> Set<String> {
+        guard let expression = try? NSRegularExpression(pattern: "[A-Za-z0-9_]+") else {
+            return []
+        }
+        let value = text as NSString
+        return Set(expression.matches(in: text, range: NSRange(location: 0, length: value.length)).map {
+            value.substring(with: $0.range).lowercased()
+        })
+    }
+
+    private static func protectedTokens(in text: String) -> [String] {
+        let value = text as NSString
+        let matches = protectedPatterns.flatMap { pattern -> [(NSRange, String)] in
+            guard let expression = try? NSRegularExpression(pattern: pattern) else {
+                return []
+            }
+            return expression.matches(
+                in: text,
+                range: NSRange(location: 0, length: value.length)
+            ).map { match in
+                (
+                    match.range,
+                    value.substring(with: match.range)
+                        .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?"))
+                )
+            }
+        }
+        var protected: [(location: Int, token: String)] = []
+        var lastEnd = 0
+        for match in matches.sorted(by: {
+            if $0.0.location == $1.0.location {
+                return $0.0.length > $1.0.length
+            }
+            return $0.0.location < $1.0.location
+        }) {
+            guard !match.1.isEmpty else {
+                continue
+            }
+            guard match.0.location >= lastEnd else {
+                continue
+            }
+            protected.append((location: match.0.location, token: match.1))
+            lastEnd = NSMaxRange(match.0)
+        }
+        return protected.map(\.token)
     }
 }
 

@@ -952,15 +952,20 @@ public final class SessionStore: @unchecked Sendable {
                 at: current.cleanTextURL,
                 allowMissing: true
             )
-            try atomicWrite(
-                data,
-                named: "clean.txt",
-                in: directoryFD,
-                at: current.cleanTextURL
-            )
             var metadata = current.metadata
             metadata.updatedAt = date
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
+            do {
+                try atomicWrite(
+                    data,
+                    named: "clean.txt",
+                    in: directoryFD,
+                    at: current.cleanTextURL
+                )
+            } catch {
+                try? writeMetadata(current.metadata, at: current.metadataURL, directoryFD: directoryFD)
+                throw error
+            }
             return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
         }
     }

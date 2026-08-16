@@ -301,9 +301,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     store: store,
                     mode: terminalMode
                 )
+                try Task.checkCancellation()
                 if terminalMode == .clean {
                     _ = try coordinator.finishCleanup()
                 }
+                try Task.checkCancellation()
                 let result = insertion.insertText(
                     for: insertionSession,
                     source: decision.insertionSource,
@@ -334,6 +336,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 refreshHistory()
             }
             updateSurface()
+        } catch is CancellationError {
+            return
         } catch {
             if [.cleaning, .inserting].contains(coordinator.state) {
                 lastSession = coordinator.failInsertion(reason: String(describing: error))
@@ -431,7 +435,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             rawText: rawText,
             deadlineNanoseconds: 4_000_000_000
         )
+        try Task.checkCancellation()
         if let cleanText = decision.cleanText {
+            try Task.checkCancellation()
             do {
                 _ = try store.persistCleanText(
                     cleanText,
@@ -510,9 +516,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     rawText: rawText,
                     deadlineNanoseconds: 4_000_000_000
                 )
+                try Task.checkCancellation()
                 guard let cleanText = decision.cleanText else {
                     let fallbackReason = decision.fallbackReason?.description
                         ?? "cleanup did not complete"
+                    try Task.checkCancellation()
                     _ = try store.update(
                         entry.session,
                         state: entry.session.metadata.state,
@@ -526,6 +534,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     self.refreshHistory()
                     return
                 }
+                try Task.checkCancellation()
                 do {
                     _ = try store.persistCleanText(
                         cleanText,
@@ -538,6 +547,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     let fallbackReason = TranscriptCleanupFallbackReason
                         .persistenceFailure(String(describing: error))
                         .description
+                    try Task.checkCancellation()
                     _ = try store.update(
                         entry.session,
                         state: entry.session.metadata.state,
@@ -551,9 +561,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     self.refreshHistory()
                     return
                 }
+                try Task.checkCancellation()
                 self.historyWindow?.showMessage("Clean transcript saved. Raw transcript was unchanged.")
                 self.refreshHistory()
             } catch SessionStoreError.rawTextChanged {
+                guard !Task.isCancelled else {
+                    return
+                }
                 let fallbackReason = "raw transcript changed while Clean Again was running"
                 do {
                     _ = try store.update(
@@ -569,6 +583,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 } catch {
                     self.historyWindow?.showMessage(Self.friendlyError("Clean Again failed", error))
                 }
+            } catch is CancellationError {
+                return
             } catch {
                 self.historyWindow?.showMessage(Self.friendlyError("Clean Again failed", error))
             }

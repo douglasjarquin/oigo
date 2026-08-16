@@ -1,5 +1,5 @@
 import Foundation
-import OigoCore
+@_spi(Testing) import OigoCore
 import OigoInsertion
 import OigoTranscription
 
@@ -24,6 +24,8 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Foundation Models session cancellation releases in-process resources")
             try await testCleanupFailuresFallBackToRaw()
             print("GREEN: Cleanup failures fall back to raw without partial output")
+            try await testUnsafeCleanupOutputFallsBackToRaw()
+            print("GREEN: Unsafe cleanup output falls back to raw without insertion")
             try await testLongTranscriptChunksSequentiallyAtStableBoundaries()
             print("GREEN: Long transcripts chunk sequentially with order and paragraphs preserved")
             try await testContextOverflowResplitsOversizedChunks()
@@ -44,6 +46,8 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Raw persistence recovery invalidates stale clean text")
             try testCleanTextRejectsStaleRawSnapshot()
             print("GREEN: Clean Again cannot recreate output after a raw retry")
+            try testCleanPersistenceMetadataFailureLeavesCleanUntouched()
+            print("GREEN: clean.txt remains unpublished when metadata persistence fails")
             try testCleanInsertionReadsCleanText()
             print("GREEN: Automatic insertion can use clean.txt without touching raw.txt")
             try testApprovedEvaluationCorpusProtectsTechnicalTokens()
@@ -158,6 +162,33 @@ private struct OigoIssue8ContractTests {
         }
     }
 
+    private static func testUnsafeCleanupOutputFallsBackToRaw() async throws {
+        let rawText = "deploy Oigo --config /tmp/oigo.yaml 42"
+        let unsafeOutputs = [
+            "Deploy Oigo --config /tmp/oigo.yaml 43 and email Alice",
+            "Deploy Oigo --config 42",
+            "deploy oigo --config /tmp/oigo.yaml 42"
+        ]
+        for unsafeOutput in unsafeOutputs {
+            let coordinator = TranscriptCleanupCoordinator(
+                cleanerFactory: {
+                    FixedResultCleaner(result: .success(unsafeOutput))
+                }
+            )
+            let decision = await coordinator.resolve(
+                mode: .clean,
+                rawText: rawText,
+                deadlineNanoseconds: 100_000_000
+            )
+            guard decision.insertionText == rawText,
+                  decision.insertionSource == .raw,
+                  decision.cleanText == nil,
+                  decision.fallbackReason == .unsafeOutput else {
+                throw ContractFailure(message: "unsafe cleanup output was inserted instead of falling back")
+            }
+        }
+    }
+
     private static func testLongTranscriptChunksSequentiallyAtStableBoundaries() async throws {
         let paragraphs = [
             (1...140).map { "Sentence \($0) preserves /tmp/file-\($0).json and 42." }.joined(separator: " "),
@@ -256,7 +287,7 @@ private struct OigoIssue8ContractTests {
     private static func testCleanupInstrumentationRecordsLifecycleMetrics() async throws {
         let metrics = TranscriptCleanupMetrics(forwarding: NoopTranscriptCleanupInstrumentation())
         let coordinator = TranscriptCleanupCoordinator(
-            cleanerFactory: { FixedResultCleaner(result: .success("cleaned")) },
+            cleanerFactory: { FixedResultCleaner(result: .success("raw")) },
             instrumentation: metrics
         )
         _ = await coordinator.resolve(
@@ -446,6 +477,32 @@ private struct OigoIssue8ContractTests {
         guard try store.readRawText(for: retried) == "after retry",
               try store.readCleanText(for: retried).isEmpty else {
             throw ContractFailure(message: "stale Clean Again output changed the retried raw transcript")
+        }
+    }
+
+    private static func testCleanPersistenceMetadataFailureLeavesCleanUntouched() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue8-clean-persistence-fault-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let session = try store.createSession()
+        let persistedRaw = try store.persistRawText("raw transcript", for: session)
+        store.failNextMetadataWriteForTesting()
+
+        do {
+            _ = try store.persistCleanText("clean transcript", for: persistedRaw)
+            throw ContractFailure(message: "metadata fault injection did not fail clean persistence")
+        } catch let error as SessionStoreError {
+            guard case .invalidMetadata = error else {
+                throw ContractFailure(message: "clean metadata fault returned the wrong error category")
+            }
+        }
+
+        guard try store.readRawText(for: persistedRaw) == "raw transcript",
+              try store.readCleanText(for: persistedRaw).isEmpty,
+              !FileManager.default.fileExists(atPath: persistedRaw.cleanTextURL.path) else {
+            throw ContractFailure(message: "clean.txt was published despite metadata persistence failure")
         }
     }
 
