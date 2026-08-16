@@ -2,7 +2,6 @@ import Foundation
 import FoundationModels
 import OigoCore
 import os
-import Darwin
 
 @available(macOS 26.0, *)
 public enum TranscriptCleanupMode: String, Codable, CaseIterable, Sendable {
@@ -137,6 +136,14 @@ public protocol TranscriptCleaner: Sendable {
         chunk: String,
         deadlineNanoseconds: UInt64
     ) async -> TranscriptCleanupGeneration
+}
+
+@available(macOS 26.0, *)
+public protocol TranscriptCleanupModel: Sendable {
+    func generate(
+        chunk: String,
+        instructions: String
+    ) async throws -> String
 }
 
 @available(macOS 26.0, *)
@@ -486,83 +493,38 @@ public enum TranscriptChunker {
 }
 
 @available(macOS 26.0, *)
-private final class TranscriptCleanupResolution: @unchecked Sendable {
-    private let lock = NSLock()
-    private let deadlineNanoseconds: UInt64
-    private var continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>?
-    private var result: TranscriptCleanupGeneration?
-
-    init(deadlineNanoseconds: UInt64) {
-        self.deadlineNanoseconds = deadlineNanoseconds
-    }
-
-    func install(_ continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>) {
-        lock.lock()
-        if let result {
-            lock.unlock()
-            continuation.resume(returning: result)
-            return
-        }
-        self.continuation = continuation
-        lock.unlock()
-    }
-
-    func resolve(_ result: TranscriptCleanupGeneration) {
-        let result = DispatchTime.now().uptimeNanoseconds < deadlineNanoseconds
-            ? result
-            : .timedOut
-        lock.lock()
-        guard self.result == nil else {
-            lock.unlock()
-            return
-        }
-        self.result = result
-        let continuation = self.continuation
-        lock.unlock()
-        continuation?.resume(returning: result)
-    }
-}
-
-@available(macOS 26.0, *)
 private enum TranscriptCleanupDeadline {
     static func run(
         deadlineNanoseconds: UInt64,
         cancel: @escaping @Sendable () -> Void,
         operation: @escaping @Sendable () async -> TranscriptCleanupGeneration
     ) async -> TranscriptCleanupGeneration {
-        let resolution = TranscriptCleanupResolution(deadlineNanoseconds: deadlineNanoseconds)
-        let responseTask = Task {
-            resolution.resolve(await operation())
-        }
-        let timeoutTask = Task {
-            let now = DispatchTime.now().uptimeNanoseconds
-            guard now < deadlineNanoseconds else {
-                cancel()
-                responseTask.cancel()
-                resolution.resolve(.timedOut)
-                return
-            }
-            do {
-                try await Task.sleep(nanoseconds: deadlineNanoseconds - now)
-                cancel()
-                responseTask.cancel()
-                resolution.resolve(.timedOut)
-            } catch {
-            }
-        }
-        let result = await withTaskCancellationHandler(operation: {
-            await withCheckedContinuation { continuation in
-                resolution.install(continuation)
+        return await withTaskCancellationHandler(operation: {
+            await withTaskGroup(of: TranscriptCleanupGeneration.self) { group in
+                group.addTask {
+                    await operation()
+                }
+                group.addTask {
+                    let now = DispatchTime.now().uptimeNanoseconds
+                    guard now < deadlineNanoseconds else {
+                        cancel()
+                        return .timedOut
+                    }
+                    do {
+                        try await Task.sleep(nanoseconds: deadlineNanoseconds - now)
+                        cancel()
+                        return .timedOut
+                    } catch {
+                        return .cancelled
+                    }
+                }
+                let result = await group.next() ?? .cancelled
+                group.cancelAll()
+                return result
             }
         }, onCancel: {
             cancel()
-            responseTask.cancel()
-            timeoutTask.cancel()
-            resolution.resolve(.cancelled)
         })
-        responseTask.cancel()
-        timeoutTask.cancel()
-        return result
     }
 }
 
@@ -651,195 +613,38 @@ public final class TranscriptCleanupMetrics: TranscriptCleanupInstrumentation, @
 }
 
 @available(macOS 26.0, *)
-private struct TranscriptCleanupWorkerRequest: Codable {
-    let chunk: String
-}
-
-@available(macOS 26.0, *)
-private struct TranscriptCleanupWorkerResponse: Codable {
-    let outcome: String
-    let value: String?
-}
-
-@available(macOS 26.0, *)
-private final class FoundationModelsWorkerProcess: @unchecked Sendable {
-    private let lock = NSLock()
-    private var process: Process?
-    private var cancelRequested = false
-
-    func cancel() {
-        lock.lock()
-        cancelRequested = true
-        let process = self.process
-        lock.unlock()
-
-        guard let process, process.isRunning else {
-            return
-        }
-        process.terminate()
-        let processIdentifier = process.processIdentifier
-        if processIdentifier > 0 {
-            _ = Darwin.kill(processIdentifier, SIGKILL)
-        }
-    }
-
-    func run(
-        executableURL: URL,
-        requestData: Data
-    ) -> TranscriptCleanupGeneration {
-        let process = Process()
-        let input = Pipe()
-        let output = Pipe()
-        process.executableURL = executableURL
-        process.arguments = ["--oigo-transcript-cleanup-worker"]
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-
-        lock.lock()
-        self.process = process
-        let shouldCancel = cancelRequested
-        lock.unlock()
-        defer {
-            lock.lock()
-            self.process = nil
-            lock.unlock()
-        }
-
-        do {
-            try process.run()
-            if shouldCancel || isCancelRequested() {
-                cancel()
-            }
-            try input.fileHandleForWriting.write(contentsOf: requestData)
-            try input.fileHandleForWriting.close()
-            let responseData = try output.fileHandleForReading.readToEnd() ?? Data()
-            process.waitUntilExit()
-            if isCancelRequested() {
-                return .cancelled
-            }
-            return Self.decode(responseData, terminationStatus: process.terminationStatus)
-        } catch {
-            cancel()
-            return isCancelRequested()
-                ? .cancelled
-                : .failed("model cleanup worker failed")
-        }
-    }
-
-    private func isCancelRequested() -> Bool {
-        lock.lock()
-        let requested = cancelRequested
-        lock.unlock()
-        return requested
-    }
-
-    private static func decode(
-        _ data: Data,
-        terminationStatus: Int32
-    ) -> TranscriptCleanupGeneration {
-        guard terminationStatus == 0,
-              let response = try? JSONDecoder().decode(
-                  TranscriptCleanupWorkerResponse.self,
-                  from: data
-              ) else {
-            return .failed("model cleanup worker failed")
-        }
-        switch response.outcome {
-        case "success":
-            return .success(response.value ?? "")
-        case "unavailable":
-            return .unavailable(response.value ?? "model unavailable")
-        case "cancelled":
-            return .cancelled
-        case "contextOverflow":
-            return .contextOverflow
-        default:
-            return .failed(response.value ?? "model generation failed")
-        }
-    }
-}
-
-@available(macOS 26.0, *)
-public enum FoundationModelsTranscriptWorker {
-    public static func run() async -> Int32 {
-        do {
-            let requestData = FileHandle.standardInput.readDataToEndOfFile()
-            let request = try JSONDecoder().decode(
-                TranscriptCleanupWorkerRequest.self,
-                from: requestData
-            )
-            let response = await generate(chunk: request.chunk)
-            let responseData = try JSONEncoder().encode(response)
-            try FileHandle.standardOutput.write(contentsOf: responseData)
-            return 0
-        } catch {
-            return 1
-        }
-    }
-
-    private static func generate(
-        chunk: String
-    ) async -> TranscriptCleanupWorkerResponse {
-        let model = SystemLanguageModel.default
-        guard model.isAvailable else {
-            return TranscriptCleanupWorkerResponse(
-                outcome: "unavailable",
-                value: String(describing: model.availability)
-            )
-        }
-
+private struct FoundationModelsSessionModel: TranscriptCleanupModel {
+    func generate(
+        chunk: String,
+        instructions: String
+    ) async throws -> String {
         let session = LanguageModelSession(
-            model: model,
-            instructions: TranscriptCleanerInstruction.v1
+            model: .default,
+            instructions: instructions
         )
-        do {
-            try Task.checkCancellation()
-            let response = try await session.respond(to: chunk)
-            try Task.checkCancellation()
-            return TranscriptCleanupWorkerResponse(
-                outcome: "success",
-                value: response.content
-            )
-        } catch is CancellationError {
-            return TranscriptCleanupWorkerResponse(
-                outcome: "cancelled",
-                value: nil
-            )
-        } catch {
-            let description = String(describing: error).lowercased()
-            if description.contains("context")
-                || description.contains("token")
-                || description.contains("window") {
-                return TranscriptCleanupWorkerResponse(
-                    outcome: "contextOverflow",
-                    value: nil
-                )
-            }
-            return TranscriptCleanupWorkerResponse(
-                outcome: "failed",
-                value: "model generation failed"
-            )
-        }
+        try Task.checkCancellation()
+        let response = try await session.respond(to: chunk)
+        try Task.checkCancellation()
+        return response.content
     }
 }
 
 @available(macOS 26.0, *)
 public final class FoundationModelsTranscriptCleaner: TranscriptCleaner, @unchecked Sendable {
     private let instrumentation: TranscriptCleanupInstrumentation
-    private let workerExecutable: URL?
+    private let model: any TranscriptCleanupModel
     private let availabilityProvider: @Sendable () -> TranscriptCleanupAvailability
-    private let activeWorkerLock = NSLock()
-    private var activeWorker: FoundationModelsWorkerProcess?
+    private let activeTaskLock = NSLock()
+    private var activeTask: Task<TranscriptCleanupGeneration, Never>?
     private var cancelRequested = false
 
     public init(
         instrumentation: TranscriptCleanupInstrumentation = TranscriptCleanupSignposts(),
-        workerExecutable: URL? = Bundle.main.executableURL,
+        model: (any TranscriptCleanupModel)? = nil,
         availabilityProvider: (@Sendable () -> TranscriptCleanupAvailability)? = nil
     ) {
         self.instrumentation = instrumentation
-        self.workerExecutable = workerExecutable
+        self.model = model ?? FoundationModelsSessionModel()
         self.availabilityProvider = availabilityProvider ?? Self.runtimeAvailability
     }
 
@@ -856,11 +661,11 @@ public final class FoundationModelsTranscriptCleaner: TranscriptCleaner, @unchec
     }
 
     public func cancel() {
-        activeWorkerLock.lock()
+        activeTaskLock.lock()
         cancelRequested = true
-        let worker = activeWorker
-        activeWorkerLock.unlock()
-        worker?.cancel()
+        let task = activeTask
+        activeTaskLock.unlock()
+        task?.cancel()
     }
 
     public func clean(
@@ -876,47 +681,54 @@ public final class FoundationModelsTranscriptCleaner: TranscriptCleaner, @unchec
             return .unavailable("model availability changed before cleanup")
         }
 
-        guard let workerExecutable else {
-            return .failed("cleanup worker executable unavailable")
+        let task = Task { [model] () -> TranscriptCleanupGeneration in
+            do {
+                try Task.checkCancellation()
+                let output = try await model.generate(
+                    chunk: chunk,
+                    instructions: TranscriptCleanerInstruction.v1
+                )
+                try Task.checkCancellation()
+                return .success(output)
+            } catch is CancellationError {
+                return .cancelled
+            } catch {
+                let description = String(describing: error).lowercased()
+                if description.contains("context")
+                    || description.contains("token")
+                    || description.contains("window") {
+                    return .contextOverflow
+                }
+                return .failed("model generation failed")
+            }
         }
-        guard let requestData = try? JSONEncoder().encode(
-            TranscriptCleanupWorkerRequest(chunk: chunk)
-        ) else {
-            return .failed("cleanup request could not be encoded")
-        }
-        let worker = FoundationModelsWorkerProcess()
-        let shouldCancel = begin(worker)
+        let shouldCancel = begin(task)
         if shouldCancel {
-            worker.cancel()
+            task.cancel()
         }
         defer {
-            end(worker)
+            end(task)
             instrumentation.record(.resourceRelease)
         }
         return await withTaskCancellationHandler(operation: {
-            worker.run(
-                executableURL: workerExecutable,
-                requestData: requestData
-            )
+            await task.value
         }, onCancel: {
-            worker.cancel()
+            task.cancel()
         })
     }
 
-    private func begin(_ worker: FoundationModelsWorkerProcess) -> Bool {
-        activeWorkerLock.lock()
-        activeWorker = worker
+    private func begin(_ task: Task<TranscriptCleanupGeneration, Never>) -> Bool {
+        activeTaskLock.lock()
+        activeTask = task
         let shouldCancel = cancelRequested
-        activeWorkerLock.unlock()
+        activeTaskLock.unlock()
         return shouldCancel
     }
 
-    private func end(_ worker: FoundationModelsWorkerProcess) {
-        activeWorkerLock.lock()
-        if activeWorker === worker {
-            activeWorker = nil
-            cancelRequested = false
-        }
-        activeWorkerLock.unlock()
+    private func end(_ task: Task<TranscriptCleanupGeneration, Never>) {
+        activeTaskLock.lock()
+        activeTask = nil
+        cancelRequested = false
+        activeTaskLock.unlock()
     }
 }

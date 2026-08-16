@@ -1,5 +1,4 @@
 import Foundation
-import Darwin
 import OigoCore
 import OigoInsertion
 import OigoTranscription
@@ -21,10 +20,8 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Instant mode does not initialize Foundation Models")
             try await testFoundationModelsAdapterUsesFixedInstructionAndReportsAvailability()
             print("GREEN: Foundation Models adapter exposes the fixed instruction and availability reason")
-            try testWorkerRejectsMalformedRequestsWithoutOutput()
-            print("GREEN: Foundation Models worker rejects malformed requests without transcript output")
-            try await testFoundationModelsWorkerCancellationReleasesProcess()
-            print("GREEN: Foundation Models worker cancellation releases the child process")
+            try await testFoundationModelsSessionCancellationReleasesResources()
+            print("GREEN: Foundation Models session cancellation releases in-process resources")
             try await testCleanupFailuresFallBackToRaw()
             print("GREEN: Cleanup failures fall back to raw without partial output")
             try await testLongTranscriptChunksSequentiallyAtStableBoundaries()
@@ -76,8 +73,22 @@ private struct OigoIssue8ContractTests {
     }
 
     private static func testFoundationModelsAdapterUsesFixedInstructionAndReportsAvailability() async throws {
-        let cleaner = FoundationModelsTranscriptCleaner()
-        switch cleaner.availability() {
+        let recorder = ModelRecorder()
+        let cleaner = FoundationModelsTranscriptCleaner(
+            model: RecordingModel(recorder: recorder),
+            availabilityProvider: { .available }
+        )
+        let generation = await cleaner.clean(
+            chunk: "raw model input",
+            deadlineNanoseconds: 1_000_000_000
+        )
+        guard generation == .success("clean model output"),
+              await recorder.instructions() == TranscriptCleanerInstruction.v1 else {
+            throw ContractFailure(message: "Foundation Models adapter did not use the fixed instruction")
+        }
+
+        let unavailableCleaner = FoundationModelsTranscriptCleaner()
+        switch unavailableCleaner.availability() {
         case .available:
             break
         case .unavailable(let reason):
@@ -87,87 +98,34 @@ private struct OigoIssue8ContractTests {
         }
     }
 
-    private static func testFoundationModelsWorkerCancellationReleasesProcess() async throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("oigo-issue8-worker-" + UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-
-        let markerURL = root.appendingPathComponent("started")
-        let pidURL = root.appendingPathComponent("pid")
-        let workerURL = root.appendingPathComponent("worker.sh")
-        let script = """
-        #!/bin/sh
-        : > '\(markerURL.path)'
-        printf '%s' "$$" > '\(pidURL.path)'
-        trap 'exit 143' TERM INT
-        while :; do sleep 1; done
-        """
-        try Data(script.utf8).write(to: workerURL, options: .atomic)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755],
-            ofItemAtPath: workerURL.path
-        )
-
+    private static func testFoundationModelsSessionCancellationReleasesResources() async throws {
+        let recorder = ModelRecorder()
         let metrics = TranscriptCleanupMetrics(forwarding: NoopTranscriptCleanupInstrumentation())
         let cleaner = FoundationModelsTranscriptCleaner(
             instrumentation: metrics,
-            workerExecutable: workerURL,
+            model: SlowRecordingModel(recorder: recorder),
             availabilityProvider: { .available }
         )
         let generationTask = Task.detached {
             await cleaner.clean(
-                chunk: "worker lifecycle probe",
+                chunk: "in-process lifecycle probe",
                 deadlineNanoseconds: 5_000_000_000
             )
         }
-        guard waitForFile(markerURL, timeoutNanoseconds: 1_000_000_000),
-              waitForFile(pidURL, timeoutNanoseconds: 1_000_000_000) else {
+        guard await recorder.waitForStart() else {
             cleaner.cancel()
             _ = await generationTask.value
-            throw ContractFailure(message: "the controllable cleanup worker did not start")
+            throw ContractFailure(message: "the controllable in-process model did not start")
         }
 
         cleaner.cancel()
         let generation = await generationTask.value
         guard generation == .cancelled else {
-            throw ContractFailure(message: "worker cancellation returned " + String(describing: generation))
+            throw ContractFailure(message: "in-process model cancellation returned " + String(describing: generation))
         }
-        guard let pid = Int32(try String(contentsOf: pidURL, encoding: .utf8)) else {
-            throw ContractFailure(message: "worker cancellation fixture did not publish a valid PID")
-        }
-        guard waitForProcessExit(pid, timeoutNanoseconds: 1_000_000_000) else {
-            throw ContractFailure(message: "worker cancellation did not reap the child process")
-        }
-        guard metrics.snapshot().resourceReleaseCount == 1 else {
-            throw ContractFailure(message: "worker cancellation did not record exactly one resource release")
-        }
-    }
-
-    private static func testWorkerRejectsMalformedRequestsWithoutOutput() throws {
-        let testExecutable = URL(fileURLWithPath: CommandLine.arguments[0])
-            .standardizedFileURL
-        let workerExecutable = testExecutable
-            .deletingLastPathComponent()
-            .appendingPathComponent("Oigo")
-        guard FileManager.default.isExecutableFile(atPath: workerExecutable.path) else {
-            throw ContractFailure(message: "the native cleanup worker executable was not built")
-        }
-        let input = Pipe()
-        let output = Pipe()
-        let process = Process()
-        process.executableURL = workerExecutable
-        process.arguments = ["--oigo-transcript-cleanup-worker"]
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        try input.fileHandleForWriting.write(contentsOf: Data("not-json".utf8))
-        try input.fileHandleForWriting.close()
-        let response = try output.fileHandleForReading.readToEnd() ?? Data()
-        process.waitUntilExit()
-        guard process.terminationStatus != 0, response.isEmpty else {
-            throw ContractFailure(message: "malformed worker input produced output or a successful exit")
+        guard await recorder.waitForFinish(),
+              metrics.snapshot().resourceReleaseCount == 1 else {
+            throw ContractFailure(message: "in-process model cancellation did not release exactly one resource")
         }
     }
 
@@ -603,6 +561,76 @@ private struct EvaluationCase: Codable {
     let expectedMeaning: String
     let protectedTechnicalTokens: [String]
     let reviewStatus: String
+}
+
+private actor ModelRecorder {
+    private var didStart = false
+    private var didFinish = false
+    private var didCancel = false
+    private var recordedInstructions = ""
+
+    func markStarted(instructions: String = "") {
+        didStart = true
+        recordedInstructions = instructions
+    }
+
+    func markCancelled() {
+        didCancel = true
+    }
+
+    func markFinished() {
+        didFinish = true
+    }
+
+    func instructions() -> String {
+        recordedInstructions
+    }
+
+    func waitForStart(timeoutNanoseconds: UInt64 = 1_000_000_000) async -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+        while !didStart && DispatchTime.now().uptimeNanoseconds < deadline {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        return didStart
+    }
+
+    func waitForFinish(timeoutNanoseconds: UInt64 = 1_000_000_000) async -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+        while !didFinish && DispatchTime.now().uptimeNanoseconds < deadline {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        return didFinish && didCancel
+    }
+}
+
+private struct RecordingModel: TranscriptCleanupModel {
+    let recorder: ModelRecorder
+
+    func generate(chunk: String, instructions: String) async throws -> String {
+        _ = chunk
+        await recorder.markStarted(instructions: instructions)
+        await recorder.markFinished()
+        return "clean model output"
+    }
+}
+
+private struct SlowRecordingModel: TranscriptCleanupModel {
+    let recorder: ModelRecorder
+
+    func generate(chunk: String, instructions: String) async throws -> String {
+        _ = chunk
+        _ = instructions
+        await recorder.markStarted()
+        do {
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            await recorder.markFinished()
+            return "unexpected completion"
+        } catch {
+            await recorder.markCancelled()
+            await recorder.markFinished()
+            throw CancellationError()
+        }
+    }
 }
 
 private struct PendingRawPersistenceFixture: Codable {
