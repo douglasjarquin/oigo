@@ -1,6 +1,8 @@
 import Foundation
+import AVFAudio
+import Speech
 import OigoCore
-import OigoTranscription
+@_spi(Testing) import OigoTranscription
 
 private struct ContractFailure: Error, CustomStringConvertible {
     let message: String
@@ -129,6 +131,20 @@ private struct OigoIssue9ContractTests {
         }
         guard OigoProcessingMode.instant.supportsDictationWithoutFoundationModels else {
             throw ContractFailure(message: "Instant mode incorrectly requires Foundation Models")
+        }
+
+        let module = DictationTranscriber(
+            locale: Locale(identifier: "en-US"),
+            preset: .progressiveLongDictation
+        )
+        guard let analyzerFormat = await TranscriptionService.analyzerAudioFormat(
+            for: AudioCaptureFormat(sampleRate: 48_000, channelCount: 1),
+            compatibleWith: module
+        ), analyzerFormat.sampleRate == 16_000,
+           analyzerFormat.channelCount == 1,
+           analyzerFormat.commonFormat == .pcmFormatInt16,
+           analyzerFormat.isInterleaved else {
+            throw ContractFailure(message: "live SpeechAnalyzer input did not use the module's best compatible format")
         }
     }
 

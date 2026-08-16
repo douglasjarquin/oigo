@@ -5,6 +5,18 @@ import Foundation
 import OigoCore
 import Speech
 
+private final class AudioPCMBufferBox: @unchecked Sendable {
+    let buffer: AVAudioPCMBuffer
+
+    init(_ buffer: AVAudioPCMBuffer) {
+        self.buffer = buffer
+    }
+}
+
+private final class AudioConverterInputState: @unchecked Sendable {
+    var supplied = false
+}
+
 @available(macOS 26.0, *)
 public final class TranscriptionService: TranscriptionController, @unchecked Sendable {
     private static let maxPreviewCharacters = 512
@@ -42,12 +54,31 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private var session: DictationSession?
     private var sessionStore: SessionStore?
     private var audioFormat: AVAudioFormat?
+    private var audioConverter: AVAudioConverter?
     private var updateHandler: (@Sendable (TranscriptionUpdate) -> Void)?
     private var analysisError: TranscriptionError?
     private var lastError: TranscriptionError?
 
     public init(locale: Locale = Locale(identifier: "en-US")) {
         configuredLocale = locale
+    }
+
+    @_spi(Testing)
+    public static func analyzerAudioFormat(
+        for captureFormat: AudioCaptureFormat,
+        compatibleWith module: DictationTranscriber
+    ) async -> AVAudioFormat? {
+        guard captureFormat.isValid,
+              let naturalFormat = AVAudioFormat(
+                  standardFormatWithSampleRate: captureFormat.sampleRate,
+                  channels: AVAudioChannelCount(captureFormat.channelCount)
+              ) else {
+            return nil
+        }
+        return await SpeechAnalyzer.bestAvailableAudioFormat(
+            compatibleWith: [module],
+            considering: naturalFormat
+        )
     }
 
     @_spi(Testing)
@@ -81,7 +112,8 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             updateHandler: nil,
             resultTask: resultTask,
             analysisTask: nil,
-            transcriptStore: TranscriptStore()
+            transcriptStore: TranscriptStore(),
+            audioConverter: nil
         )
         guard published else {
             gate.finish()
@@ -203,17 +235,23 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         do {
             let module = try await installedTranscriber()
             try checkCancellationRequested()
-            guard let audioFormat = AVAudioFormat(
+            guard let captureAudioFormat = AVAudioFormat(
                 standardFormatWithSampleRate: format.sampleRate,
                 channels: AVAudioChannelCount(format.channelCount)
+            ), let audioFormat = await Self.analyzerAudioFormat(
+                for: format,
+                compatibleWith: module
+            ), let audioConverter = AVAudioConverter(
+                from: captureAudioFormat,
+                to: audioFormat
             ) else {
                 throw TranscriptionError.invalidCaptureFormat
             }
+            audioConverter.primeMethod = .none
 
             let streamPair = AsyncStream<AnalyzerInput>.makeStream()
             preparedInputContinuation = streamPair.continuation
             let analyzer = SpeechAnalyzer(
-                inputSequence: streamPair.stream,
                 modules: [module],
                 options: SpeechAnalyzer.Options(
                     priority: .userInitiated,
@@ -269,7 +307,8 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 updateHandler: onUpdate,
                 resultTask: resultTask,
                 analysisTask: analysisTask,
-                transcriptStore: TranscriptStore()
+                transcriptStore: TranscriptStore(),
+                audioConverter: audioConverter
             )
             guard published else {
                 gate.finish()
@@ -302,6 +341,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         lock.lock()
         guard lifecycle == .running,
               let audioFormat,
+              let audioConverter,
               let inputContinuation else {
             lock.unlock()
             return
@@ -309,7 +349,11 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         lock.unlock()
 
         do {
-            let pcmBuffer = try makePCMBuffer(buffer, format: audioFormat)
+            let pcmBuffer = try makePCMBuffer(
+                buffer,
+                format: audioFormat,
+                converter: audioConverter
+            )
             inputContinuation.yield(AnalyzerInput(buffer: pcmBuffer))
         } catch {
             record(error: Self.map(error))
@@ -708,6 +752,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             session = nil
             sessionStore = nil
             audioFormat = nil
+            audioConverter = nil
             updateHandler = nil
             analysisError = nil
             cancellationRequested = false
@@ -795,7 +840,8 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         updateHandler: (@Sendable (TranscriptionUpdate) -> Void)?,
         resultTask: Task<Void, Never>?,
         analysisTask: Task<Void, Never>?,
-        transcriptStore: TranscriptStore
+        transcriptStore: TranscriptStore,
+        audioConverter: AVAudioConverter?
     ) -> Bool {
         withLock {
             guard lifecycle == .starting, !cancellationRequested else {
@@ -806,6 +852,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             self.analyzer = analyzer
             self.inputContinuation = inputContinuation
             self.audioFormat = audioFormat
+            self.audioConverter = audioConverter
             self.session = session
             sessionStore = store
             self.updateHandler = updateHandler
@@ -980,35 +1027,86 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
 
     private func makePCMBuffer(
         _ captureBuffer: AudioCaptureBuffer,
-        format: AVAudioFormat
+        format: AVAudioFormat,
+        converter: AVAudioConverter
     ) throws -> AVAudioPCMBuffer {
         guard captureBuffer.frameCount > 0,
-              captureBuffer.sampleRate == format.sampleRate,
-              captureBuffer.channelCount == Int(format.channelCount),
-              let pcmBuffer = AVAudioPCMBuffer(
-                pcmFormat: format,
+              captureBuffer.sampleRate.isFinite,
+              captureBuffer.sampleRate > 0,
+              captureBuffer.channelCount == 1,
+              format.commonFormat == .pcmFormatInt16,
+              format.isInterleaved,
+              let captureFormat = AVAudioFormat(
+                  standardFormatWithSampleRate: captureBuffer.sampleRate,
+                  channels: AVAudioChannelCount(captureBuffer.channelCount)
+              ),
+              let capturePCMBuffer = AVAudioPCMBuffer(
+                pcmFormat: captureFormat,
                 frameCapacity: AVAudioFrameCount(captureBuffer.frameCount)
               ),
-              let destination = pcmBuffer.floatChannelData?.pointee else {
+              let source = capturePCMBuffer.floatChannelData?.pointee else {
             throw TranscriptionError.malformedAudio(
                 URL(fileURLWithPath: "<live-buffer>"),
                 "capture buffer does not match the prepared mono PCM format"
             )
         }
-        pcmBuffer.frameLength = AVAudioFrameCount(captureBuffer.frameCount)
-        let destinationByteCount = captureBuffer.frameCount * MemoryLayout<Float>.size
-        memset(destination, 0, destinationByteCount)
-        captureBuffer.pcmData.withUnsafeBytes { source in
-            guard let baseAddress = source.baseAddress else {
-                return
+        let sourceByteCount = captureBuffer.frameCount * MemoryLayout<Float>.size
+        try captureBuffer.pcmData.withUnsafeBytes { rawBuffer in
+            guard rawBuffer.count >= sourceByteCount,
+                  let baseAddress = rawBuffer.baseAddress else {
+                throw TranscriptionError.malformedAudio(
+                    URL(fileURLWithPath: "<live-buffer>"),
+                    "capture buffer does not contain one Float32 sample per frame"
+                )
             }
-            memcpy(
-                destination,
-                baseAddress,
-                min(destinationByteCount, captureBuffer.pcmData.count)
+            memcpy(source, baseAddress, sourceByteCount)
+        }
+        for index in 0..<captureBuffer.frameCount {
+            guard source[index].isFinite else {
+                throw TranscriptionError.malformedAudio(
+                    URL(fileURLWithPath: "<live-buffer>"),
+                    "capture buffer contains a non-finite sample"
+                )
+            }
+        }
+        capturePCMBuffer.frameLength = AVAudioFrameCount(captureBuffer.frameCount)
+
+        let expectedFrameCount = max(
+            1,
+            Int(ceil(Double(captureBuffer.frameCount) * format.sampleRate / captureBuffer.sampleRate)) + 32
+        )
+        guard let analyzerPCMBuffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(expectedFrameCount)
+        ) else {
+            throw TranscriptionError.malformedAudio(
+                URL(fileURLWithPath: "<live-buffer>"),
+                "could not allocate the analyzer PCM buffer"
             )
         }
-        return pcmBuffer
+
+        let inputBuffer = AudioPCMBufferBox(capturePCMBuffer)
+        let inputState = AudioConverterInputState()
+        var conversionError: NSError?
+        let status = converter.convert(
+            to: analyzerPCMBuffer,
+            error: &conversionError
+        ) { _, inputStatus in
+            guard !inputState.supplied else {
+                inputStatus.pointee = .noDataNow
+                return nil
+            }
+            inputState.supplied = true
+            inputStatus.pointee = .haveData
+            return inputBuffer.buffer
+        }
+        guard status != .error, analyzerPCMBuffer.frameLength > 0 else {
+            throw TranscriptionError.malformedAudio(
+                URL(fileURLWithPath: "<live-buffer>"),
+                conversionError.map(String.init(describing:)) ?? "audio format conversion failed"
+            )
+        }
+        return analyzerPCMBuffer
     }
 
 }

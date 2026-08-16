@@ -420,6 +420,7 @@ public enum OigoLaunchAtLoginStatus: String, Sendable {
     case unknown
 }
 
+@MainActor
 public protocol OigoLaunchAtLoginClient: AnyObject {
     var status: OigoLaunchAtLoginStatus { get }
     func register() throws

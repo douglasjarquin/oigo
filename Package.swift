@@ -100,7 +100,8 @@ let package = Package(
             dependencies: ["OigoCore", "OigoCapture", "OigoTranscription", "OigoInsertion"],
             path: "Sources/Oigo",
             linkerSettings: [
-                .linkedFramework("AppKit")
+                .linkedFramework("AppKit"),
+                .linkedFramework("ServiceManagement")
             ]
         ),
         .executableTarget(
