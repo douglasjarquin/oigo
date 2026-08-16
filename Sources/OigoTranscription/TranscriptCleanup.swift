@@ -813,19 +813,26 @@ public enum FoundationModelsTranscriptWorker {
 public final class FoundationModelsTranscriptCleaner: TranscriptCleaner, @unchecked Sendable {
     private let instrumentation: TranscriptCleanupInstrumentation
     private let workerExecutable: URL?
+    private let availabilityProvider: @Sendable () -> TranscriptCleanupAvailability
     private let activeWorkerLock = NSLock()
     private var activeWorker: FoundationModelsWorkerProcess?
     private var cancelRequested = false
 
     public init(
         instrumentation: TranscriptCleanupInstrumentation = TranscriptCleanupSignposts(),
-        workerExecutable: URL? = Bundle.main.executableURL
+        workerExecutable: URL? = Bundle.main.executableURL,
+        availabilityProvider: (@Sendable () -> TranscriptCleanupAvailability)? = nil
     ) {
         self.instrumentation = instrumentation
         self.workerExecutable = workerExecutable
+        self.availabilityProvider = availabilityProvider ?? Self.runtimeAvailability
     }
 
     public func availability() -> TranscriptCleanupAvailability {
+        availabilityProvider()
+    }
+
+    private static func runtimeAvailability() -> TranscriptCleanupAvailability {
         let model = SystemLanguageModel.default
         guard model.isAvailable else {
             return .unavailable(String(describing: model.availability))

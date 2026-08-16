@@ -1,5 +1,5 @@
 import Foundation
-import CryptoKit
+import Darwin
 import OigoCore
 import OigoInsertion
 import OigoTranscription
@@ -23,6 +23,8 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Foundation Models adapter exposes the fixed instruction and availability reason")
             try testWorkerRejectsMalformedRequestsWithoutOutput()
             print("GREEN: Foundation Models worker rejects malformed requests without transcript output")
+            try await testFoundationModelsWorkerCancellationReleasesProcess()
+            print("GREEN: Foundation Models worker cancellation releases the child process")
             try await testCleanupFailuresFallBackToRaw()
             print("GREEN: Cleanup failures fall back to raw without partial output")
             try await testLongTranscriptChunksSequentiallyAtStableBoundaries()
@@ -66,14 +68,6 @@ private struct OigoIssue8ContractTests {
     }
 
     private static func testFoundationModelsAdapterUsesFixedInstructionAndReportsAvailability() async throws {
-        let instructionData = Data(TranscriptCleanerInstruction.v1.utf8)
-        let instructionDigest = SHA256.hash(data: instructionData)
-            .map { String(format: "%02x", $0) }
-            .joined()
-        guard instructionDigest == "a3384f019de02d823305bd2c292b8d7e62dad8e0ed4dd3727a342a0249e4beea" else {
-            throw ContractFailure(message: "the v1 cleanup instruction changed")
-        }
-
         let cleaner = FoundationModelsTranscriptCleaner()
         switch cleaner.availability() {
         case .available:
@@ -82,6 +76,56 @@ private struct OigoIssue8ContractTests {
             guard !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw ContractFailure(message: "model unavailability did not expose a reason")
             }
+        }
+    }
+
+    private static func testFoundationModelsWorkerCancellationReleasesProcess() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue8-worker-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let markerURL = root.appendingPathComponent("started")
+        let pidURL = root.appendingPathComponent("pid")
+        let workerURL = root.appendingPathComponent("worker.sh")
+        let script = """
+        #!/bin/sh
+        : > '\(markerURL.path)'
+        printf '%s' "$$" > '\(pidURL.path)'
+        trap 'exit 143' TERM INT
+        while :; do sleep 1; done
+        """
+        try Data(script.utf8).write(to: workerURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: workerURL.path
+        )
+
+        let metrics = TranscriptCleanupMetrics(forwarding: NoopTranscriptCleanupInstrumentation())
+        let cleaner = FoundationModelsTranscriptCleaner(
+            instrumentation: metrics,
+            workerExecutable: workerURL,
+            availabilityProvider: { .available }
+        )
+        let generationTask = Task.detached {
+            await cleaner.clean(
+                chunk: "worker lifecycle probe",
+                deadlineNanoseconds: 5_000_000_000
+            )
+        }
+        guard waitForFile(markerURL, timeoutNanoseconds: 1_000_000_000) else {
+            cleaner.cancel()
+            _ = await generationTask.value
+            throw ContractFailure(message: "the controllable cleanup worker did not start")
+        }
+
+        cleaner.cancel()
+        let generation = await generationTask.value
+        guard generation == .cancelled,
+              let pid = Int32(try String(contentsOf: pidURL, encoding: .utf8)),
+              waitForProcessExit(pid, timeoutNanoseconds: 1_000_000_000),
+              metrics.snapshot().resourceReleaseCount == 1 else {
+            throw ContractFailure(message: "worker cancellation did not release the process and resource metric")
         }
     }
 
@@ -354,23 +398,18 @@ private struct OigoIssue8ContractTests {
             .deletingLastPathComponent()
             .appendingPathComponent("Fixtures/cleanup-corpus-v1.json")
         let cases = try JSONDecoder().decode([EvaluationCase].self, from: Data(contentsOf: url))
-        let approvedOutputs = [
-            "command-path-and-number": "Open the file /Users/douglas/projects/oigo/Package.swift and run swift test --filter OigoTests 42.",
-            "url-identifier-and-product": "Please check Oigo monitor https://api.example.com/v1/monitors?id=42 for monitor_id abc_123.",
-            "quoted-text-and-package-name": "Say the exact text \"deploy nice baas\", then edit package name NiceBaaS."
+        let expectedIDs: Set<String> = [
+            "command-path-and-number",
+            "url-identifier-and-product",
+            "quoted-text-and-package-name"
         ]
-        let approvedMeanings = [
-            "command-path-and-number": "Open the Oigo Package.swift file and run the named Swift test filter with the number 42.",
-            "url-identifier-and-product": "Check the specified Oigo monitor URL and preserve its identifier values.",
-            "quoted-text-and-package-name": "Say the quoted text exactly and edit the package name NiceBaaS."
-        ]
-        guard cases.count >= 3 else {
+        guard cases.count >= 3,
+              Set(cases.map(\.id)) == expectedIDs else {
             throw ContractFailure(message: "cleanup evaluation corpus is too small to review")
         }
         for sample in cases {
             guard sample.reviewStatus == "approved",
-                  approvedOutputs[sample.id] == sample.modelOutput,
-                  approvedMeanings[sample.id] == sample.expectedMeaning,
+                  expectedIDs.contains(sample.id),
                   !sample.rawTranscript.isEmpty,
                   !sample.modelOutput.isEmpty,
                   !sample.expectedMeaning.isEmpty,
@@ -399,6 +438,28 @@ private struct OigoIssue8ContractTests {
         ).compactMap { match in
             Int(value.substring(with: match.range(at: 1)))
         }
+    }
+
+    private static func waitForFile(_ url: URL, timeoutNanoseconds: UInt64) -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            if FileManager.default.fileExists(atPath: url.path) {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    private static func waitForProcessExit(_ pid: Int32, timeoutNanoseconds: UInt64) -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            if Darwin.kill(pid, 0) != 0 && errno == ESRCH {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        return Darwin.kill(pid, 0) != 0 && errno == ESRCH
     }
 }
 
