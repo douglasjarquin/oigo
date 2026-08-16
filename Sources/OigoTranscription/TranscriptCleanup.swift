@@ -174,13 +174,15 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
         }
 
         instrumentation.record(.cleanupStart)
-        let chunks = TranscriptChunker.split(rawText)
+        var chunks = TranscriptChunker.split(rawText)
         let start = DispatchTime.now().uptimeNanoseconds
         let deadline = start.addingReportingOverflow(deadlineNanoseconds).partialValue
         var cleanedParts: [String] = []
         cleanedParts.reserveCapacity(chunks.count)
 
-        for chunk in chunks {
+        var chunkIndex = 0
+        while chunkIndex < chunks.count {
+            let chunk = chunks[chunkIndex]
             let now = DispatchTime.now().uptimeNanoseconds
             guard now < deadline else {
                 instrumentation.record(.timeout)
@@ -205,6 +207,7 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
                     )
                 }
                 cleanedParts.append(cleanedText.trimmingCharacters(in: .whitespacesAndNewlines))
+                chunkIndex += 1
             case .unavailable(let reason):
                 return fallback(
                     rawText: rawText,
@@ -225,11 +228,20 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
                     chunkCount: chunks.count
                 )
             case .contextOverflow:
-                return fallback(
-                    rawText: rawText,
-                    reason: .contextOverflow,
-                    chunkCount: chunks.count
+                let smallerLimit = max(1, chunk.estimatedTokenCount / 2)
+                let subdivisions = TranscriptChunker.split(
+                    chunk.text,
+                    maxTokenCount: smallerLimit,
+                    separatorBefore: chunk.separatorBefore
                 )
+                guard subdivisions.count > 1 else {
+                    return fallback(
+                        rawText: rawText,
+                        reason: .contextOverflow,
+                        chunkCount: chunks.count
+                    )
+                }
+                chunks.replaceSubrange(chunkIndex...chunkIndex, with: subdivisions)
             case .failed(let reason):
                 return fallback(
                     rawText: rawText,
@@ -302,9 +314,13 @@ public enum TranscriptChunker {
     public static let targetTokenCount = 1_800
     public static let maxTokenCount = 2_000
 
-    private static let maxInputBytes = maxTokenCount * 4
-
-    public static func split(_ text: String) -> [TranscriptChunk] {
+    public static func split(
+        _ text: String,
+        maxTokenCount limit: Int? = nil,
+        separatorBefore: String = ""
+    ) -> [TranscriptChunk] {
+        let chunkLimit = max(1, limit ?? Self.maxTokenCount)
+        let maxInputBytes = chunkLimit * 4
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
         let paragraphs = normalized.components(separatedBy: "\n\n")
         var chunks: [TranscriptChunk] = []
@@ -330,7 +346,7 @@ public enum TranscriptChunker {
             let candidate = currentText.isEmpty
                 ? piece
                 : currentText + separator + piece
-            if !currentText.isEmpty && tokenEstimate(candidate) > maxTokenCount {
+            if !currentText.isEmpty && tokenEstimate(candidate) > chunkLimit {
                 flush()
                 currentText = piece
                 currentSeparator = separator
@@ -347,11 +363,15 @@ public enum TranscriptChunker {
                 continue
             }
             let paragraphSeparator = paragraphIndex == 0 && chunks.isEmpty && currentText.isEmpty
-                ? ""
+                ? separatorBefore
                 : "\n\n"
             for (pieceIndex, piece) in sentencePieces(paragraph).enumerated() {
                 let sentenceSeparator = pieceIndex == 0 ? paragraphSeparator : " "
-                let pieces = splitOversized(piece)
+                let pieces = splitOversized(
+                    piece,
+                    maxTokenCount: chunkLimit,
+                    maxInputBytes: maxInputBytes
+                )
                 for (smallIndex, smallPiece) in pieces.enumerated() {
                     let separator: String
                     if smallIndex > 0 {
@@ -398,7 +418,11 @@ public enum TranscriptChunker {
         return pieces.isEmpty ? [paragraph] : pieces
     }
 
-    private static func splitOversized(_ text: String) -> [String] {
+    private static func splitOversized(
+        _ text: String,
+        maxTokenCount: Int,
+        maxInputBytes: Int
+    ) -> [String] {
         guard tokenEstimate(text) > maxTokenCount else {
             return [text]
         }
@@ -408,6 +432,7 @@ public enum TranscriptChunker {
         while tokenEstimate(remaining) > maxTokenCount {
             var end = remaining.startIndex
             var bytes = 0
+            var lastWhitespaceEnd: String.Index?
             while end < remaining.endIndex {
                 let next = remaining.index(after: end)
                 let characterBytes = remaining[end..<next].utf8.count
@@ -415,13 +440,17 @@ public enum TranscriptChunker {
                     break
                 }
                 bytes += characterBytes
+                if remaining[end].isWhitespace {
+                    lastWhitespaceEnd = next
+                }
                 end = next
             }
             if end == remaining.startIndex {
                 end = remaining.index(after: remaining.startIndex)
             }
-            pieces.append(String(remaining[..<end]))
-            remaining = String(remaining[end...])
+            let splitEnd = lastWhitespaceEnd ?? end
+            pieces.append(String(remaining[..<splitEnd]))
+            remaining = String(remaining[splitEnd...])
         }
         if !remaining.isEmpty {
             pieces.append(remaining)
@@ -496,7 +525,6 @@ private enum TranscriptCleanupDeadline {
         })
         responseTask.cancel()
         timeoutTask.cancel()
-        _ = await responseTask.value
         return result
     }
 }

@@ -416,6 +416,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             do {
                 _ = try store.persistCleanText(cleanText, for: session)
             } catch {
+                transcriptCleanupMetrics.record(.fallback)
                 decision = TranscriptCleanupDecision(
                     rawText: rawText,
                     insertionText: rawText,

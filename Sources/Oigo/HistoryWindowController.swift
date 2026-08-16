@@ -395,7 +395,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             + " · " + (selectedTranscriptSource == .processed ? "Clean transcript" : "Raw transcript")
         failureLabel.stringValue = [
             entry.session.metadata.failureReason,
-            entry.session.metadata.insertionFailureReason
+            entry.session.metadata.insertionFailureReason,
+            entry.session.metadata.cleanupFallbackReason
         ]
             .compactMap { $0 }
             .joined(separator: " · ")

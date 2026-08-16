@@ -24,8 +24,12 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Cleanup failures fall back to raw without partial output")
             try await testLongTranscriptChunksSequentiallyAtStableBoundaries()
             print("GREEN: Long transcripts chunk sequentially with order and paragraphs preserved")
+            try await testContextOverflowResplitsOversizedChunks()
+            print("GREEN: Context overflow re-splits oversized chunks sequentially")
             try await testAutomaticDeadlineCancelsSlowCleanup()
             print("GREEN: Automatic cleanup deadline cancels slow generation")
+            try await testDeadlineDoesNotWaitForCancellationResistantCleanup()
+            print("GREEN: Automatic cleanup deadline returns promptly when cancellation is ignored")
             try await testCleanupInstrumentationRecordsLifecycleMetrics()
             print("GREEN: Cleanup availability, start, completion, and fallback metrics are recorded")
             try testCleanPersistenceLeavesRawUntouchedAndRecordsInsertionSource()
@@ -139,6 +143,33 @@ Return only the cleaned transcript.
         }
     }
 
+    private static func testContextOverflowResplitsOversizedChunks() async throws {
+        let rawText = (1...220)
+            .map { "Sentence \($0) preserves /tmp/file-\($0).json and 42." }
+            .joined(separator: " ")
+        let recorder = ChunkRecorder()
+        let coordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: { OverflowThenSuccessCleaner(recorder: recorder) }
+        )
+        let decision = await coordinator.resolve(
+            mode: .clean,
+            rawText: rawText,
+            deadlineNanoseconds: 1_000_000_000
+        )
+        let recordedChunks = await recorder.values()
+        guard let firstAttempt = recordedChunks.first,
+              TranscriptChunk(text: firstAttempt).estimatedTokenCount > 1_000,
+              recordedChunks.dropFirst().allSatisfy({
+                  TranscriptChunk(text: $0).estimatedTokenCount <= 1_000
+              }),
+              recordedChunks.count > TranscriptChunker.split(rawText).count,
+              decision.insertionSource == .clean,
+              decision.fallbackReason == nil,
+              decision.cleanText == rawText else {
+            throw ContractFailure(message: "context overflow did not re-split and complete the transcript")
+        }
+    }
+
     private static func testAutomaticDeadlineCancelsSlowCleanup() async throws {
         let cancellationRecorder = CancellationRecorder()
         let cleaner = SlowCleaner(recorder: cancellationRecorder)
@@ -155,6 +186,24 @@ Return only the cleaned transcript.
               decision.fallbackReason == .timeout || decision.fallbackReason == .cancellation,
               await cancellationRecorder.wasCancelledValue() else {
             throw ContractFailure(message: "deadline did not produce raw fallback and cancellation")
+        }
+    }
+
+    private static func testDeadlineDoesNotWaitForCancellationResistantCleanup() async throws {
+        let coordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: { CancellationResistantCleaner() }
+        )
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let decision = await coordinator.resolve(
+            mode: .clean,
+            rawText: "a cancellation-resistant transcript",
+            deadlineNanoseconds: 5_000_000
+        )
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
+        guard decision.insertionSource == .raw,
+              decision.fallbackReason == .timeout,
+              elapsedNanoseconds < 100_000_000 else {
+            throw ContractFailure(message: "automatic cleanup waited for cancellation-resistant generation")
         }
     }
 
@@ -349,6 +398,25 @@ private struct RecordingCleaner: TranscriptCleaner {
     }
 }
 
+private struct OverflowThenSuccessCleaner: TranscriptCleaner {
+    let recorder: ChunkRecorder
+
+    func availability() -> TranscriptCleanupAvailability {
+        .available
+    }
+
+    func clean(
+        chunk: String,
+        deadlineNanoseconds: UInt64
+    ) async -> TranscriptCleanupGeneration {
+        _ = deadlineNanoseconds
+        await recorder.record(chunk)
+        return TranscriptChunk(text: chunk).estimatedTokenCount > 1_000
+            ? .contextOverflow
+            : .success(chunk)
+    }
+}
+
 private struct FixedResultCleaner: TranscriptCleaner, Sendable {
     let result: TranscriptCleanupGeneration
 
@@ -398,6 +466,25 @@ private struct SlowCleaner: TranscriptCleaner {
             await recorder.markCancelled()
             return .cancelled
         }
+    }
+}
+
+private struct CancellationResistantCleaner: TranscriptCleaner {
+    func availability() -> TranscriptCleanupAvailability {
+        .available
+    }
+
+    func clean(
+        chunk: String,
+        deadlineNanoseconds: UInt64
+    ) async -> TranscriptCleanupGeneration {
+        _ = chunk
+        _ = deadlineNanoseconds
+        let end = DispatchTime.now().uptimeNanoseconds + 250_000_000
+        while DispatchTime.now().uptimeNanoseconds < end {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        return .success("late output")
     }
 }
 
