@@ -499,32 +499,76 @@ private enum TranscriptCleanupDeadline {
         cancel: @escaping @Sendable () -> Void,
         operation: @escaping @Sendable () async -> TranscriptCleanupGeneration
     ) async -> TranscriptCleanupGeneration {
-        return await withTaskCancellationHandler(operation: {
-            await withTaskGroup(of: TranscriptCleanupGeneration.self) { group in
-                group.addTask {
-                    await operation()
+        let state = TranscriptCleanupDeadlineState()
+        let operationTask = Task {
+            state.resolve(await operation())
+        }
+        let timeoutTask = Task {
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard now < deadlineNanoseconds else {
+                cancel()
+                state.resolve(.timedOut)
+                return
+            }
+            do {
+                try await Task.sleep(nanoseconds: deadlineNanoseconds - now)
+                guard !Task.isCancelled else {
+                    return
                 }
-                group.addTask {
-                    let now = DispatchTime.now().uptimeNanoseconds
-                    guard now < deadlineNanoseconds else {
-                        cancel()
-                        return .timedOut
-                    }
-                    do {
-                        try await Task.sleep(nanoseconds: deadlineNanoseconds - now)
-                        cancel()
-                        return .timedOut
-                    } catch {
-                        return .cancelled
-                    }
-                }
-                let result = await group.next() ?? .cancelled
-                group.cancelAll()
-                return result
+                cancel()
+                state.resolve(.timedOut)
+            } catch {}
+        }
+
+        let result = await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                state.install(continuation)
             }
         }, onCancel: {
+            operationTask.cancel()
+            timeoutTask.cancel()
             cancel()
+            state.resolve(.cancelled)
         })
+        operationTask.cancel()
+        timeoutTask.cancel()
+        return result
+    }
+}
+
+@available(macOS 26.0, *)
+private final class TranscriptCleanupDeadlineState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>?
+    private var pendingResult: TranscriptCleanupGeneration?
+    private var resolved = false
+
+    func install(_ continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>) {
+        lock.lock()
+        if let pendingResult {
+            lock.unlock()
+            continuation.resume(returning: pendingResult)
+        } else {
+            self.continuation = continuation
+            lock.unlock()
+        }
+    }
+
+    func resolve(_ result: TranscriptCleanupGeneration) {
+        lock.lock()
+        guard !resolved else {
+            lock.unlock()
+            return
+        }
+        resolved = true
+        if let continuation {
+            self.continuation = nil
+            lock.unlock()
+            continuation.resume(returning: result)
+        } else {
+            pendingResult = result
+            lock.unlock()
+        }
     }
 }
 

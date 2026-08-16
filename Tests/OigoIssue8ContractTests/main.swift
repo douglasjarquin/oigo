@@ -504,8 +504,21 @@ private struct OigoIssue8ContractTests {
                   !sample.rawTranscript.isEmpty,
                   !sample.modelOutput.isEmpty,
                   !sample.expectedMeaning.isEmpty,
+                  !sample.meaningAssertions.isEmpty,
                   !sample.protectedTechnicalTokens.isEmpty else {
                 throw ContractFailure(message: "evaluation corpus contains an unapproved or incomplete sample")
+            }
+            let rawMeaningTokens = semanticTokens(in: sample.rawTranscript)
+            let outputMeaningTokens = semanticTokens(in: sample.modelOutput)
+            guard outputMeaningTokens.isSubset(of: rawMeaningTokens) else {
+                throw ContractFailure(message: "evaluation sample added factual tokens: " + sample.id)
+            }
+            for assertion in sample.meaningAssertions {
+                let assertionTokens = semanticTokens(in: assertion)
+                guard !assertionTokens.isEmpty,
+                      assertionTokens.isSubset(of: outputMeaningTokens) else {
+                    throw ContractFailure(message: "evaluation sample changed intended meaning: " + sample.id)
+                }
             }
             for token in sample.protectedTechnicalTokens {
                 guard sample.rawTranscript.contains(token),
@@ -516,6 +529,16 @@ private struct OigoIssue8ContractTests {
                 }
             }
         }
+    }
+
+    private static func semanticTokens(in text: String) -> Set<String> {
+        guard let expression = try? NSRegularExpression(pattern: "[A-Za-z0-9_]+") else {
+            return []
+        }
+        let value = text as NSString
+        return Set(expression.matches(in: text, range: NSRange(location: 0, length: value.length)).map {
+            value.substring(with: $0.range).lowercased()
+        })
     }
 
     private static func sentenceNumbers(in text: String) -> [Int] {
@@ -531,27 +554,6 @@ private struct OigoIssue8ContractTests {
         }
     }
 
-    private static func waitForFile(_ url: URL, timeoutNanoseconds: UInt64) -> Bool {
-        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
-        while DispatchTime.now().uptimeNanoseconds < deadline {
-            if FileManager.default.fileExists(atPath: url.path) {
-                return true
-            }
-            Thread.sleep(forTimeInterval: 0.001)
-        }
-        return FileManager.default.fileExists(atPath: url.path)
-    }
-
-    private static func waitForProcessExit(_ pid: Int32, timeoutNanoseconds: UInt64) -> Bool {
-        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
-        while DispatchTime.now().uptimeNanoseconds < deadline {
-            if Darwin.kill(pid, 0) != 0 && errno == ESRCH {
-                return true
-            }
-            Thread.sleep(forTimeInterval: 0.001)
-        }
-        return Darwin.kill(pid, 0) != 0 && errno == ESRCH
-    }
 }
 
 private struct EvaluationCase: Codable {
@@ -560,6 +562,7 @@ private struct EvaluationCase: Codable {
     let modelOutput: String
     let expectedMeaning: String
     let protectedTechnicalTokens: [String]
+    let meaningAssertions: [String]
     let reviewStatus: String
 }
 
