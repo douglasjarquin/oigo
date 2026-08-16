@@ -124,6 +124,20 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         return lastError
     }
 
+    public func supportedLocaleIdentifiers() async -> [String] {
+        await DictationTranscriber.supportedLocales
+            .map(\.identifier)
+            .sorted()
+    }
+
+    public func closestSupportedLocaleIdentifier() async -> String? {
+        let identifiers = await supportedLocaleIdentifiers()
+        return OigoSupportedLocaleResolver.closest(
+            to: configuredLocale.identifier,
+            among: identifiers
+        )
+    }
+
     public func checkSpeechAssets() async throws -> SpeechAssetState {
         let inspection = try await inspectAssets()
         return try applyAssetStatus(inspection.status, localeIdentifier: inspection.locale.identifier)
@@ -153,9 +167,12 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 }
                 try await request.downloadAndInstall()
             } catch let error as TranscriptionError {
+                setAssetState(.failed(error.description))
                 throw error
             } catch {
-                throw remember(.speechAssetsUnavailable(String(describing: error)))
+                let reason = String(describing: error)
+                setAssetState(.failed(reason))
+                throw remember(.speechAssetsFailed(reason))
             }
             let status = await AssetInventory.status(forModules: [inspection.module])
             return try applyAssetStatus(status, localeIdentifier: inspection.locale.identifier)

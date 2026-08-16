@@ -5,6 +5,7 @@ import OigoCore
 public enum SpeechAssetState: Equatable, Sendable, CustomStringConvertible {
     case unavailable(String)
     case installing(String)
+    case failed(String)
     case ready(String)
 
     public var description: String {
@@ -13,6 +14,8 @@ public enum SpeechAssetState: Equatable, Sendable, CustomStringConvertible {
             return "unavailable: " + reason
         case .installing(let localeIdentifier):
             return "installing: " + localeIdentifier
+        case .failed(let reason):
+            return "failed: " + reason
         case .ready(let localeIdentifier):
             return "ready: " + localeIdentifier
         }
@@ -24,6 +27,7 @@ public enum TranscriptionError: Error, Equatable, Sendable, CustomStringConverti
     case unsupportedLocale(String)
     case speechAssetsUnavailable(String)
     case speechAssetsInstalling(String)
+    case speechAssetsFailed(String)
     case recognitionUnavailable(String)
     case malformedAudio(URL, String)
     case cancelled
@@ -42,6 +46,8 @@ public enum TranscriptionError: Error, Equatable, Sendable, CustomStringConverti
             return "speech assets are unavailable: " + reason
         case .speechAssetsInstalling(let identifier):
             return "speech assets are still installing for " + identifier
+        case .speechAssetsFailed(let reason):
+            return "speech asset installation failed: " + reason
         case .recognitionUnavailable(let reason):
             return "on-device speech recognition is unavailable: " + reason
         case .malformedAudio(let url, let reason):
