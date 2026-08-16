@@ -40,8 +40,8 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Oversized cleanup chunks preserve whitespace at boundaries")
             try testCleanPersistenceLeavesRawUntouchedAndRecordsInsertionSource()
             print("GREEN: clean.txt is separate from raw.txt and insertion source is durable")
-            try testCleanAgainFallbackRecordsRawSourceAndReason()
-            print("GREEN: Clean Again fallback source and reason are durable without insertion")
+            try testCleanAgainFallbackRecordsReasonWithoutChangingInsertionSource()
+            print("GREEN: Clean Again fallback reason is durable without changing insertion source")
             try testRecoveryInvalidatesStaleCleanTextAfterRawCommit()
             print("GREEN: Raw persistence recovery invalidates stale clean text")
             try testCleanTextRejectsStaleRawSnapshot()
@@ -471,7 +471,7 @@ private struct OigoIssue8ContractTests {
         }
     }
 
-    private static func testCleanAgainFallbackRecordsRawSourceAndReason() throws {
+    private static func testCleanAgainFallbackRecordsReasonWithoutChangingInsertionSource() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("oigo-issue8-clean-again-fallback-" + UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -483,18 +483,22 @@ private struct OigoIssue8ContractTests {
             state: .interrupted,
             failureReason: "transcription interrupted"
         )
-        _ = try store.update(interrupted, state: .completed)
-        let recorded = try store.update(
+        let completed = try store.update(
             interrupted,
-            state: .interrupted,
-            insertionTextSource: .raw,
+            state: .completed,
+            insertionOutcome: .pasted,
+            insertionTextSource: .clean
+        )
+        let recorded = try store.update(
+            completed,
+            state: .completed,
             cleanupFallbackReason: "model unavailable: device policy"
         )
         let reloaded = try store.load(id: recorded.id)
         guard reloaded.metadata.state == .completed,
-              reloaded.metadata.insertionTextSource == .raw,
+              reloaded.metadata.insertionTextSource == .clean,
               reloaded.metadata.cleanupFallbackReason == "model unavailable: device policy" else {
-            throw ContractFailure(message: "Clean Again fallback metadata was not durable without changing session state")
+            throw ContractFailure(message: "Clean Again fallback changed insertion metadata without an insertion")
         }
     }
 

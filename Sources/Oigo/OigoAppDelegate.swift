@@ -524,7 +524,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     _ = try store.update(
                         entry.session,
                         state: entry.session.metadata.state,
-                        insertionTextSource: .raw,
                         cleanupFallbackReason: fallbackReason
                     )
                     self.historyWindow?.showMessage(
