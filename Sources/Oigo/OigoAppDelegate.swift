@@ -526,10 +526,31 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     self.refreshHistory()
                     return
                 }
-                _ = try store.persistCleanText(
-                    cleanText,
-                    for: entry.session
-                )
+                do {
+                    _ = try store.persistCleanText(
+                        cleanText,
+                        for: entry.session
+                    )
+                } catch let error as SessionStoreError {
+                    if case .rawTextChanged = error {
+                        throw error
+                    }
+                    let fallbackReason = TranscriptCleanupFallbackReason
+                        .persistenceFailure(String(describing: error))
+                        .description
+                    _ = try store.update(
+                        entry.session,
+                        state: entry.session.metadata.state,
+                        insertionTextSource: .raw,
+                        cleanupFallbackReason: fallbackReason
+                    )
+                    self.historyWindow?.showMessage(
+                        "Clean Again could not save clean.txt. Raw transcript remains available: "
+                            + fallbackReason
+                    )
+                    self.refreshHistory()
+                    return
+                }
                 self.historyWindow?.showMessage("Clean transcript saved. Raw transcript was unchanged.")
                 self.refreshHistory()
             } catch SessionStoreError.rawTextChanged {

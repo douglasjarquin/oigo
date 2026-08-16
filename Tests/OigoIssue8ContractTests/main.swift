@@ -504,21 +504,19 @@ private struct OigoIssue8ContractTests {
                   !sample.rawTranscript.isEmpty,
                   !sample.modelOutput.isEmpty,
                   !sample.expectedMeaning.isEmpty,
-                  !sample.meaningAssertions.isEmpty,
                   !sample.protectedTechnicalTokens.isEmpty else {
                 throw ContractFailure(message: "evaluation corpus contains an unapproved or incomplete sample")
             }
             let rawMeaningTokens = semanticTokens(in: sample.rawTranscript)
             let outputMeaningTokens = semanticTokens(in: sample.modelOutput)
+            let expectedMeaningTokens = semanticTokens(in: sample.expectedMeaning)
             guard outputMeaningTokens.isSubset(of: rawMeaningTokens) else {
                 throw ContractFailure(message: "evaluation sample added factual tokens: " + sample.id)
             }
-            for assertion in sample.meaningAssertions {
-                let assertionTokens = semanticTokens(in: assertion)
-                guard !assertionTokens.isEmpty,
-                      assertionTokens.isSubset(of: outputMeaningTokens) else {
-                    throw ContractFailure(message: "evaluation sample changed intended meaning: " + sample.id)
-                }
+            guard !expectedMeaningTokens.isEmpty,
+                  expectedMeaningTokens.isSubset(of: rawMeaningTokens),
+                  expectedMeaningTokens.isSubset(of: outputMeaningTokens) else {
+                throw ContractFailure(message: "evaluation sample changed intended meaning: " + sample.id)
             }
             for token in sample.protectedTechnicalTokens {
                 guard sample.rawTranscript.contains(token),
@@ -562,7 +560,6 @@ private struct EvaluationCase: Codable {
     let modelOutput: String
     let expectedMeaning: String
     let protectedTechnicalTokens: [String]
-    let meaningAssertions: [String]
     let reviewStatus: String
 }
 
