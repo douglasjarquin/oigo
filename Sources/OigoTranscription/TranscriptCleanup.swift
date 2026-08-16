@@ -330,6 +330,11 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
 
 @available(macOS 26.0, *)
 private enum TranscriptCleanupOutputGuard {
+    private struct SemanticToken {
+        let text: String
+        let allowsCaseChange: Bool
+    }
+
     private static let protectedPatterns = [
         "\"(?:\\\\.|[^\"])*\"",
         "https?://[^\\s]+",
@@ -354,7 +359,7 @@ private enum TranscriptCleanupOutputGuard {
             }
         )
         let rawTokensPreserved = isSubsequence(
-            rawTokens.filter { !removableFillers.contains($0.lowercased()) },
+            rawTokens.filter { !removableFillers.contains($0.text.lowercased()) },
             of: cleanedTokens,
             matching: { raw, cleaned in
                 tokenMatches(raw: raw, cleaned: cleaned)
@@ -385,27 +390,54 @@ private enum TranscriptCleanupOutputGuard {
         return true
     }
 
-    private static func semanticTokenSequence(in text: String) -> [String] {
-        var tokens: [String] = []
+    private static func semanticTokenSequence(in text: String) -> [SemanticToken] {
+        var tokens: [SemanticToken] = []
         var current = ""
+        var allowsCaseChange = true
+        var sentenceTokens: [String] = []
+        var sentenceStart = true
         for character in text {
             if character.isLetter || character.isNumber || character == "_" {
+                if current.isEmpty {
+                    allowsCaseChange = sentenceStart
+                        || sentenceTokens.allSatisfy {
+                            removableFillers.contains($0.lowercased())
+                        }
+                }
                 current.append(character)
-            } else if !current.isEmpty {
-                tokens.append(current)
-                current = ""
+                sentenceStart = false
+            } else {
+                if !current.isEmpty {
+                    tokens.append(
+                        SemanticToken(
+                            text: current,
+                            allowsCaseChange: allowsCaseChange
+                        )
+                    )
+                    sentenceTokens.append(current)
+                    current = ""
+                }
+                if ".!?\n".contains(character) {
+                    sentenceStart = true
+                    sentenceTokens.removeAll(keepingCapacity: true)
+                }
             }
         }
         if !current.isEmpty {
-            tokens.append(current)
+            tokens.append(
+                SemanticToken(
+                    text: current,
+                    allowsCaseChange: allowsCaseChange
+                )
+            )
         }
         return tokens
     }
 
     private static func isSubsequence(
-        _ candidate: [String],
-        of source: [String],
-        matching: (String, String) -> Bool
+        _ candidate: [SemanticToken],
+        of source: [SemanticToken],
+        matching: (SemanticToken, SemanticToken) -> Bool
     ) -> Bool {
         var sourceIndex = source.startIndex
         for candidateToken in candidate {
@@ -419,13 +451,13 @@ private enum TranscriptCleanupOutputGuard {
         return true
     }
 
-    private static func tokenMatches(raw: String, cleaned: String) -> Bool {
-        guard raw.lowercased() == cleaned.lowercased() else {
+    private static func tokenMatches(raw: SemanticToken, cleaned: SemanticToken) -> Bool {
+        guard raw.text.lowercased() == cleaned.text.lowercased() else {
             return false
         }
-        let requiresExactCase = raw.contains(where: { $0.isUppercase || $0.isNumber })
-            || raw.contains("_")
-        return !requiresExactCase || raw == cleaned
+        let requiresExactCase = raw.text.contains(where: { $0.isUppercase || $0.isNumber })
+            || raw.text.contains("_")
+        return raw.text == cleaned.text || (!requiresExactCase && raw.allowsCaseChange)
     }
 
     private static func punctuationSequence(in text: String) -> [Character] {

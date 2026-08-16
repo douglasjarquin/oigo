@@ -50,7 +50,7 @@ private struct OigoIssue8ContractTests {
             print("GREEN: clean.txt remains unpublished when metadata persistence fails")
             try testCleanInsertionReadsCleanText()
             print("GREEN: Automatic insertion can use clean.txt without touching raw.txt")
-            try testApprovedEvaluationCorpusProtectsTechnicalTokens()
+            try await testApprovedEvaluationCorpusProtectsTechnicalTokens()
             print("GREEN: Approved evaluation corpus preserves protected technical tokens")
             exit(0)
         } catch {
@@ -186,6 +186,21 @@ private struct OigoIssue8ContractTests {
                   decision.fallbackReason == .unsafeOutput else {
                 throw ContractFailure(message: "unsafe cleanup output was inserted instead of falling back")
             }
+        }
+
+        let lowercaseTechnicalCoordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: {
+                FixedResultCleaner(result: .success("please run Oigo"))
+            }
+        )
+        let lowercaseTechnicalDecision = await lowercaseTechnicalCoordinator.resolve(
+            mode: .clean,
+            rawText: "please run oigo",
+            deadlineNanoseconds: 100_000_000
+        )
+        guard lowercaseTechnicalDecision.insertionSource == .raw,
+              lowercaseTechnicalDecision.fallbackReason == .unsafeOutput else {
+            throw ContractFailure(message: "lowercase technical token was recased")
         }
 
         let meaningRawText = "send the report to Alice"
@@ -603,7 +618,7 @@ private struct OigoIssue8ContractTests {
         }
     }
 
-    private static func testApprovedEvaluationCorpusProtectsTechnicalTokens() throws {
+    private static func testApprovedEvaluationCorpusProtectsTechnicalTokens() async throws {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .appendingPathComponent("Fixtures/cleanup-corpus-v1.json")
@@ -644,6 +659,24 @@ private struct OigoIssue8ContractTests {
                         message: "evaluation sample changed protected token: " + sample.id
                     )
                 }
+            }
+
+            let coordinator = TranscriptCleanupCoordinator(
+                cleanerFactory: {
+                    FixedResultCleaner(result: .success(sample.modelOutput))
+                }
+            )
+            let decision = await coordinator.resolve(
+                mode: .clean,
+                rawText: sample.rawTranscript,
+                deadlineNanoseconds: 1_000_000_000
+            )
+            guard decision.insertionSource == .clean,
+                  decision.cleanText == sample.modelOutput else {
+                throw ContractFailure(
+                    message: "approved evaluation sample fell back from the production guard: "
+                        + sample.id
+                )
             }
         }
     }
