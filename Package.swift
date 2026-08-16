@@ -127,7 +127,8 @@ let package = Package(
         .executableTarget(
             name: "OigoIssue8ContractTests",
             dependencies: ["OigoCore", "OigoTranscription", "OigoInsertion"],
-            path: "Tests/OigoIssue8ContractTests"
+            path: "Tests/OigoIssue8ContractTests",
+            exclude: ["Fixtures"]
         )
     ]
 )

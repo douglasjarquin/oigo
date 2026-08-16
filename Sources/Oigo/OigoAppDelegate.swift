@@ -47,7 +47,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var cleanupMode = OigoAppDelegate.loadCleanupMode()
     private var targetSnapshot: InsertionTargetSnapshot?
     private var insertionDisplayStatus: InsertionDisplayStatus?
-    private var toggleTaskInFlight = false
+    private var toggleTask: Task<Void, Never>?
+    private var cleanAgainTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
@@ -63,9 +64,25 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         shortcutRegistrar.unregister()
         statusSurface.hide()
         playback.stop()
-        if coordinator.hasActiveTranscription {
+        let activeToggleTask = toggleTask
+        let activeCleanAgainTask = cleanAgainTask
+        activeToggleTask?.cancel()
+        activeCleanAgainTask?.cancel()
+        if coordinator.hasActiveTranscription
+            || activeToggleTask != nil
+            || activeCleanAgainTask != nil {
             Task { @MainActor [weak self] in
-                await self?.coordinator.shutdownWithTranscription()
+                if let activeToggleTask {
+                    await activeToggleTask.value
+                }
+                if let activeCleanAgainTask {
+                    await activeCleanAgainTask.value
+                }
+                if self?.coordinator.hasActiveTranscription == true {
+                    await self?.coordinator.shutdownWithTranscription()
+                } else {
+                    self?.coordinator.shutdown()
+                }
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
             return .terminateLater
@@ -227,12 +244,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleToggle() {
-        guard !toggleTaskInFlight else {
+        guard toggleTask == nil else {
             return
         }
-        toggleTaskInFlight = true
-        Task { @MainActor [weak self] in
-            defer { self?.toggleTaskInFlight = false }
+        toggleTask = Task { @MainActor [weak self] in
+            defer { self?.toggleTask = nil }
             await self?.performToggle()
         }
     }
@@ -467,11 +483,17 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func cleanAgain(for entry: SessionHistoryEntry) {
-        guard let store = sessionStore else {
+        guard cleanAgainTask == nil,
+              let store = sessionStore else {
             return
         }
+        historyWindow?.setCleanAgainEnabled(false)
         historyWindow?.showMessage("Cleaning the saved raw transcript…")
-        Task { @MainActor [weak self] in
+        cleanAgainTask = Task { @MainActor [weak self] in
+            defer {
+                self?.cleanAgainTask = nil
+                self?.historyWindow?.setCleanAgainEnabled(true)
+            }
             guard let self else {
                 return
             }
@@ -510,6 +532,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             defer {
                 self.historyWindow?.showAndFocus()
+                self.historyWindow?.showCleanTranscript()
                 self.updateSurface()
             }
             let target = self.insertion.captureTarget()

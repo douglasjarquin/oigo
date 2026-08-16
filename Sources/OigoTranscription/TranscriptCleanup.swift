@@ -190,7 +190,7 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
             }
 
             let generation = await TranscriptCleanupDeadline.run(
-                timeoutNanoseconds: deadline - now
+                deadlineNanoseconds: deadline
             ) {
                 await cleaner.clean(
                     chunk: chunk.text,
@@ -466,8 +466,13 @@ public enum TranscriptChunker {
 @available(macOS 26.0, *)
 private final class TranscriptCleanupResolution: @unchecked Sendable {
     private let lock = NSLock()
+    private let deadlineNanoseconds: UInt64
     private var continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>?
     private var result: TranscriptCleanupGeneration?
+
+    init(deadlineNanoseconds: UInt64) {
+        self.deadlineNanoseconds = deadlineNanoseconds
+    }
 
     func install(_ continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>) {
         lock.lock()
@@ -481,6 +486,9 @@ private final class TranscriptCleanupResolution: @unchecked Sendable {
     }
 
     func resolve(_ result: TranscriptCleanupGeneration) {
+        let result = DispatchTime.now().uptimeNanoseconds < deadlineNanoseconds
+            ? result
+            : .timedOut
         lock.lock()
         guard self.result == nil else {
             lock.unlock()
@@ -496,20 +504,21 @@ private final class TranscriptCleanupResolution: @unchecked Sendable {
 @available(macOS 26.0, *)
 private enum TranscriptCleanupDeadline {
     static func run(
-        timeoutNanoseconds: UInt64,
+        deadlineNanoseconds: UInt64,
         operation: @escaping @Sendable () async -> TranscriptCleanupGeneration
     ) async -> TranscriptCleanupGeneration {
-        let resolution = TranscriptCleanupResolution()
+        let resolution = TranscriptCleanupResolution(deadlineNanoseconds: deadlineNanoseconds)
         let responseTask = Task {
             resolution.resolve(await operation())
         }
         let timeoutTask = Task {
-            if timeoutNanoseconds == 0 {
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard now < deadlineNanoseconds else {
                 resolution.resolve(.timedOut)
                 return
             }
             do {
-                try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                try await Task.sleep(nanoseconds: deadlineNanoseconds - now)
                 resolution.resolve(.timedOut)
             } catch {
             }

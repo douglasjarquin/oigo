@@ -16,6 +16,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private let runIdleMaintenance: () -> Void
 
     private var entries: [SessionHistoryEntry] = []
+    private var isReloading = false
+    private var preservedSelectionID: UUID?
     private let tableView = NSTableView()
     private let detailTitle = NSTextField(labelWithString: "No session selected")
     private let detailStatus = NSTextField(labelWithString: "")
@@ -91,14 +93,34 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     func reload(entries: [SessionHistoryEntry]) {
         let selectedID = selectedEntry?.id
+        let selectedSource = selectedTranscriptSource
+        isReloading = true
+        defer { isReloading = false }
         self.entries = entries
         tableView.reloadData()
         if let selectedID,
            let row = entries.firstIndex(where: { $0.id == selectedID }) {
+            preservedSelectionID = selectedID
             tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            selectedTranscriptSource = selectedSource
+            transcriptVersionPopup.selectItem(at: selectedSource == .processed ? 1 : 0)
+            updateDetail(for: selectedEntry)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.selectedEntry?.id == selectedID else {
+                    return
+                }
+                self.selectedTranscriptSource = selectedSource
+                self.transcriptVersionPopup.selectItem(at: selectedSource == .processed ? 1 : 0)
+                self.updateDetail(for: self.selectedEntry)
+                self.preservedSelectionID = nil
+            }
         } else if !entries.isEmpty {
+            preservedSelectionID = nil
+            selectedTranscriptSource = .raw
+            transcriptVersionPopup.selectItem(at: 0)
             tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         } else {
+            preservedSelectionID = nil
             updateDetail(for: nil)
         }
     }
@@ -106,6 +128,19 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     func showMessage(_ message: String) {
         messageLabel.stringValue = message
         messageLabel.isHidden = message.isEmpty
+    }
+
+    func setCleanAgainEnabled(_ enabled: Bool) {
+        cleanAgainButton.isEnabled = enabled && selectedEntry != nil
+    }
+
+    func showCleanTranscript() {
+        guard selectedEntry != nil else {
+            return
+        }
+        selectedTranscriptSource = .processed
+        transcriptVersionPopup.selectItem(at: 1)
+        updateDetail(for: selectedEntry)
     }
 
     func showAndFocus() {
@@ -172,7 +207,21 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         _ = notification
+        guard !isReloading else {
+            return
+        }
+        if let preservedSelectionID {
+            guard let currentID = selectedEntry?.id else {
+                return
+            }
+            if currentID == preservedSelectionID {
+                updateDetail(for: selectedEntry)
+                return
+            }
+            self.preservedSelectionID = nil
+        }
         selectedTranscriptSource = .raw
+        transcriptVersionPopup.selectItem(at: 0)
         updateDetail(for: selectedEntry)
     }
 
@@ -391,6 +440,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
 
         detailTitle.stringValue = dateFormatter.string(from: entry.session.metadata.createdAt)
+        transcriptVersionPopup.selectItem(at: selectedTranscriptSource == .processed ? 1 : 0)
         detailStatus.stringValue = Self.statusText(entry.session.metadata.state)
             + " · " + (selectedTranscriptSource == .processed ? "Clean transcript" : "Raw transcript")
         failureLabel.stringValue = [
