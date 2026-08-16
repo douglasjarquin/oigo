@@ -341,11 +341,16 @@ private enum TranscriptCleanupOutputGuard {
         "\\b[A-Z][A-Za-z0-9_./-]*[A-Z][A-Za-z0-9_./-]*\\b",
         "\\b[A-Z][a-z][A-Za-z0-9_./-]+\\b"
     ]
+    private static let removableFillers: Set<String> = ["ah", "er", "hmm", "mm", "uh", "um"]
 
     static func accepts(rawText: String, cleanedText: String) -> Bool {
-        let rawTokens = semanticTokens(in: rawText)
-        let cleanedTokens = semanticTokens(in: cleanedText)
-        guard cleanedTokens.isSubset(of: rawTokens) else {
+        let rawTokens = semanticTokenSequence(in: rawText)
+        let cleanedTokens = semanticTokenSequence(in: cleanedText)
+        guard isSubsequence(cleanedTokens, of: rawTokens) else {
+            return false
+        }
+        let requiredRawTokens = rawTokens.filter { !removableFillers.contains($0) }
+        guard isSubsequence(requiredRawTokens, of: cleanedTokens) else {
             return false
         }
 
@@ -363,14 +368,25 @@ private enum TranscriptCleanupOutputGuard {
         return true
     }
 
-    private static func semanticTokens(in text: String) -> Set<String> {
+    private static func semanticTokenSequence(in text: String) -> [String] {
         guard let expression = try? NSRegularExpression(pattern: "[A-Za-z0-9_]+") else {
             return []
         }
         let value = text as NSString
-        return Set(expression.matches(in: text, range: NSRange(location: 0, length: value.length)).map {
+        return expression.matches(in: text, range: NSRange(location: 0, length: value.length)).map {
             value.substring(with: $0.range).lowercased()
-        })
+        }
+    }
+
+    private static func isSubsequence(_ candidate: [String], of source: [String]) -> Bool {
+        var sourceIndex = source.startIndex
+        for token in candidate {
+            guard let matchIndex = source[sourceIndex...].firstIndex(of: token) else {
+                return false
+            }
+            sourceIndex = source.index(after: matchIndex)
+        }
+        return true
     }
 
     private static func protectedTokens(in text: String) -> [String] {
@@ -602,77 +618,37 @@ private enum TranscriptCleanupDeadline {
         cancel: @escaping @Sendable () -> Void,
         operation: @escaping @Sendable () async -> TranscriptCleanupGeneration
     ) async -> TranscriptCleanupGeneration {
-        let state = TranscriptCleanupDeadlineState()
-        let operationTask = Task {
-            state.resolve(await operation())
-        }
-        let timeoutTask = Task {
-            let now = DispatchTime.now().uptimeNanoseconds
-            guard now < deadlineNanoseconds else {
-                cancel()
-                state.resolve(.timedOut)
-                return
-            }
-            do {
-                try await Task.sleep(nanoseconds: deadlineNanoseconds - now)
-                guard !Task.isCancelled else {
-                    return
+        return await withTaskCancellationHandler(operation: {
+            await withTaskGroup(of: TranscriptCleanupGeneration.self) { group in
+                group.addTask {
+                    await operation()
                 }
-                cancel()
-                state.resolve(.timedOut)
-            } catch {}
-        }
-
-        let result = await withTaskCancellationHandler(operation: {
-            await withCheckedContinuation { continuation in
-                state.install(continuation)
+                group.addTask {
+                    let now = DispatchTime.now().uptimeNanoseconds
+                    guard now < deadlineNanoseconds else {
+                        cancel()
+                        return .timedOut
+                    }
+                    do {
+                        try await Task.sleep(nanoseconds: deadlineNanoseconds - now)
+                        guard !Task.isCancelled else {
+                            return .cancelled
+                        }
+                        cancel()
+                        return .timedOut
+                    } catch {
+                        return .cancelled
+                    }
+                }
+                let result = await group.next() ?? .cancelled
+                group.cancelAll()
+                return result
             }
         }, onCancel: {
-            operationTask.cancel()
-            timeoutTask.cancel()
             cancel()
-            state.resolve(.cancelled)
-        })
-        operationTask.cancel()
-        timeoutTask.cancel()
-        return result
-    }
+        }
+    )
 }
-
-@available(macOS 26.0, *)
-private final class TranscriptCleanupDeadlineState: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>?
-    private var pendingResult: TranscriptCleanupGeneration?
-    private var resolved = false
-
-    func install(_ continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>) {
-        lock.lock()
-        if let pendingResult {
-            lock.unlock()
-            continuation.resume(returning: pendingResult)
-        } else {
-            self.continuation = continuation
-            lock.unlock()
-        }
-    }
-
-    func resolve(_ result: TranscriptCleanupGeneration) {
-        lock.lock()
-        guard !resolved else {
-            lock.unlock()
-            return
-        }
-        resolved = true
-        if let continuation {
-            self.continuation = nil
-            lock.unlock()
-            continuation.resume(returning: result)
-        } else {
-            pendingResult = result
-            lock.unlock()
-        }
-    }
 }
 
 @available(macOS 26.0, *)

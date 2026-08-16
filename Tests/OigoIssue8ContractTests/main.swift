@@ -187,6 +187,23 @@ private struct OigoIssue8ContractTests {
                 throw ContractFailure(message: "unsafe cleanup output was inserted instead of falling back")
             }
         }
+
+        let meaningRawText = "send the report to Alice"
+        let meaningCoordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: {
+                FixedResultCleaner(result: .success("Send the report"))
+            }
+        )
+        let meaningDecision = await meaningCoordinator.resolve(
+            mode: .clean,
+            rawText: meaningRawText,
+            deadlineNanoseconds: 100_000_000
+        )
+        guard meaningDecision.insertionText == meaningRawText,
+              meaningDecision.insertionSource == .raw,
+              meaningDecision.fallbackReason == .unsafeOutput else {
+            throw ContractFailure(message: "meaning-bearing deletion was accepted instead of falling back")
+        }
     }
 
     private static func testLongTranscriptChunksSequentiallyAtStableBoundaries() async throws {
