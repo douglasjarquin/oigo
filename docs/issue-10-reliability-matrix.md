@@ -32,7 +32,7 @@ This matrix records the issue #10 reliability scenarios against the v1 implement
 | Quit while tracked work exists waits for child cleanup | PASS | `oigo-issue10-contract-tests` awaited shutdown and issue #5 shutdown coverage | Active native capture was not left running while quitting. |
 | Quit from preparing, recording, finalizing, cleaning, and inserting | INCONCLUSIVE | Coordinator-owned task shutdown and active-transcription shutdown contracts | Native quit was exercised only from the idle onboarding surface. |
 | Quit after target-app termination or crash | INCONCLUSIVE | Target-loss copy-only recovery contracts | Native target-app termination during Oigo processing was not performed. |
-| Native AppKit launch, onboarding surface, status menu, and idle quit | PASS | `.ulw/evidence/issue10-native-qa-head-addcf56.log` and `.ulw/evidence/issue10-native-qa-head-addcf56.png` | The temporary QA bundle used an ad hoc local signature and did not complete permission setup. |
+| Native AppKit launch, onboarding surface, status menu, and idle quit | PASS | `.ulw/evidence/issue10-native-qa-head-7561bd.log` and `.ulw/evidence/issue10-native-qa-head-7561bd.png` | The temporary QA bundle used an ad hoc local signature and did not complete permission setup. |
 
 ## Implementation notes
 
@@ -54,7 +54,7 @@ Audio recorder teardown removes the engine tap, observers, device listener, and 
 
 Fault injection is exposed through Swift SPI and is used only by deterministic developer contract tests.
 
-The pre-production RED run is bound to live base `ca349411c45b9738983d6793bb2f7136a57faeba` in `.ulw/evidence/issue10-red-bound-ce9d388.log`; the exact-head GREEN run is recorded in `.ulw/evidence/full-regression-head-addcf56.log`.
+The pre-production RED run is bound to live base `ca349411c45b9738983d6793bb2f7136a57faeba` in `.ulw/evidence/issue10-red-bound-ce9d388.log`; the exact-head GREEN run is recorded in `.ulw/evidence/full-regression-head-7561bd.log`.
 
 The v1 implementation does not auto-retry failed capture or transcription.
 
