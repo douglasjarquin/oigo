@@ -146,7 +146,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "OigoIssue10ContractTests",
-            dependencies: ["OigoCore", "OigoInsertion"],
+            dependencies: ["OigoCore", "OigoInsertion", "OigoTranscription"],
             path: "Tests/OigoIssue10ContractTests"
         )
     ]

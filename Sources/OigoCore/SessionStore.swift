@@ -1,6 +1,52 @@
 import Foundation
 import Darwin
 
+@_spi(Testing)
+public enum DictationFault: String, CaseIterable, Hashable, Sendable {
+    case diskWriteFailure
+    case speechFailure
+    case cleanupTimeout
+    case targetLoss
+    case cancellationRace
+}
+
+@_spi(Testing)
+public final class DictationFaultInjector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var remaining: [DictationFault: Int] = [:]
+
+    public init() {}
+
+    public func arm(_ fault: DictationFault, times: Int = 1) {
+        guard times > 0 else {
+            return
+        }
+        lock.lock()
+        remaining[fault, default: 0] += times
+        lock.unlock()
+    }
+
+    public func consume(_ fault: DictationFault) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let count = remaining[fault], count > 0 else {
+            return false
+        }
+        if count == 1 {
+            remaining.removeValue(forKey: fault)
+        } else {
+            remaining[fault] = count - 1
+        }
+        return true
+    }
+
+    public func reset() {
+        lock.lock()
+        remaining.removeAll()
+        lock.unlock()
+    }
+}
+
 public enum DictationSessionState: String, Codable, CaseIterable, Sendable {
     case preparing
     case recording
@@ -72,7 +118,8 @@ public enum DictationFailureCode: String, Codable, CaseIterable, Equatable, Send
             || normalized.contains("analysis") {
             return .transcriptionFailed
         }
-        if normalized.contains("cleanup") && normalized.contains("timeout") {
+        if normalized.contains("cleanup")
+            && (normalized.contains("timeout") || normalized.contains("deadline")) {
             return .cleanupTimedOut
         }
         if normalized.contains("target") {
@@ -364,6 +411,7 @@ public final class SessionStore: @unchecked Sendable {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let lock = NSLock()
+    private let faultInjector: DictationFaultInjector?
     private var failNextMetadataWrite = false
 
     private struct PendingRawPersistence: Codable {
@@ -384,8 +432,37 @@ public final class SessionStore: @unchecked Sendable {
     private static let maxMetadataBytes = 64 * 1024
     private static let maxTranscriptBytes = 4 * 1024 * 1024
 
-    public init(rootDirectory: URL? = nil, fileManager: FileManager = .default) throws {
+    public init(
+        rootDirectory: URL? = nil,
+        fileManager: FileManager = .default
+    ) throws {
         self.fileManager = fileManager
+        self.faultInjector = nil
+        self.rootDirectory = rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        self.encoder = encoder
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        self.decoder = decoder
+
+        try fileManager.createDirectory(
+            at: self.rootDirectory,
+            withIntermediateDirectories: true
+        )
+    }
+
+    @_spi(Testing)
+    public init(
+        rootDirectory: URL? = nil,
+        fileManager: FileManager = .default,
+        faultInjector: DictationFaultInjector?
+    ) throws {
+        self.fileManager = fileManager
+        self.faultInjector = faultInjector
         self.rootDirectory = rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
 
         let encoder = JSONEncoder()
@@ -1553,7 +1630,7 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     private func writeMetadata(_ metadata: SessionMetadata, at url: URL, directoryFD: Int32) throws {
-        if consumeMetadataWriteFailure() {
+        if faultInjector?.consume(.diskWriteFailure) == true || consumeMetadataWriteFailure() {
             throw SessionStoreError.invalidMetadata(url)
         }
         let data = try encoder.encode(metadata)

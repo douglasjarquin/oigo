@@ -77,7 +77,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         let activeCleanAgainTask = cleanAgainTask
         activeToggleTask?.cancel()
         activeCleanAgainTask?.cancel()
-        if coordinator.hasActiveTranscription
+        if coordinator.hasActiveWork
             || activeToggleTask != nil
             || activeCleanAgainTask != nil {
             Task { @MainActor [weak self] in
@@ -90,7 +90,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 if self?.coordinator.hasActiveTranscription == true {
                     await self?.coordinator.shutdownWithTranscription()
                 } else {
-                    self?.coordinator.shutdown()
+                    await self?.coordinator.shutdownAndWait()
                 }
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
@@ -513,6 +513,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             updateSurface()
         } catch is CancellationError {
+            if [.cleaning, .inserting].contains(coordinator.state) {
+                lastSession = coordinator.failInsertion(reason: "dictation operation cancelled")
+            }
+            recordingStartedAt = nil
+            targetSnapshot = nil
+            livePreview = ""
+            if !coordinator.hasActiveWork {
+                insertionDisplayStatus = nil
+            }
+            updateSurface()
             return
         } catch {
             if [.cleaning, .inserting].contains(coordinator.state) {

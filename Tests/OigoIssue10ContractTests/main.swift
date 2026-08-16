@@ -1,6 +1,8 @@
 import Darwin
 import Foundation
 @_spi(Testing) import OigoCore
+@_spi(Testing) import OigoTranscription
+@_spi(Testing) import OigoInsertion
 
 private struct ContractFailure: Error, CustomStringConvertible {
     let message: String
@@ -20,7 +22,10 @@ private struct OigoIssue10ContractTests {
             ("capture failure persists durable code after metadata fault", testCaptureFailurePersistsDurableCodeAfterMetadataFault),
             ("device interruption records stable code", testDeviceInterruptionRecordsStableCode),
             ("stale callback cannot fail a new session", testStaleCallbackCannotFailNewSession),
-            ("rapid cancellation cycles release capture", testRapidCancellationCyclesReleaseCapture)
+            ("rapid cancellation cycles release capture", testRapidCancellationCyclesReleaseCapture),
+            ("cancellation terminalizes processing without paste", testCancellationTerminalizesProcessingWithoutPaste),
+            ("fault injection matrix is isolated", testFaultInjectionMatrix),
+            ("shutdown waits for registered task", testShutdownWaitsForRegisteredTask)
         ]
 
         var failures = 0
@@ -106,7 +111,11 @@ private struct OigoIssue10ContractTests {
         _ = try coordinator.cancelRecording()
         let second = try coordinator.startRecording(using: capture, store: store)
 
-        capture.emitFailure("stale device failure", callbackIndex: 0)
+        let raceFaults = DictationFaultInjector()
+        raceFaults.arm(.cancellationRace)
+        if raceFaults.consume(.cancellationRace) {
+            capture.emitFailure("stale device failure", callbackIndex: 0)
+        }
         await Task.yield()
 
         let savedFirst = try store.load(id: first.id)
@@ -142,6 +151,126 @@ private struct OigoIssue10ContractTests {
                   !capture.isActive else {
                 throw ContractFailure(message: "cancellation cycle (index) left capture or coordinator work active")
             }
+        }
+    }
+
+    private static func testCancellationTerminalizesProcessingWithoutPaste() async throws {
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let capture = ScriptedAudioCapture()
+        let coordinator = DictationCoordinator()
+        let transcription = ProcessingTranscriptionController()
+        let session = try await coordinator.startRecordingWithTranscription(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        let completed = try await coordinator.stopRecordingWithTranscription()
+        guard completed.metadata.rawTextByteCount == 9 else {
+            throw ContractFailure(message: "processing fixture did not persist a canonical transcript")
+        }
+        _ = try coordinator.beginInsertion(using: store, requiresCleanup: true)
+        let terminal = coordinator.failInsertion(reason: "dictation operation cancelled")
+        let saved = try store.load(id: session.id)
+        guard terminal?.metadata.insertionOutcome == .failed,
+              saved.metadata.insertionOutcome == .failed,
+              coordinator.state == .failed,
+              !coordinator.hasActiveWork else {
+            throw ContractFailure(message: "processing cancellation left work active or insertable")
+        }
+    }
+
+    private static func testFaultInjectionMatrix() async throws {
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+
+        let diskFaults = DictationFaultInjector()
+        let diskStore = try SessionStore(rootDirectory: root.appendingPathComponent("disk"), faultInjector: diskFaults)
+        let diskSession = try diskStore.createSession()
+        diskFaults.arm(.diskWriteFailure)
+        do {
+            _ = try diskStore.update(diskSession, state: .recording)
+            throw ContractFailure(message: "disk-write fault did not reach SessionStore")
+        } catch let error as SessionStoreError {
+            guard case .invalidMetadata = error else {
+                throw ContractFailure(message: "disk-write fault returned the wrong error: " + String(describing: error))
+            }
+        }
+
+        let speechFaults = DictationFaultInjector()
+        let speechStore = try SessionStore(rootDirectory: root.appendingPathComponent("speech"))
+        let transcription = TranscriptionService(faultInjector: speechFaults)
+        speechFaults.arm(.speechFailure)
+        do {
+            _ = try await transcription.deliverFinalAtStartupBoundaryForTesting(
+                range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
+                text: "speech fault"
+            )
+            throw ContractFailure(message: "speech fault did not stop transcription startup")
+        } catch let error as TranscriptionError {
+            guard case .analysisFailed(let reason) = error,
+                  reason.contains("fault injection") else {
+                throw ContractFailure(message: "speech fault returned the wrong error: " + String(describing: error))
+            }
+        }
+
+        let cleaner = TranscriptCleanupCoordinator(
+            cleanerFactory: { TimeoutCleaner() }
+        )
+        let cleanupDecision = await cleaner.resolve(
+            mode: .clean,
+            rawText: "keep this transcript",
+            deadlineNanoseconds: 1_000_000
+        )
+        guard cleanupDecision.cleanText == nil,
+              cleanupDecision.fallbackReason == .timeout else {
+            throw ContractFailure(message: "cleanup timeout fault did not select raw fallback")
+        }
+
+        let targetFaults = DictationFaultInjector()
+        let targetSession = try speechStore.createSession()
+        _ = try speechStore.persistRawText("copy me", for: targetSession)
+        let environment = TestTargetEnvironment()
+        let pasteboard = TestPasteboard()
+        let eventSender = TestEventSender()
+        let insertion = InsertionService(
+            targetEnvironment: environment,
+            pasteboard: pasteboard,
+            eventSender: eventSender,
+            faultInjector: targetFaults
+        )
+        targetFaults.arm(.targetLoss)
+        let insertionResult = insertion.insertRawText(
+            for: targetSession,
+            store: speechStore,
+            target: environment.snapshot
+        )
+        guard insertionResult.outcome == .copied,
+              eventSender.sendCount == 0,
+              pasteboard.lastText == "copy me" else {
+            throw ContractFailure(message: "target-loss fault did not produce copy-only recovery")
+        }
+
+        guard DictationFailureCode.infer(from: "automatic cleanup exceeded its deadline") == .cleanupTimedOut else {
+            throw ContractFailure(message: "cleanup deadline did not map to a stable failure code")
+        }
+    }
+
+    private static func testShutdownWaitsForRegisteredTask() async throws {
+        let coordinator = DictationCoordinator()
+        let receipt = ShutdownReceipt()
+        let task = Task { @MainActor in
+            while !Task.isCancelled {
+                await Task.yield()
+            }
+            receipt.finished = true
+        }
+        try coordinator.register(task: task)
+        await coordinator.shutdownAndWait()
+        guard receipt.finished, coordinator.activeTaskCount == 0 else {
+            throw ContractFailure(message: "shutdown returned before registered child task cleanup completed")
         }
     }
 
@@ -237,5 +366,124 @@ private final class ScriptedAudioCapture: AudioCapturing, @unchecked Sendable {
             return
         }
         callbacks[index].onInterruption(reason)
+    }
+}
+
+@available(macOS 26.0, *)
+private struct TimeoutCleaner: TranscriptCleaner {
+    func availability() -> TranscriptCleanupAvailability {
+        .available
+    }
+
+    func cancel() {}
+
+    func clean(
+        chunk: String,
+        deadlineNanoseconds: UInt64
+    ) async -> TranscriptCleanupGeneration {
+        .timedOut
+    }
+}
+
+@MainActor
+private final class TestTargetEnvironment: InsertionTargetEnvironment {
+    let snapshot = InsertionTargetSnapshot(
+        frontmostProcessIdentifier: 10,
+        bundleIdentifier: "com.example.editor",
+        focusedElementIdentifier: "field",
+        role: "AXTextArea",
+        isSecureTextField: false
+    )
+
+    func capture() -> InsertionTargetSnapshot {
+        snapshot
+    }
+
+    func validate(_ snapshot: InsertionTargetSnapshot) -> TargetValidation {
+        .safe
+    }
+}
+
+@MainActor
+private final class TestPasteboard: InsertionPasteboard {
+    private(set) var lastText: String?
+
+    func write(_ rawText: String) -> Bool {
+        lastText = rawText
+        return true
+    }
+}
+
+@MainActor
+private final class TestEventSender: InsertionEventSender {
+    private(set) var sendCount = 0
+
+    func sendPaste(
+        to processIdentifier: Int32,
+        revalidate: () -> TargetValidation
+    ) -> InsertionEventResult {
+        sendCount += 1
+        return .sent
+    }
+}
+
+private final class ShutdownReceipt: @unchecked Sendable {
+    var finished = false
+}
+
+@available(macOS 26.0, *)
+private final class ProcessingTranscriptionController: TranscriptionController, @unchecked Sendable {
+    private var session: DictationSession?
+    private var store: SessionStore?
+    private var isRunning = false
+
+    func start(
+        session: DictationSession,
+        format: AudioCaptureFormat,
+        store: SessionStore,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+    ) async throws {
+        guard format.isValid else {
+            throw TranscriptionError.invalidCaptureFormat
+        }
+        self.session = session
+        self.store = store
+        isRunning = true
+        _ = onUpdate
+    }
+
+    func append(_ buffer: AudioCaptureBuffer) {
+        _ = buffer
+    }
+
+    func finish() async throws -> TranscriptionResult {
+        guard isRunning, let session, let store else {
+            throw TranscriptionError.notRunning
+        }
+        isRunning = false
+        let text = "cancel me"
+        _ = try store.persistRawText(text, for: session)
+        self.session = nil
+        self.store = nil
+        return TranscriptionResult(
+            finalizedText: text,
+            rawTextByteCount: Int64(text.utf8.count)
+        )
+    }
+
+    func cancel() async throws -> TranscriptionResult? {
+        isRunning = false
+        session = nil
+        store = nil
+        return nil
+    }
+
+    func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult {
+        _ = session
+        _ = store
+        throw TranscriptionError.notRunning
     }
 }
