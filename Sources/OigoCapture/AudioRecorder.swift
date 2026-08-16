@@ -518,7 +518,6 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         resources.engine?.stop()
         resources.onFinish?()
         resources.descriptor?.close()
-        instrumentation.mark(.recordingStopped)
     }
 }
 

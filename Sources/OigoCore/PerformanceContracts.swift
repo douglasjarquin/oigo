@@ -181,10 +181,7 @@ public enum PerformanceReleaseCheck {
     public static func evaluate(
         _ records: [PerformanceMeasurementRecord]
     ) -> PerformanceReleaseReport {
-        let byMeasurement = Dictionary(
-            records.map { ($0.measurement, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
+        let byMeasurement = Dictionary(grouping: records, by: \.measurement)
         let budgets = Dictionary(
             PerformanceBudgetCatalog.hardGates.map { ($0.measurement, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -192,7 +189,7 @@ public enum PerformanceReleaseCheck {
         var results: [PerformanceGateResult] = []
 
         for measurement in PerformanceBudgetCatalog.allMeasurements {
-            guard let record = byMeasurement[measurement] else {
+            guard let matchingRecords = byMeasurement[measurement] else {
                 results.append(
                     PerformanceGateResult(
                         measurement: measurement,
@@ -203,14 +200,46 @@ public enum PerformanceReleaseCheck {
                 )
                 continue
             }
-            guard record.status == .available,
-                  let value = record.value else {
+            guard matchingRecords.count == 1, let record = matchingRecords.first else {
+                results.append(
+                    PerformanceGateResult(
+                        measurement: measurement,
+                        status: .fail,
+                        value: nil,
+                        note: "duplicate measurement records are invalid"
+                    )
+                )
+                continue
+            }
+            guard record.status == .available else {
                 results.append(
                     PerformanceGateResult(
                         measurement: measurement,
                         status: .inconclusive,
                         value: record.value,
                         note: record.note ?? "host measurement is unavailable"
+                    )
+                )
+                continue
+            }
+            guard let value = record.value else {
+                results.append(
+                    PerformanceGateResult(
+                        measurement: measurement,
+                        status: .fail,
+                        value: nil,
+                        note: "available measurement must include a value"
+                    )
+                )
+                continue
+            }
+            guard Self.isValid(measurement: measurement, value: value) else {
+                results.append(
+                    PerformanceGateResult(
+                        measurement: measurement,
+                        status: .fail,
+                        value: value,
+                        note: "measurement value must be finite, nonnegative, and integral for count gates"
                     )
                 )
                 continue
@@ -249,6 +278,18 @@ public enum PerformanceReleaseCheck {
             status = .pass
         }
         return PerformanceReleaseReport(status: status, results: results)
+    }
+
+    private static func isValid(measurement: PerformanceMeasurement, value: Double) -> Bool {
+        guard value.isFinite, value >= 0 else {
+            return false
+        }
+        switch measurement {
+        case .oigoInitiatedNetworkRequests, .lostRecoverableRecordings:
+            return value.rounded() == value
+        default:
+            return true
+        }
     }
 
     public static func load(from url: URL) throws -> PerformanceReleaseReport {

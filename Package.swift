@@ -155,7 +155,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "OigoIssue11PerformanceCheck",
-            dependencies: ["OigoCore"],
+            dependencies: ["OigoCore", "OigoTranscription"],
             path: "Tests/OigoIssue11PerformanceCheck"
         )
     ]

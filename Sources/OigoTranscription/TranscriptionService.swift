@@ -133,6 +133,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
 
         if faultInjector?.consume(.speechFailure) == true {
             finishStarting()
+            await releaseResources()
             throw remember(.analysisFailed("fault injection: speech failure"))
         }
 
@@ -165,13 +166,14 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             gate.finish()
             resultTask.cancel()
             _ = await resultTask.value
-            finishStarting()
+            await releaseResources()
             throw remember(.cancelled)
         }
 
         gate.release()
         _ = await resultTask.value
         let snapshot = latestSnapshot
+        instrumentation.mark(.transcriptionFinalized)
         await releaseResources()
         return snapshot
     }
@@ -378,7 +380,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 await preparedAnalyzer.cancelAndFinishNow()
             }
             finishStarting()
-            await SpeechModels.endRetention()
+            await releaseResources()
             throw remember(Self.map(error))
         }
     }
@@ -513,7 +515,10 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         guard beginStarting() else {
             throw remember(.alreadyRunning)
         }
-        defer { finishStarting() }
+        defer {
+            finishStarting()
+            instrumentation.mark(.resourcesReleased)
+        }
 
         if faultInjector?.consume(.speechFailure) == true {
             throw remember(.analysisFailed("fault injection: speech failure"))
@@ -570,6 +575,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             throw remember(Self.map(error))
         }
         guard let analyzer = createdAnalyzer else {
+            await SpeechModels.endRetention()
             throw remember(.recognitionUnavailable("speech analyzer could not be created"))
         }
 
@@ -647,6 +653,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 rawTextByteCount: rawTextByteCount
             )
             await SpeechModels.endRetention()
+            instrumentation.mark(.transcriptionFinalized)
             return TranscriptionResult(
                 finalizedText: rawText,
                 rawTextByteCount: rawTextByteCount

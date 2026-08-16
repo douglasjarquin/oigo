@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 @_spi(Testing) import OigoCore
+@_spi(Testing) import OigoTranscription
 
 private struct ContractFailure: Error, CustomStringConvertible {
     let message: String
@@ -46,6 +47,21 @@ private struct OigoIssue11PerformanceCheck {
             }
         }
 
+        let transcriptionTestName = "transcription release instrumentation"
+        if #available(macOS 26.0, *) {
+            if filter == nil || transcriptionTestName.contains(filter ?? "") {
+                matched += 1
+                do {
+                    try await testTranscriptionReleaseInstrumentation()
+                    print("GREEN: " + transcriptionTestName)
+                } catch {
+                    failures += 1
+                    print("FAIL: " + transcriptionTestName + ": " + String(describing: error))
+                }
+            }
+        } else {
+            print("INCONCLUSIVE: transcription release instrumentation requires macOS 26")
+        }
         if matched == 0 {
             print("FAIL: no performance contract scenario matched")
             exit(1)
@@ -172,6 +188,36 @@ private struct OigoIssue11PerformanceCheck {
             throw ContractFailure(message: "over-budget evidence did not fail the release check")
         }
 
+        let invalid = available.map { record in
+            record.measurement == .idleCPUPercent
+                ? PerformanceMeasurementRecord(
+                    measurement: record.measurement,
+                    value: -1
+                )
+                : record
+        }
+        guard PerformanceReleaseCheck.evaluate(invalid).status == .fail else {
+            throw ContractFailure(message: "invalid negative evidence did not fail the release check")
+        }
+
+        let missingValue = available.map { record in
+            record.measurement == .idleCPUPercent
+                ? PerformanceMeasurementRecord(
+                    measurement: record.measurement,
+                    value: nil
+                )
+                : record
+        }
+        guard PerformanceReleaseCheck.evaluate(missingValue).status == .fail else {
+            throw ContractFailure(message: "available evidence without a value did not fail the release check")
+        }
+
+        var duplicate = available
+        duplicate.append(available[0])
+        guard PerformanceReleaseCheck.evaluate(duplicate).status == .fail else {
+            throw ContractFailure(message: "duplicate evidence did not fail the release check")
+        }
+
         let missing = Array(available.dropLast())
         guard PerformanceReleaseCheck.evaluate(missing).status == .inconclusive else {
             throw ContractFailure(message: "missing host evidence was not inconclusive")
@@ -209,6 +255,49 @@ private struct OigoIssue11PerformanceCheck {
         let releaseCount = recorder.events.filter { $0 == .resourcesReleased }.count
         guard releaseCount == 100 else {
             throw ContractFailure(message: "expected one resource-release marker per cycle, got \(releaseCount)")
+        }
+        let persistedCount = recorder.events.filter { $0 == .sessionPersisted }.count
+        guard persistedCount == 100 else {
+            throw ContractFailure(message: "expected one session-persisted marker per cycle, got \(persistedCount)")
+        }
+        let stoppedCount = recorder.events.filter { $0 == .recordingStopped }.count
+        guard stoppedCount == 100 else {
+            throw ContractFailure(message: "expected one recording-stopped marker per cycle, got \(stoppedCount)")
+        }
+    }
+
+    @available(macOS 26.0, *)
+    private static func testTranscriptionReleaseInstrumentation() async throws {
+        let successRecorder = RecordingPerformanceInstrumentation()
+        let transcription = TranscriptionService(instrumentation: successRecorder)
+        _ = try await transcription.deliverFinalAtStartupBoundaryForTesting(
+            range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
+            text: "fixture"
+        )
+        guard successRecorder.events == [.transcriptionFinalized, .resourcesReleased] else {
+            throw ContractFailure(message: "successful transcription did not emit finalization and release markers")
+        }
+
+        let faultRecorder = RecordingPerformanceInstrumentation()
+        let faults = DictationFaultInjector()
+        faults.arm(.speechFailure)
+        let failedTranscription = TranscriptionService(
+            faultInjector: faults,
+            instrumentation: faultRecorder
+        )
+        do {
+            _ = try await failedTranscription.deliverFinalAtStartupBoundaryForTesting(
+                range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
+                text: "fixture"
+            )
+            throw ContractFailure(message: "fault-injected transcription unexpectedly succeeded")
+        } catch let error as TranscriptionError {
+            guard case .analysisFailed = error else {
+                throw ContractFailure(message: "fault-injected transcription returned the wrong error")
+            }
+        }
+        guard faultRecorder.events == [.resourcesReleased] else {
+            throw ContractFailure(message: "failed transcription did not emit a release marker")
         }
     }
 
