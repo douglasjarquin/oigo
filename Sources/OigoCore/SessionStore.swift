@@ -1,6 +1,52 @@
 import Foundation
 import Darwin
 
+@_spi(Testing)
+public enum DictationFault: String, CaseIterable, Hashable, Sendable {
+    case diskWriteFailure
+    case speechFailure
+    case cleanupTimeout
+    case targetLoss
+    case cancellationRace
+}
+
+@_spi(Testing)
+public final class DictationFaultInjector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var remaining: [DictationFault: Int] = [:]
+
+    public init() {}
+
+    public func arm(_ fault: DictationFault, times: Int = 1) {
+        guard times > 0 else {
+            return
+        }
+        lock.lock()
+        remaining[fault, default: 0] += times
+        lock.unlock()
+    }
+
+    public func consume(_ fault: DictationFault) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let count = remaining[fault], count > 0 else {
+            return false
+        }
+        if count == 1 {
+            remaining.removeValue(forKey: fault)
+        } else {
+            remaining[fault] = count - 1
+        }
+        return true
+    }
+
+    public func reset() {
+        lock.lock()
+        remaining.removeAll()
+        lock.unlock()
+    }
+}
+
 public enum DictationSessionState: String, Codable, CaseIterable, Sendable {
     case preparing
     case recording
@@ -18,6 +64,68 @@ public enum DictationSessionState: String, Codable, CaseIterable, Sendable {
         case .completed, .failed, .cancelled, .interrupted:
             false
         }
+    }
+}
+
+public enum DictationFailureCode: String, Codable, CaseIterable, Equatable, Sendable {
+    case audioInputDeviceChanged = "audio_input_device_changed"
+    case audioInputConfigurationChanged = "audio_input_configuration_changed"
+    case audioEngineInterrupted = "audio_engine_interrupted"
+    case audioEngineStartFailed = "audio_engine_start_failed"
+    case audioWriteFailed = "audio_write_failed"
+    case microphonePermissionRevoked = "microphone_permission_revoked"
+    case transcriptionFailed = "transcription_failed"
+    case cleanupTimedOut = "cleanup_timed_out"
+    case targetLost = "target_lost"
+    case cancelled
+    case applicationQuit = "application_quit"
+    case unknownFailure = "unknown_failure"
+
+    public static func infer(
+        from reason: String,
+        interruption: Bool = false
+    ) -> DictationFailureCode {
+        let normalized = reason.lowercased()
+        if normalized.contains("shutdown") || normalized.contains("quit") {
+            return .applicationQuit
+        }
+        if normalized.contains("cancel") {
+            return .cancelled
+        }
+        if normalized.contains("permission") && normalized.contains("microphone") {
+            return .microphonePermissionRevoked
+        }
+        if normalized.contains("disk")
+            || normalized.contains("write")
+            || normalized.contains("space")
+            || normalized.contains("unwritable") {
+            return .audioWriteFailed
+        }
+        if normalized.contains("configuration") || normalized.contains("format") {
+            return .audioInputConfigurationChanged
+        }
+        if normalized.contains("input device")
+            || normalized.contains("airpods")
+            || normalized.contains("bluetooth")
+            || normalized.contains("usb") {
+            return .audioInputDeviceChanged
+        }
+        if normalized.contains("engine") && normalized.contains("start") {
+            return .audioEngineStartFailed
+        }
+        if normalized.contains("speech")
+            || normalized.contains("transcrib")
+            || normalized.contains("analysis") {
+            return .transcriptionFailed
+        }
+        if normalized.contains("cleanup")
+            && (normalized.contains("timeout") || normalized.contains("deadline")) {
+            return .cleanupTimedOut
+        }
+        if normalized.contains("target") {
+            return .targetLost
+        }
+        return interruption ? .audioEngineInterrupted : .unknownFailure
     }
 }
 
@@ -71,6 +179,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         case endedAt
         case duration
         case failureReason
+        case failureCode
         case audioByteCount
         case rawTextByteCount
         case rawTextRevision
@@ -95,6 +204,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
     public var endedAt: Date?
     public var duration: TimeInterval?
     public var failureReason: String?
+    public var failureCode: DictationFailureCode?
     public var audioByteCount: Int64?
     public var rawTextByteCount: Int64?
     public var rawTextRevision: UInt64
@@ -119,6 +229,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         endedAt: Date? = nil,
         duration: TimeInterval? = nil,
         failureReason: String? = nil,
+        failureCode: DictationFailureCode? = nil,
         audioByteCount: Int64? = nil,
         rawTextByteCount: Int64? = nil,
         rawTextRevision: UInt64 = 0,
@@ -142,6 +253,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         self.endedAt = endedAt
         self.duration = duration
         self.failureReason = failureReason
+        self.failureCode = failureCode
         self.audioByteCount = audioByteCount
         self.rawTextByteCount = rawTextByteCount
         self.rawTextRevision = rawTextRevision
@@ -169,6 +281,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
             endedAt: container.decodeIfPresent(Date.self, forKey: .endedAt),
             duration: container.decodeIfPresent(TimeInterval.self, forKey: .duration),
             failureReason: container.decodeIfPresent(String.self, forKey: .failureReason),
+            failureCode: container.decodeIfPresent(DictationFailureCode.self, forKey: .failureCode),
             audioByteCount: container.decodeIfPresent(Int64.self, forKey: .audioByteCount),
             rawTextByteCount: container.decodeIfPresent(Int64.self, forKey: .rawTextByteCount),
             rawTextRevision: container.decodeIfPresent(UInt64.self, forKey: .rawTextRevision) ?? 0,
@@ -298,6 +411,7 @@ public final class SessionStore: @unchecked Sendable {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let lock = NSLock()
+    private let faultInjector: DictationFaultInjector?
     private var failNextMetadataWrite = false
 
     private struct PendingRawPersistence: Codable {
@@ -318,8 +432,37 @@ public final class SessionStore: @unchecked Sendable {
     private static let maxMetadataBytes = 64 * 1024
     private static let maxTranscriptBytes = 4 * 1024 * 1024
 
-    public init(rootDirectory: URL? = nil, fileManager: FileManager = .default) throws {
+    public init(
+        rootDirectory: URL? = nil,
+        fileManager: FileManager = .default
+    ) throws {
         self.fileManager = fileManager
+        self.faultInjector = nil
+        self.rootDirectory = rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        self.encoder = encoder
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        self.decoder = decoder
+
+        try fileManager.createDirectory(
+            at: self.rootDirectory,
+            withIntermediateDirectories: true
+        )
+    }
+
+    @_spi(Testing)
+    public init(
+        rootDirectory: URL? = nil,
+        fileManager: FileManager = .default,
+        faultInjector: DictationFaultInjector?
+    ) throws {
+        self.fileManager = fileManager
+        self.faultInjector = faultInjector
         self.rootDirectory = rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
 
         let encoder = JSONEncoder()
@@ -451,6 +594,7 @@ public final class SessionStore: @unchecked Sendable {
         state: DictationSessionState,
         at date: Date = Date(),
         failureReason: String? = nil,
+        failureCode: DictationFailureCode? = nil,
         audioByteCount: Int64? = nil,
         rawTextByteCount: Int64? = nil,
         insertionOutcome: InsertionOutcome? = nil,
@@ -480,8 +624,12 @@ public final class SessionStore: @unchecked Sendable {
                 }
                 if state == .failed {
                     metadata.failureReason = failureReason ?? metadata.failureReason ?? "capture failed"
+                    metadata.failureCode = failureCode ?? metadata.failureCode ?? .unknownFailure
                 } else if let failureReason {
                     metadata.failureReason = failureReason
+                }
+                if let failureCode {
+                    metadata.failureCode = failureCode
                 }
                 if let audioByteCount {
                     metadata.audioByteCount = audioByteCount
@@ -1090,6 +1238,7 @@ public final class SessionStore: @unchecked Sendable {
             metadata.failureReason = session.metadata.state == .retrying
                 ? "transcription retry was interrupted before shutdown"
                 : "recording was interrupted before shutdown"
+            metadata.failureCode = .applicationQuit
             try writeMetadata(metadata, at: session.metadataURL)
             recovered.append(DictationSession(metadata: metadata, directoryURL: session.directoryURL))
         }
@@ -1481,7 +1630,7 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     private func writeMetadata(_ metadata: SessionMetadata, at url: URL, directoryFD: Int32) throws {
-        if consumeMetadataWriteFailure() {
+        if faultInjector?.consume(.diskWriteFailure) == true || consumeMetadataWriteFailure() {
             throw SessionStoreError.invalidMetadata(url)
         }
         let data = try encoder.encode(metadata)

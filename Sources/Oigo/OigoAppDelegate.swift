@@ -49,6 +49,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var previewThrottle = OigoHUDPreviewThrottle()
     private var toggleTask: Task<Void, Never>?
     private var cleanAgainTask: Task<Void, Never>?
+    private var retryTask: Task<Void, Never>?
+    private var workspaceInterruptionTask: Task<Void, Never>?
+    private var workspaceObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
@@ -58,6 +61,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             showOnboarding(support)
             return
         }
+        installWorkspaceInterruptionObservers()
         prepareSessionStore()
         configureStatusItem()
         if onboardingStore.load().isComplete {
@@ -71,15 +75,20 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
         shortcutRegistrar.unregister()
+        removeWorkspaceInterruptionObservers()
         statusSurface.hide()
         playback.stop()
         let activeToggleTask = toggleTask
         let activeCleanAgainTask = cleanAgainTask
+        let activeRetryTask = retryTask
+        let activeWorkspaceInterruptionTask = workspaceInterruptionTask
         activeToggleTask?.cancel()
         activeCleanAgainTask?.cancel()
-        if coordinator.hasActiveTranscription
+        if coordinator.hasActiveWork
             || activeToggleTask != nil
-            || activeCleanAgainTask != nil {
+            || activeCleanAgainTask != nil
+            || activeRetryTask != nil
+            || activeWorkspaceInterruptionTask != nil {
             Task { @MainActor [weak self] in
                 if let activeToggleTask {
                     await activeToggleTask.value
@@ -90,7 +99,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 if self?.coordinator.hasActiveTranscription == true {
                     await self?.coordinator.shutdownWithTranscription()
                 } else {
-                    self?.coordinator.shutdown()
+                    await self?.coordinator.shutdownAndWait()
+                }
+                if let activeRetryTask {
+                    await activeRetryTask.value
+                }
+                if let activeWorkspaceInterruptionTask {
+                    await activeWorkspaceInterruptionTask.value
                 }
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
@@ -380,17 +395,80 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func installWorkspaceInterruptionObservers() {
+        removeWorkspaceInterruptionObservers()
+        let center = NSWorkspace.shared.notificationCenter
+        workspaceObservers = [
+            NSWorkspace.willSleepNotification,
+            NSWorkspace.sessionDidResignActiveNotification
+        ].map { name in
+            center.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                let reason = name == NSWorkspace.willSleepNotification
+                    ? "system sleep interrupted dictation operation"
+                    : "screen lock interrupted dictation operation"
+                Task { @MainActor [weak self] in
+                    self?.handleWorkspaceInterruption(reason)
+                }
+            }
+        }
+    }
+
+    private func removeWorkspaceInterruptionObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+        workspaceObservers.forEach(center.removeObserver)
+        workspaceObservers.removeAll(keepingCapacity: false)
+    }
+
+    private func handleWorkspaceInterruption(_ reason: String) {
+        workspaceInterruptionTask?.cancel()
+        workspaceInterruptionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let activeToggleTask = toggleTask
+            let activeCleanAgainTask = cleanAgainTask
+            let activeRetryTask = retryTask
+            activeToggleTask?.cancel()
+            activeCleanAgainTask?.cancel()
+            activeRetryTask?.cancel()
+            await coordinator.cancelActiveWork(reason: reason)
+            if let activeToggleTask {
+                await activeToggleTask.value
+            }
+            if let activeCleanAgainTask {
+                await activeCleanAgainTask.value
+            }
+            if let activeRetryTask {
+                await activeRetryTask.value
+            }
+            lastSession = coordinator.currentSession ?? lastSession
+            recordingStartedAt = nil
+            targetSnapshot = nil
+            livePreview = ""
+            insertionDisplayStatus = nil
+            updateSurface()
+            workspaceInterruptionTask = nil
+        }
+    }
+
     private func handleToggle(allowBeforeSetup: Bool = false) {
         guard allowBeforeSetup || onboardingStore.load().isComplete else {
             showOnboarding(OigoSystemSupportEvaluator.current())
             return
         }
-        guard toggleTask == nil else {
+        if let toggleTask {
+            toggleTask.cancel()
             return
         }
-        toggleTask = Task { @MainActor [weak self] in
-            defer { self?.toggleTask = nil }
-            await self?.performToggle()
+        do {
+            toggleTask = try coordinator.startTask { @MainActor [weak self] in
+                defer { self?.toggleTask = nil }
+                await self?.performToggle()
+            }
+        } catch {
+            NSLog("Oigo could not start its coordinator-owned toggle task: %@", String(describing: error))
         }
     }
 
@@ -429,8 +507,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 insertionDisplayStatus = nil
                 try await ensureMicrophonePermission()
+                try Task.checkCancellation()
                 targetSnapshot = insertion.captureTarget()
                 let format = try recorder.captureFormat()
+                try Task.checkCancellation()
                 let service = transcriptionService()
                 recordingStartedAt = Date()
                 previewThrottle = OigoHUDPreviewThrottle()
@@ -513,11 +593,21 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             updateSurface()
         } catch is CancellationError {
+            await coordinator.cancelActiveWork()
+            lastSession = coordinator.currentSession ?? lastSession
+            recordingStartedAt = nil
+            targetSnapshot = nil
+            livePreview = ""
+            if !coordinator.hasActiveWork {
+                insertionDisplayStatus = nil
+            }
+            updateSurface()
             return
         } catch {
-            if [.cleaning, .inserting].contains(coordinator.state) {
-                lastSession = coordinator.failInsertion(reason: String(describing: error))
+            if coordinator.hasActiveWork {
+                await coordinator.cancelActiveWork(reason: String(describing: error))
             }
+            lastSession = coordinator.currentSession ?? lastSession
             targetSnapshot = nil
             recordingStartedAt = nil
             insertionDisplayStatus = .failed
@@ -537,17 +627,27 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func retryLastTranscription() {
-        Task { @MainActor [weak self] in
-            guard let self, let session = self.lastSession else {
-                return
-            }
-            await self.performRetry(for: session)
+        guard let session = lastSession else {
+            return
         }
+        startRetry(for: session)
     }
 
     private func retryTranscription(for entry: SessionHistoryEntry) {
-        Task { @MainActor [weak self] in
-            await self?.performRetry(for: entry.session)
+        startRetry(for: entry.session)
+    }
+
+    private func startRetry(for session: DictationSession) {
+        guard retryTask == nil else {
+            return
+        }
+        do {
+            retryTask = try coordinator.startTask { @MainActor [weak self] in
+                defer { self?.retryTask = nil }
+                await self?.performRetry(for: session)
+            }
+        } catch {
+            historyWindow?.showMessage(Self.friendlyError("Retry failed", error))
         }
     }
 
@@ -683,92 +783,101 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         historyWindow?.setCleanAgainEnabled(false)
         historyWindow?.showMessage("Cleaning the saved raw transcript…")
-        cleanAgainTask = Task { @MainActor [weak self] in
-            defer {
-                self?.cleanAgainTask = nil
-                self?.historyWindow?.setCleanAgainEnabled(true)
+        do {
+            cleanAgainTask = try coordinator.startTask { @MainActor [weak self] in
+                defer {
+                    self?.cleanAgainTask = nil
+                    self?.historyWindow?.setCleanAgainEnabled(true)
+                }
+                await self?.performCleanAgain(for: entry, store: store)
             }
-            guard let self else {
-                return
-            }
-            do {
-                let rawText = try store.readRawText(for: entry.session)
-                let decision = await self.transcriptCleanup.resolve(
-                    mode: .clean,
-                    rawText: rawText,
-                    deadlineNanoseconds: 4_000_000_000
+        } catch {
+            historyWindow?.setCleanAgainEnabled(true)
+            historyWindow?.showMessage(Self.friendlyError("Clean Again failed", error))
+        }
+    }
+
+    private func performCleanAgain(
+        for entry: SessionHistoryEntry,
+        store: SessionStore
+    ) async {
+        do {
+            let rawText = try store.readRawText(for: entry.session)
+            let decision = await transcriptCleanup.resolve(
+                mode: .clean,
+                rawText: rawText,
+                deadlineNanoseconds: 4_000_000_000
+            )
+            try Task.checkCancellation()
+            guard let cleanText = decision.cleanText else {
+                let fallbackReason = decision.fallbackReason?.description
+                    ?? "cleanup did not complete"
+                try Task.checkCancellation()
+                _ = try store.update(
+                    entry.session,
+                    state: entry.session.metadata.state,
+                    cleanupFallbackReason: fallbackReason
                 )
-                try Task.checkCancellation()
-                guard let cleanText = decision.cleanText else {
-                    let fallbackReason = decision.fallbackReason?.description
-                        ?? "cleanup did not complete"
-                    try Task.checkCancellation()
-                    _ = try store.update(
-                        entry.session,
-                        state: entry.session.metadata.state,
-                        cleanupFallbackReason: fallbackReason
-                    )
-                    self.historyWindow?.showMessage(
-                        "Clean Again used no output. Raw transcript remains available: "
-                            + fallbackReason
-                    )
-                    self.refreshHistory()
-                    return
-                }
-                try Task.checkCancellation()
-                do {
-                    _ = try store.persistCleanText(
-                        cleanText,
-                        for: entry.session
-                    )
-                } catch let error as SessionStoreError {
-                    if case .rawTextChanged = error {
-                        throw error
-                    }
-                    let fallbackReason = TranscriptCleanupFallbackReason
-                        .persistenceFailure(String(describing: error))
-                        .description
-                    try Task.checkCancellation()
-                    _ = try store.update(
-                        entry.session,
-                        state: entry.session.metadata.state,
-                        insertionTextSource: .raw,
-                        cleanupFallbackReason: fallbackReason
-                    )
-                    self.historyWindow?.showMessage(
-                        "Clean Again could not save clean.txt. Raw transcript remains available: "
-                            + fallbackReason
-                    )
-                    self.refreshHistory()
-                    return
-                }
-                try Task.checkCancellation()
-                self.historyWindow?.showMessage("Clean transcript saved. Raw transcript was unchanged.")
-                self.refreshHistory()
-            } catch SessionStoreError.rawTextChanged {
-                guard !Task.isCancelled else {
-                    return
-                }
-                let fallbackReason = "raw transcript changed while Clean Again was running"
-                do {
-                    _ = try store.update(
-                        entry.session,
-                        state: entry.session.metadata.state,
-                        insertionTextSource: .raw,
-                        cleanupFallbackReason: fallbackReason
-                    )
-                    self.historyWindow?.showMessage(
-                        "Clean Again discarded stale output. Raw transcript remains available."
-                    )
-                    self.refreshHistory()
-                } catch {
-                    self.historyWindow?.showMessage(Self.friendlyError("Clean Again failed", error))
-                }
-            } catch is CancellationError {
+                historyWindow?.showMessage(
+                    "Clean Again used no output. Raw transcript remains available: "
+                        + fallbackReason
+                )
+                refreshHistory()
                 return
-            } catch {
-                self.historyWindow?.showMessage(Self.friendlyError("Clean Again failed", error))
             }
+            try Task.checkCancellation()
+            do {
+                _ = try store.persistCleanText(
+                    cleanText,
+                    for: entry.session
+                )
+            } catch let error as SessionStoreError {
+                if case .rawTextChanged = error {
+                    throw error
+                }
+                let fallbackReason = TranscriptCleanupFallbackReason
+                    .persistenceFailure(String(describing: error))
+                    .description
+                try Task.checkCancellation()
+                _ = try store.update(
+                    entry.session,
+                    state: entry.session.metadata.state,
+                    insertionTextSource: .raw,
+                    cleanupFallbackReason: fallbackReason
+                )
+                historyWindow?.showMessage(
+                    "Clean Again could not save clean.txt. Raw transcript remains available: "
+                        + fallbackReason
+                )
+                refreshHistory()
+                return
+            }
+            try Task.checkCancellation()
+            historyWindow?.showMessage("Clean transcript saved. Raw transcript was unchanged.")
+            refreshHistory()
+        } catch SessionStoreError.rawTextChanged {
+            guard !Task.isCancelled else {
+                return
+            }
+            let fallbackReason = "raw transcript changed while Clean Again was running"
+            do {
+                _ = try store.update(
+                    entry.session,
+                    state: entry.session.metadata.state,
+                    insertionTextSource: .raw,
+                    cleanupFallbackReason: fallbackReason
+                )
+                historyWindow?.showMessage(
+                    "Clean Again discarded stale output. Raw transcript remains available."
+                )
+                refreshHistory()
+            } catch {
+                historyWindow?.showMessage(Self.friendlyError("Clean Again failed", error))
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            historyWindow?.showMessage(Self.friendlyError("Clean Again failed", error))
         }
     }
 

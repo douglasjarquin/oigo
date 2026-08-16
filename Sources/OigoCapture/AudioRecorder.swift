@@ -1,4 +1,5 @@
 import AVFAudio
+import AppKit
 import CoreAudio
 import Foundation
 import OigoCore
@@ -29,9 +30,98 @@ public enum AudioRecorderError: Error, CustomStringConvertible, Sendable {
     }
 }
 
+public protocol AudioDeviceMonitoring: AnyObject {
+    func start(onChange: @escaping @Sendable (String) -> Void)
+    func stop()
+}
+
+@available(macOS 14.0, *)
+public final class SystemAudioDeviceMonitor: AudioDeviceMonitoring, @unchecked Sendable {
+    private final class Registration {
+        let objectID: AudioObjectID
+        var address: AudioObjectPropertyAddress
+        let queue: DispatchQueue
+        let listener: AudioObjectPropertyListenerBlock
+
+        init(
+            objectID: AudioObjectID,
+            address: AudioObjectPropertyAddress,
+            queue: DispatchQueue,
+            listener: @escaping AudioObjectPropertyListenerBlock
+        ) {
+            self.objectID = objectID
+            self.address = address
+            self.queue = queue
+            self.listener = listener
+        }
+    }
+
+    private let lock = NSLock()
+    private var registration: Registration?
+    private var onChange: (@Sendable (String) -> Void)?
+
+    public init() {}
+
+    public func start(onChange: @escaping @Sendable (String) -> Void) {
+        stop()
+        let queue = DispatchQueue(label: "com.oigo.audio-device-monitor")
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.notifyChange()
+        }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            queue,
+            listener
+        ) == noErr else {
+            return
+        }
+        lock.lock()
+        self.onChange = onChange
+        registration = Registration(
+            objectID: AudioObjectID(kAudioObjectSystemObject),
+            address: address,
+            queue: queue,
+            listener: listener
+        )
+        lock.unlock()
+    }
+
+    public func stop() {
+        lock.lock()
+        let registration = self.registration
+        self.registration = nil
+        onChange = nil
+        lock.unlock()
+
+        guard let registration else {
+            return
+        }
+        _ = AudioObjectRemovePropertyListenerBlock(
+            registration.objectID,
+            &registration.address,
+            registration.queue,
+            registration.listener
+        )
+    }
+
+    private func notifyChange() {
+        lock.lock()
+        let callback = onChange
+        lock.unlock()
+        callback?("default input device changed")
+    }
+}
+
 @available(macOS 14.0, *)
 public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private let lock = NSLock()
+    private let deviceMonitor: AudioDeviceMonitoring
     private var engine: AVAudioEngine?
     private var audioFile: AVAudioFile?
     private var audioFileDescriptor: AudioFileDescriptor?
@@ -40,10 +130,13 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private var onInterruption: (@Sendable (String) -> Void)?
     private var onFailure: (@Sendable (String) -> Void)?
     private var configurationObserver: NSObjectProtocol?
+    private var lifecycleObservers: [NSObjectProtocol] = []
     private var recording = false
     private var failureReported = false
 
-    public init() {}
+    public init(deviceMonitor: AudioDeviceMonitoring = SystemAudioDeviceMonitor()) {
+        self.deviceMonitor = deviceMonitor
+    }
 
     public func captureFormat() throws -> AudioCaptureFormat {
         guard Bundle.main.bundleIdentifier != nil else {
@@ -169,6 +262,29 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             lock.lock()
             configurationObserver = observer
             lock.unlock()
+            deviceMonitor.start { [weak self] reason in
+                self?.handleInterruption(reason)
+            }
+            let workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
+            let lifecycleNames = [
+                NSWorkspace.willSleepNotification,
+                NSWorkspace.sessionDidResignActiveNotification
+            ]
+            let lifecycleObservers = lifecycleNames.map { name in
+                workspaceNotificationCenter.addObserver(
+                    forName: name,
+                    object: nil,
+                    queue: nil
+                ) { [weak self] notification in
+                    let reason = notification.name.rawValue.contains("Sleep")
+                        ? "system sleep interrupted recording"
+                        : "screen lock interrupted recording"
+                    self?.handleInterruption(reason)
+                }
+            }
+            lock.lock()
+            self.lifecycleObservers = lifecycleObservers
+            lock.unlock()
             engine.prepare()
             try engine.start()
         } catch {
@@ -179,7 +295,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
     public func stop() throws {
         guard let resources = beginTeardown() else {
-            throw AudioRecorderError.notRecording
+            return
         }
         finish(resources)
     }
@@ -192,6 +308,11 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     }
 
     private func handle(_ buffer: AVAudioPCMBuffer) {
+        guard AVAudioApplication.shared.recordPermission == .granted else {
+            handleInterruption("microphone permission revoked")
+            return
+        }
+
         var callback: (@Sendable (AudioCaptureBuffer) -> Void)?
         var forwardedBuffer: AudioCaptureBuffer?
         var failure: (@Sendable (String) -> Void)?
@@ -347,6 +468,14 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         if let observer {
             NotificationCenter.default.removeObserver(observer)
         }
+        lock.lock()
+        let lifecycleObservers = self.lifecycleObservers
+        self.lifecycleObservers = []
+        lock.unlock()
+        for observer in lifecycleObservers {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        deviceMonitor.stop()
         return resources
     }
 

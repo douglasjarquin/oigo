@@ -1,13 +1,14 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
-import OigoCore
+@_spi(Testing) import OigoCore
 
 @MainActor
 public final class InsertionService {
     private let targetEnvironment: InsertionTargetEnvironment
     private let pasteboard: InsertionPasteboard
     private let eventSender: InsertionEventSender
+    private let faultInjector: DictationFaultInjector?
     private var attemptedSessionID: UUID?
 
     public init(
@@ -18,6 +19,20 @@ public final class InsertionService {
         self.targetEnvironment = targetEnvironment
         self.pasteboard = pasteboard
         self.eventSender = eventSender
+        faultInjector = nil
+    }
+
+    @_spi(Testing)
+    public init(
+        targetEnvironment: InsertionTargetEnvironment = AccessibilityTargetEnvironment(),
+        pasteboard: InsertionPasteboard = SystemInsertionPasteboard(),
+        eventSender: InsertionEventSender = CommandVPasteEventSender(),
+        faultInjector: DictationFaultInjector?
+    ) {
+        self.targetEnvironment = targetEnvironment
+        self.pasteboard = pasteboard
+        self.eventSender = eventSender
+        self.faultInjector = faultInjector
     }
 
     public func captureTarget() -> InsertionTargetSnapshot {
@@ -148,6 +163,9 @@ public final class InsertionService {
     private func performPaste(
         target: InsertionTargetSnapshot
     ) -> InsertionResult {
+        if faultInjector?.consume(.targetLoss) == true {
+            return Self.copyOnlyResult(for: .applicationChanged)
+        }
         switch targetEnvironment.validate(target) {
         case .secureTextField:
             return Self.copyOnlyResult(for: .secureTextField)

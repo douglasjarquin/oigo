@@ -2,7 +2,7 @@ import AVFAudio
 import CoreMedia
 import Darwin
 import Foundation
-import OigoCore
+@_spi(Testing) import OigoCore
 import Speech
 
 private final class AudioPCMBufferBox: @unchecked Sendable {
@@ -37,6 +37,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
 
     private let lock = NSLock()
     private let configuredLocale: Locale
+    private let faultInjector: DictationFaultInjector?
     private var lifecycle = Lifecycle.idle
     private var startWaiters: [CheckedContinuation<Void, Never>] = []
     private var cancellationRequested = false
@@ -61,6 +62,16 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
 
     public init(locale: Locale = Locale(identifier: "en-US")) {
         configuredLocale = locale
+        faultInjector = nil
+    }
+
+    @_spi(Testing)
+    public init(
+        locale: Locale = Locale(identifier: "en-US"),
+        faultInjector: DictationFaultInjector?
+    ) {
+        configuredLocale = locale
+        self.faultInjector = faultInjector
     }
 
     @_spi(Testing)
@@ -110,6 +121,11 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     ) async throws -> TranscriptionSnapshot {
         guard beginStarting() else {
             throw remember(.alreadyRunning)
+        }
+
+        if faultInjector?.consume(.speechFailure) == true {
+            finishStarting()
+            throw remember(.analysisFailed("fault injection: speech failure"))
         }
 
         let gate = TranscriptionStartupGate()
@@ -489,6 +505,10 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             throw remember(.alreadyRunning)
         }
         defer { finishStarting() }
+
+        if faultInjector?.consume(.speechFailure) == true {
+            throw remember(.analysisFailed("fault injection: speech failure"))
+        }
 
         let url = session.audioURL
         let module = try await installedTranscriber()

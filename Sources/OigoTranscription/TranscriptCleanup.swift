@@ -1,6 +1,6 @@
 import Foundation
 import FoundationModels
-import OigoCore
+@_spi(Testing) import OigoCore
 import os
 
 @available(macOS 26.0, *)
@@ -153,6 +153,7 @@ public protocol TranscriptCleanupModel: Sendable {
 public final class TranscriptCleanupCoordinator: @unchecked Sendable {
     private let cleanerFactory: @Sendable () -> TranscriptCleaner
     private let instrumentation: TranscriptCleanupInstrumentation
+    private let faultInjector: DictationFaultInjector?
 
     public init(
         cleanerFactory: @escaping @Sendable () -> TranscriptCleaner,
@@ -160,6 +161,18 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
     ) {
         self.cleanerFactory = cleanerFactory
         self.instrumentation = instrumentation
+        self.faultInjector = nil
+    }
+
+    @_spi(Testing)
+    public init(
+        cleanerFactory: @escaping @Sendable () -> TranscriptCleaner,
+        instrumentation: TranscriptCleanupInstrumentation = NoopTranscriptCleanupInstrumentation(),
+        faultInjector: DictationFaultInjector
+    ) {
+        self.cleanerFactory = cleanerFactory
+        self.instrumentation = instrumentation
+        self.faultInjector = faultInjector
     }
 
     public func resolve(
@@ -202,14 +215,19 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
                 return fallback(rawText: rawText, reason: .timeout)
             }
 
-            let generationResult = await TranscriptCleanupDeadline.run(
-                deadlineNanoseconds: deadline,
-                cancel: cleaner.cancel
-            ) {
-                await cleaner.clean(
-                    chunk: chunk.text,
-                    deadlineNanoseconds: deadline - now
-                )
+            let generationResult: TranscriptCleanupGeneration
+            if faultInjector?.consume(.cleanupTimeout) == true {
+                generationResult = .timedOut
+            } else {
+                generationResult = await TranscriptCleanupDeadline.run(
+                    deadlineNanoseconds: deadline,
+                    cancel: cleaner.cancel
+                ) {
+                    await cleaner.clean(
+                        chunk: chunk.text,
+                        deadlineNanoseconds: deadline - now
+                    )
+                }
             }
             let generation: TranscriptCleanupGeneration = DispatchTime.now().uptimeNanoseconds < deadline
                 ? generationResult
