@@ -280,6 +280,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     }
                 )
             case .recording:
+                let terminalMode = cleanupMode
                 insertionDisplayStatus = .finalizing
                 updateSurface()
                 _ = try await coordinator.stopRecordingWithTranscription()
@@ -289,17 +290,18 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 let insertionSession = try coordinator.beginInsertion(
                     using: store,
-                    requiresCleanup: cleanupMode == .clean
+                    requiresCleanup: terminalMode == .clean
                 )
-                if cleanupMode == .clean {
+                if terminalMode == .clean {
                     insertionDisplayStatus = .cleaning
                 }
                 updateSurface()
                 let decision = try await resolveCleanup(
                     for: insertionSession,
-                    store: store
+                    store: store,
+                    mode: terminalMode
                 )
-                if cleanupMode == .clean {
+                if terminalMode == .clean {
                     _ = try coordinator.finishCleanup()
                 }
                 let result = insertion.insertText(
@@ -411,10 +413,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func resolveCleanup(
         for session: DictationSession,
-        store: SessionStore
+        store: SessionStore,
+        mode: TranscriptCleanupMode
     ) async throws -> TranscriptCleanupDecision {
         let rawText = try store.readRawText(for: session)
-        guard cleanupMode == .clean else {
+        guard mode == .clean else {
             return TranscriptCleanupDecision(
                 rawText: rawText,
                 insertionText: rawText,
@@ -430,7 +433,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         )
         if let cleanText = decision.cleanText {
             do {
-                _ = try store.persistCleanText(cleanText, for: session)
+                _ = try store.persistCleanText(
+                    cleanText,
+                    for: session
+                )
             } catch {
                 transcriptCleanupMetrics.record(.fallback)
                 decision = TranscriptCleanupDecision(
@@ -505,15 +511,43 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     deadlineNanoseconds: 4_000_000_000
                 )
                 guard let cleanText = decision.cleanText else {
+                    let fallbackReason = decision.fallbackReason?.description
+                        ?? "cleanup did not complete"
+                    _ = try store.update(
+                        entry.session,
+                        state: entry.session.metadata.state,
+                        insertionTextSource: .raw,
+                        cleanupFallbackReason: fallbackReason
+                    )
                     self.historyWindow?.showMessage(
                         "Clean Again used no output. Raw transcript remains available: "
-                            + (decision.fallbackReason?.description ?? "cleanup did not complete")
+                            + fallbackReason
                     )
+                    self.refreshHistory()
                     return
                 }
-                _ = try store.persistCleanText(cleanText, for: entry.session)
+                _ = try store.persistCleanText(
+                    cleanText,
+                    for: entry.session
+                )
                 self.historyWindow?.showMessage("Clean transcript saved. Raw transcript was unchanged.")
                 self.refreshHistory()
+            } catch SessionStoreError.rawTextChanged {
+                let fallbackReason = "raw transcript changed while Clean Again was running"
+                do {
+                    _ = try store.update(
+                        entry.session,
+                        state: entry.session.metadata.state,
+                        insertionTextSource: .raw,
+                        cleanupFallbackReason: fallbackReason
+                    )
+                    self.historyWindow?.showMessage(
+                        "Clean Again discarded stale output. Raw transcript remains available."
+                    )
+                    self.refreshHistory()
+                } catch {
+                    self.historyWindow?.showMessage(Self.friendlyError("Clean Again failed", error))
+                }
             } catch {
                 self.historyWindow?.showMessage(Self.friendlyError("Clean Again failed", error))
             }

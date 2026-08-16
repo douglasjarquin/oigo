@@ -37,8 +37,16 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Automatic cleanup deadline stops cancellation-resistant generation")
             try await testCleanupInstrumentationRecordsLifecycleMetrics()
             print("GREEN: Cleanup availability, start, completion, and fallback metrics are recorded")
+            try await testOversizedChunkBoundariesPreserveWhitespace()
+            print("GREEN: Oversized cleanup chunks preserve whitespace at boundaries")
             try testCleanPersistenceLeavesRawUntouchedAndRecordsInsertionSource()
             print("GREEN: clean.txt is separate from raw.txt and insertion source is durable")
+            try testCleanAgainFallbackRecordsRawSourceAndReason()
+            print("GREEN: Clean Again fallback source and reason are durable without insertion")
+            try testRecoveryInvalidatesStaleCleanTextAfterRawCommit()
+            print("GREEN: Raw persistence recovery invalidates stale clean text")
+            try testCleanTextRejectsStaleRawSnapshot()
+            print("GREEN: Clean Again cannot recreate output after a raw retry")
             try testCleanInsertionReadsCleanText()
             print("GREEN: Automatic insertion can use clean.txt without touching raw.txt")
             try testApprovedEvaluationCorpusProtectsTechnicalTokens()
@@ -365,6 +373,124 @@ private struct OigoIssue8ContractTests {
         }
     }
 
+    private static func testOversizedChunkBoundariesPreserveWhitespace() async throws {
+        let rawText = String(repeating: "word ", count: 3_999) + "word"
+        let coordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: { RecordingCleaner(recorder: ChunkRecorder()) }
+        )
+        let decision = await coordinator.resolve(
+            mode: .clean,
+            rawText: rawText,
+            deadlineNanoseconds: 1_000_000_000
+        )
+        guard decision.cleanText == rawText,
+              decision.insertionText == rawText,
+              decision.fallbackReason == nil else {
+            throw ContractFailure(message: "oversized cleanup chunks concatenated words at a boundary")
+        }
+    }
+
+    private static func testCleanAgainFallbackRecordsRawSourceAndReason() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue8-clean-again-fallback-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let session = try store.createSession()
+        let interrupted = try store.update(
+            try store.persistRawText("saved raw", for: session),
+            state: .interrupted,
+            failureReason: "transcription interrupted"
+        )
+        _ = try store.update(interrupted, state: .completed)
+        let recorded = try store.update(
+            interrupted,
+            state: .interrupted,
+            insertionTextSource: .raw,
+            cleanupFallbackReason: "model unavailable: device policy"
+        )
+        let reloaded = try store.load(id: recorded.id)
+        guard reloaded.metadata.state == .completed,
+              reloaded.metadata.insertionTextSource == .raw,
+              reloaded.metadata.cleanupFallbackReason == "model unavailable: device policy" else {
+            throw ContractFailure(message: "Clean Again fallback metadata was not durable without changing session state")
+        }
+    }
+
+    private static func testRecoveryInvalidatesStaleCleanTextAfterRawCommit() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue8-recovery-clean-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let session = try store.createSession()
+        let persisted = try store.persistRawText("old raw", for: session)
+        _ = try store.persistCleanText("stale clean", for: persisted)
+        let rawText = "new raw after committed replacement"
+        try Data(rawText.utf8).write(to: persisted.rawTextURL, options: [.atomic])
+
+        var pendingMetadata = persisted.metadata
+        pendingMetadata.updatedAt = Date()
+        pendingMetadata.rawTextByteCount = Int64(rawText.utf8.count)
+        pendingMetadata.firstTranscriptLine = "new raw after committed replacement"
+        let pending = PendingRawPersistenceFixture(
+            metadata: pendingMetadata,
+            sourceName: nil,
+            previousRawTextByteCount: Int64("old raw".utf8.count),
+            targetRawTextByteCount: Int64(rawText.utf8.count)
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var pendingObject = try JSONSerialization.jsonObject(
+            with: encoder.encode(pending)
+        ) as! [String: Any]
+        var pendingMetadataObject = pendingObject["metadata"] as! [String: Any]
+        pendingMetadataObject["rawTextRevision"] = 2
+        pendingObject["metadata"] = pendingMetadataObject
+        try JSONSerialization.data(withJSONObject: pendingObject, options: [.sortedKeys]).write(
+            to: persisted.directoryURL.appendingPathComponent(".raw-persistence.json"),
+            options: [.atomic]
+        )
+
+        let recovered = try store.load(id: persisted.id)
+        guard try store.readRawText(for: recovered) == rawText,
+              try store.readCleanText(for: recovered).isEmpty,
+              !FileManager.default.fileExists(atPath: recovered.cleanTextURL.path),
+              !FileManager.default.fileExists(
+                  atPath: recovered.directoryURL.appendingPathComponent(".raw-persistence.json").path
+              ) else {
+            throw ContractFailure(message: "raw persistence recovery exposed stale clean transcript output")
+        }
+    }
+
+    private static func testCleanTextRejectsStaleRawSnapshot() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue8-clean-again-race-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let session = try store.createSession()
+        let persisted = try store.persistRawText("before retry", for: session)
+        let staleSession = persisted
+        let retried = try store.persistRawText("after retry", for: staleSession)
+
+        do {
+            _ = try store.persistCleanText(
+                "stale clean output",
+                for: staleSession
+            )
+            throw ContractFailure(message: "stale Clean Again output was persisted after a raw retry")
+        } catch let error as SessionStoreError {
+            guard case .rawTextChanged = error else {
+                throw ContractFailure(message: "stale Clean Again output returned the wrong persistence error")
+            }
+        }
+        guard try store.readRawText(for: retried) == "after retry",
+              try store.readCleanText(for: retried).isEmpty else {
+            throw ContractFailure(message: "stale Clean Again output changed the retried raw transcript")
+        }
+    }
+
     private static func testCleanInsertionReadsCleanText() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("oigo-issue8-insert-" + UUID().uuidString, isDirectory: true)
@@ -477,6 +603,13 @@ private struct EvaluationCase: Codable {
     let expectedMeaning: String
     let protectedTechnicalTokens: [String]
     let reviewStatus: String
+}
+
+private struct PendingRawPersistenceFixture: Codable {
+    let metadata: SessionMetadata
+    let sourceName: String?
+    let previousRawTextByteCount: Int64
+    let targetRawTextByteCount: Int64
 }
 
 private final class RecordingCleanerFactory: @unchecked Sendable {

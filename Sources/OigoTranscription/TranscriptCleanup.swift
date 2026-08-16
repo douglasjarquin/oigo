@@ -380,13 +380,12 @@ public enum TranscriptChunker {
                     maxInputBytes: maxInputBytes
                 )
                 for (smallIndex, smallPiece) in pieces.enumerated() {
-                    let separator: String
-                    if smallIndex > 0 {
-                        separator = ""
-                    } else {
-                        separator = sentenceSeparator
-                    }
-                    append(smallPiece, separator: separator)
+                    append(
+                        smallPiece.text,
+                        separator: smallIndex == 0
+                            ? sentenceSeparator
+                            : smallPiece.separatorBefore
+                    )
                 }
             }
         }
@@ -429,16 +428,19 @@ public enum TranscriptChunker {
         _ text: String,
         maxTokenCount: Int,
         maxInputBytes: Int
-    ) -> [String] {
+    ) -> [(text: String, separatorBefore: String)] {
         guard tokenEstimate(text) > maxTokenCount else {
-            return [text]
+            return [(text: text, separatorBefore: "")]
         }
 
-        var pieces: [String] = []
+        var pieces: [(text: String, separatorBefore: String)] = []
         var remaining = text
+        var separatorBefore = ""
         while tokenEstimate(remaining) > maxTokenCount {
             var end = remaining.startIndex
             var bytes = 0
+            var whitespaceRunStart: String.Index?
+            var lastWhitespaceStart: String.Index?
             var lastWhitespaceEnd: String.Index?
             while end < remaining.endIndex {
                 let next = remaining.index(after: end)
@@ -448,19 +450,32 @@ public enum TranscriptChunker {
                 }
                 bytes += characterBytes
                 if remaining[end].isWhitespace {
+                    if whitespaceRunStart == nil {
+                        whitespaceRunStart = end
+                    }
+                    lastWhitespaceStart = whitespaceRunStart
                     lastWhitespaceEnd = next
+                } else {
+                    whitespaceRunStart = nil
                 }
                 end = next
             }
             if end == remaining.startIndex {
                 end = remaining.index(after: remaining.startIndex)
             }
+            let splitStart = lastWhitespaceStart ?? end
             let splitEnd = lastWhitespaceEnd ?? end
-            pieces.append(String(remaining[..<splitEnd]))
+            pieces.append(
+                (
+                    text: String(remaining[..<splitStart]),
+                    separatorBefore: separatorBefore
+                )
+            )
+            separatorBefore = String(remaining[splitStart..<splitEnd])
             remaining = String(remaining[splitEnd...])
         }
         if !remaining.isEmpty {
-            pieces.append(remaining)
+            pieces.append((text: remaining, separatorBefore: separatorBefore))
         }
         return pieces
     }

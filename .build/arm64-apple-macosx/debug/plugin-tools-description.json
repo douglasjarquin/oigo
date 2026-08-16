@@ -1,0 +1,3447 @@
+{
+  "builtTestProducts" : [
+
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.Oigo-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/GlobalHotKeyRegistrar.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/HistoryWindowController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/OigoAppDelegate.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/SettingsWindowController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/StatusSurfaceController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/main.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCore.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCapture.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoTranscription.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoInsertion.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "Oigo",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/Oigo.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/GlobalHotKeyRegistrar.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/HistoryWindowController.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/OigoAppDelegate.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/SettingsWindowController.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/StatusSurfaceController.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/main.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "Oigo_main",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/GlobalHotKeyRegistrar.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/HistoryWindowController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/OigoAppDelegate.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/SettingsWindowController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/StatusSurfaceController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/Oigo.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/GlobalHotKeyRegistrar.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/HistoryWindowController.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/OigoAppDelegate.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/SettingsWindowController.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/StatusSurfaceController.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/main.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.OigoCapture-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCapture/AudioPlayback.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCapture/AudioRecorder.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCore.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "OigoCapture",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCapture.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/AudioPlayback.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/AudioRecorder.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/include/OigoCapture-Swift.h",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/AudioPlayback.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/AudioRecorder.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCapture.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCapture/AudioPlayback.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCapture/AudioRecorder.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.OigoCore-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/AudioCapturing.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/DictationCoordinator.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/SessionStore.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/TranscriptionContracts.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "OigoCore",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCore.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/AudioCapturing.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/DictationCoordinator.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/SessionStore.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/TranscriptionContracts.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/include/OigoCore-Swift.h",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/AudioCapturing.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/DictationCoordinator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/SessionStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/TranscriptionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCore.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/AudioCapturing.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/DictationCoordinator.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/SessionStore.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/TranscriptionContracts.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.OigoInsertion-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoInsertion/InsertionContracts.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoInsertion/InsertionService.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCore.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "OigoInsertion",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoInsertion.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionContracts.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionService.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/include/OigoInsertion-Swift.h",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionService.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoInsertion.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoInsertion/InsertionContracts.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoInsertion/InsertionService.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.OigoIssue3ContractTests-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue3ContractTests.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue3ContractTests/main.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCore.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue3ContractTests.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "OigoIssue3ContractTests",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoIssue3ContractTests.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue3ContractTests.build/main.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "OigoIssue3ContractTests_main",
+        "-parse-as-library",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue3ContractTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue3ContractTests.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoIssue3ContractTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue3ContractTests/main.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue3ContractTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.OigoIssue4ContractTests-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue4ContractTests.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue4ContractTests/main.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCore.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCapture.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue4ContractTests.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "OigoIssue4ContractTests",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoIssue4ContractTests.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue4ContractTests.build/main.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "OigoIssue4ContractTests_main",
+        "-parse-as-library",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue4ContractTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue4ContractTests.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoIssue4ContractTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue4ContractTests/main.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue4ContractTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.OigoIssue5ContractTests-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue5ContractTests.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue5ContractTests/main.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCore.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoTranscription.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue5ContractTests.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "OigoIssue5ContractTests",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoIssue5ContractTests.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue5ContractTests.build/main.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "OigoIssue5ContractTests_main",
+        "-parse-as-library",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue5ContractTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue5ContractTests.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoIssue5ContractTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue5ContractTests/main.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue5ContractTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.OigoIssue6ContractTests-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue6ContractTests.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue6ContractTests/main.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCore.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoInsertion.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue6ContractTests.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "OigoIssue6ContractTests",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoIssue6ContractTests.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue6ContractTests.build/main.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "OigoIssue6ContractTests_main",
+        "-parse-as-library",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue6ContractTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue6ContractTests.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoIssue6ContractTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue6ContractTests/main.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue6ContractTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.OigoIssue7ContractTests-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue7ContractTests.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue7ContractTests/main.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCore.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoTranscription.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoInsertion.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue7ContractTests.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "OigoIssue7ContractTests",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoIssue7ContractTests.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue7ContractTests.build/main.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "OigoIssue7ContractTests_main",
+        "-parse-as-library",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue7ContractTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue7ContractTests.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoIssue7ContractTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue7ContractTests/main.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue7ContractTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.OigoIssue8ContractTests-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue8ContractTests.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue8ContractTests/main.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCore.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoTranscription.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoInsertion.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue8ContractTests.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "OigoIssue8ContractTests",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoIssue8ContractTests.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue8ContractTests.build/main.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "OigoIssue8ContractTests_main",
+        "-parse-as-library",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue8ContractTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue8ContractTests.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoIssue8ContractTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue8ContractTests/main.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue8ContractTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.OigoSpike-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/CaptureJournal.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/Cleanup.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/Metrics.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/NativeDictationPipeline.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/RecordValidator.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/TranscriptAccumulator.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "OigoSpike",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoSpike.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/CaptureJournal.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/Cleanup.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/Metrics.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/NativeDictationPipeline.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/RecordValidator.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/TranscriptAccumulator.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/include/OigoSpike-Swift.h",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/CaptureJournal.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/Cleanup.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/Metrics.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/NativeDictationPipeline.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/RecordValidator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/TranscriptAccumulator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoSpike.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/CaptureJournal.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/Cleanup.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/Metrics.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/NativeDictationPipeline.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/RecordValidator.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/TranscriptAccumulator.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.OigoSpikeCLI-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeCLI.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/oigo-spike/main.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoSpike.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCore.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoTranscription.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeCLI.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "OigoSpikeCLI",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoSpikeCLI.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeCLI.build/main.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "OigoSpikeCLI_main",
+        "-parse-as-library",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeCLI.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeCLI.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoSpikeCLI.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/oigo-spike/main.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeCLI.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.OigoSpikeContractTests-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeContractTests.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoSpikeContractTests/main.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoSpike.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeContractTests.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "OigoSpikeContractTests",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoSpikeContractTests.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeContractTests.build/main.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "OigoSpikeContractTests_main",
+        "-parse-as-library",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeContractTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeContractTests.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoSpikeContractTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoSpikeContractTests/main.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeContractTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.OigoTranscription-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/sources",
+      "importPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/SavedAudioRetry.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptCleanup.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptStore.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptionModels.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptionService.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptionStartupGate.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoCore.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "OigoTranscription",
+      "moduleOutputPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoTranscription.swiftmodule",
+      "objects" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/SavedAudioRetry.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptCleanup.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptStore.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionModels.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionService.swift.o",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionStartupGate.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx26.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/include/OigoTranscription-Swift.h",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "_1m04r4mp7vnkdgqztpp6ahe05"
+      ],
+      "outputFileMapPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/SavedAudioRetry.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptCleanup.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionModels.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionService.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionStartupGate.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules/OigoTranscription.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/SavedAudioRetry.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptCleanup.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptStore.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptionModels.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptionService.swift",
+        "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptionStartupGate.swift"
+      ],
+      "tempsPath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "Oigo" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "Oigo",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/GlobalHotKeyRegistrar.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/HistoryWindowController.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/OigoAppDelegate.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/SettingsWindowController.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/StatusSurfaceController.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/main.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "Oigo_main",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "OigoCapture" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "OigoCapture",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCapture/AudioPlayback.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCapture/AudioRecorder.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/include/OigoCapture-Swift.h",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "OigoCore" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "OigoCore",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/AudioCapturing.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/DictationCoordinator.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/SessionStore.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/TranscriptionContracts.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/include/OigoCore-Swift.h",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "OigoInsertion" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "OigoInsertion",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoInsertion/InsertionContracts.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoInsertion/InsertionService.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/include/OigoInsertion-Swift.h",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "OigoIssue3ContractTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "OigoIssue3ContractTests",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue3ContractTests/main.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "OigoIssue3ContractTests_main",
+      "-parse-as-library",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "OigoIssue4ContractTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "OigoIssue4ContractTests",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue4ContractTests/main.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "OigoIssue4ContractTests_main",
+      "-parse-as-library",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "OigoIssue5ContractTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "OigoIssue5ContractTests",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue5ContractTests/main.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "OigoIssue5ContractTests_main",
+      "-parse-as-library",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "OigoIssue6ContractTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "OigoIssue6ContractTests",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue6ContractTests/main.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "OigoIssue6ContractTests_main",
+      "-parse-as-library",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "OigoIssue7ContractTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "OigoIssue7ContractTests",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue7ContractTests/main.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "OigoIssue7ContractTests_main",
+      "-parse-as-library",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "OigoIssue8ContractTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "OigoIssue8ContractTests",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue8ContractTests/main.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "OigoIssue8ContractTests_main",
+      "-parse-as-library",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "OigoSpike" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "OigoSpike",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/CaptureJournal.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/Cleanup.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/Metrics.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/NativeDictationPipeline.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/RecordValidator.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/TranscriptAccumulator.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/include/OigoSpike-Swift.h",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "OigoSpikeCLI" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "OigoSpikeCLI",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/oigo-spike/main.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "OigoSpikeCLI_main",
+      "-parse-as-library",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "OigoSpikeContractTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "OigoSpikeContractTests",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoSpikeContractTests/main.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "OigoSpikeContractTests_main",
+      "-parse-as-library",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "OigoTranscription" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "OigoTranscription",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-c",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/SavedAudioRetry.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptCleanup.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptStore.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptionModels.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptionService.swift",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptionStartupGate.swift",
+      "-I",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx26.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/include/OigoTranscription-Swift.h",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "_1m04r4mp7vnkdgqztpp6ahe05",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "Oigo" : [
+      "OigoInsertion",
+      "OigoTranscription",
+      "OigoCapture",
+      "OigoCore"
+    ],
+    "OigoCapture" : [
+      "OigoCore"
+    ],
+    "OigoCore" : [
+
+    ],
+    "OigoInsertion" : [
+      "OigoCore"
+    ],
+    "OigoIssue3ContractTests" : [
+      "OigoCore"
+    ],
+    "OigoIssue4ContractTests" : [
+      "OigoCapture",
+      "OigoCore"
+    ],
+    "OigoIssue5ContractTests" : [
+      "OigoTranscription",
+      "OigoCore"
+    ],
+    "OigoIssue6ContractTests" : [
+      "OigoInsertion",
+      "OigoCore"
+    ],
+    "OigoIssue7ContractTests" : [
+      "OigoInsertion",
+      "OigoTranscription",
+      "OigoCore"
+    ],
+    "OigoIssue8ContractTests" : [
+      "OigoInsertion",
+      "OigoTranscription",
+      "OigoCore"
+    ],
+    "OigoSpike" : [
+
+    ],
+    "OigoSpikeCLI" : [
+      "OigoTranscription",
+      "OigoCore",
+      "OigoSpike"
+    ],
+    "OigoSpikeContractTests" : [
+      "OigoSpike"
+    ],
+    "OigoTranscription" : [
+      "OigoCore"
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo-entitlement.plist" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<entitlement-plist>"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<com.apple.security.get-task-allow>"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo-entitlement.plist"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/GlobalHotKeyRegistrar.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/HistoryWindowController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/OigoAppDelegate.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/SettingsWindowController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/StatusSurfaceController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/Oigo/main.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/GlobalHotKeyRegistrar.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/HistoryWindowController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/OigoAppDelegate.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/SettingsWindowController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/StatusSurfaceController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/AudioPlayback.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/AudioRecorder.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/AudioCapturing.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/DictationCoordinator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/SessionStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/TranscriptionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionService.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/SavedAudioRetry.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptCleanup.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionModels.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionService.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionStartupGate.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/Oigo.product/Objects.LinkFileList"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCapture/AudioPlayback.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCapture/AudioRecorder.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/AudioCapturing.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/DictationCoordinator.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/SessionStore.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoCore/TranscriptionContracts.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoInsertion/InsertionContracts.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoInsertion/InsertionService.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue3ContractTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue3ContractTests/main.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue3ContractTests.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue4ContractTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue4ContractTests/main.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue4ContractTests.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue5ContractTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue5ContractTests/main.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue5ContractTests.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue6ContractTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue6ContractTests/main.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue6ContractTests.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue7ContractTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue7ContractTests/main.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue7ContractTests.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue8ContractTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoIssue8ContractTests/main.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue8ContractTests.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/CaptureJournal.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/Cleanup.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/Metrics.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/NativeDictationPipeline.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/RecordValidator.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoSpike/TranscriptAccumulator.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeCLI.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/oigo-spike/main.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeCLI.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeContractTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Tests/OigoSpikeContractTests/main.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeContractTests.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/SavedAudioRetry.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptCleanup.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptStore.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptionModels.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptionService.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/Sources/OigoTranscription/TranscriptionStartupGate.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/sources"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue3-contract-tests-entitlement.plist" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<entitlement-plist>"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<com.apple.security.get-task-allow>"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue3-contract-tests-entitlement.plist"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue3-contract-tests.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/AudioCapturing.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/DictationCoordinator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/SessionStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/TranscriptionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue3ContractTests.build/main.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue3-contract-tests.product/Objects.LinkFileList"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue4-contract-tests-entitlement.plist" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<entitlement-plist>"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<com.apple.security.get-task-allow>"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue4-contract-tests-entitlement.plist"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue4-contract-tests.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/AudioPlayback.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCapture.build/AudioRecorder.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/AudioCapturing.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/DictationCoordinator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/SessionStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/TranscriptionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue4ContractTests.build/main.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue4-contract-tests.product/Objects.LinkFileList"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue5-contract-tests-entitlement.plist" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<entitlement-plist>"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<com.apple.security.get-task-allow>"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue5-contract-tests-entitlement.plist"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue5-contract-tests.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/AudioCapturing.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/DictationCoordinator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/SessionStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/TranscriptionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue5ContractTests.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/SavedAudioRetry.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptCleanup.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionModels.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionService.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionStartupGate.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue5-contract-tests.product/Objects.LinkFileList"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue6-contract-tests-entitlement.plist" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<entitlement-plist>"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<com.apple.security.get-task-allow>"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue6-contract-tests-entitlement.plist"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue6-contract-tests.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/AudioCapturing.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/DictationCoordinator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/SessionStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/TranscriptionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionService.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue6ContractTests.build/main.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue6-contract-tests.product/Objects.LinkFileList"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue7-contract-tests-entitlement.plist" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<entitlement-plist>"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<com.apple.security.get-task-allow>"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue7-contract-tests-entitlement.plist"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue7-contract-tests.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/AudioCapturing.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/DictationCoordinator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/SessionStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/TranscriptionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionService.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue7ContractTests.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/SavedAudioRetry.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptCleanup.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionModels.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionService.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionStartupGate.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue7-contract-tests.product/Objects.LinkFileList"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue8-contract-tests-entitlement.plist" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<entitlement-plist>"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<com.apple.security.get-task-allow>"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue8-contract-tests-entitlement.plist"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue8-contract-tests.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/AudioCapturing.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/DictationCoordinator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/SessionStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/TranscriptionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionService.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoIssue8ContractTests.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/SavedAudioRetry.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptCleanup.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionModels.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionService.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionStartupGate.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-issue8-contract-tests.product/Objects.LinkFileList"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-spike-contract-tests-entitlement.plist" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<entitlement-plist>"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<com.apple.security.get-task-allow>"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-spike-contract-tests-entitlement.plist"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-spike-contract-tests.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/CaptureJournal.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/Cleanup.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/Metrics.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/NativeDictationPipeline.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/RecordValidator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/TranscriptAccumulator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeContractTests.build/main.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-spike-contract-tests.product/Objects.LinkFileList"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-spike-entitlement.plist" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<entitlement-plist>"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<com.apple.security.get-task-allow>"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-spike-entitlement.plist"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-spike.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/AudioCapturing.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/DictationCoordinator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/SessionStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoCore.build/TranscriptionContracts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/CaptureJournal.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/Cleanup.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/Metrics.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/NativeDictationPipeline.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/RecordValidator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpike.build/TranscriptAccumulator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoSpikeCLI.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/SavedAudioRetry.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptCleanup.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptStore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionModels.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionService.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/OigoTranscription.build/TranscriptionStartupGate.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/oigo-spike.product/Objects.LinkFileList"
+    },
+    "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/douglasjarquin/.no-mistakes/worktrees/56226d202d19/01M04R4MP7VNKDGQZTPP6AHE05/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+    }
+  }
+}
