@@ -346,16 +346,28 @@ private enum TranscriptCleanupOutputGuard {
     static func accepts(rawText: String, cleanedText: String) -> Bool {
         let rawTokens = semanticTokenSequence(in: rawText)
         let cleanedTokens = semanticTokenSequence(in: cleanedText)
+        let cleanedTokensPreserved = isSubsequence(
+            cleanedTokens,
+            of: rawTokens,
+            matching: { cleaned, raw in
+                tokenMatches(raw: raw, cleaned: cleaned)
+            }
+        )
+        let rawTokensPreserved = isSubsequence(
+            rawTokens.filter { !removableFillers.contains($0.lowercased()) },
+            of: cleanedTokens,
+            matching: { raw, cleaned in
+                tokenMatches(raw: raw, cleaned: cleaned)
+            }
+        )
+        let punctuationPreserved = isCharacterSubsequence(
+            punctuationSequence(in: rawText),
+            of: punctuationSequence(in: cleanedText)
+        )
         guard !cleanedTokens.isEmpty,
-              isSubsequence(cleanedTokens, of: rawTokens),
-              isSubsequence(
-                  rawTokens.filter { !removableFillers.contains($0.lowercased()) },
-                  of: cleanedTokens
-              ),
-              isSubsequence(
-                  punctuationSequence(in: rawText),
-                  of: punctuationSequence(in: cleanedText)
-              ) else {
+              cleanedTokensPreserved,
+              rawTokensPreserved,
+              punctuationPreserved else {
             return false
         }
 
@@ -390,11 +402,15 @@ private enum TranscriptCleanupOutputGuard {
         return tokens
     }
 
-    private static func isSubsequence(_ candidate: [String], of source: [String]) -> Bool {
+    private static func isSubsequence(
+        _ candidate: [String],
+        of source: [String],
+        matching: (String, String) -> Bool
+    ) -> Bool {
         var sourceIndex = source.startIndex
-        for token in candidate {
+        for candidateToken in candidate {
             guard let matchIndex = source[sourceIndex...].firstIndex(where: {
-                tokenMatches(raw: $0, cleaned: token)
+                matching(candidateToken, $0)
             }) else {
                 return false
             }
@@ -418,7 +434,10 @@ private enum TranscriptCleanupOutputGuard {
         }
     }
 
-    private static func isSubsequence(_ candidate: [Character], of source: [Character]) -> Bool {
+    private static func isCharacterSubsequence(
+        _ candidate: [Character],
+        of source: [Character]
+    ) -> Bool {
         var sourceIndex = source.startIndex
         for character in candidate {
             guard let matchIndex = source[sourceIndex...].firstIndex(of: character) else {

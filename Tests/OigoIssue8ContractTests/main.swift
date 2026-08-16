@@ -234,6 +234,21 @@ private struct OigoIssue8ContractTests {
               unicodeDecision.fallbackReason == .unsafeOutput else {
             throw ContractFailure(message: "unsafe Unicode cleanup output was accepted")
         }
+
+        let capitalizationCoordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: {
+                FixedResultCleaner(result: .success("Open the file"))
+            }
+        )
+        let capitalizationDecision = await capitalizationCoordinator.resolve(
+            mode: .clean,
+            rawText: "open the file",
+            deadlineNanoseconds: 100_000_000
+        )
+        guard capitalizationDecision.insertionSource == .clean,
+              capitalizationDecision.insertionText == "Open the file" else {
+            throw ContractFailure(message: "ordinary-word capitalization was rejected")
+        }
     }
 
     private static func testLongTranscriptChunksSequentiallyAtStableBoundaries() async throws {
