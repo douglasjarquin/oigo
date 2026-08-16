@@ -26,10 +26,14 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Long transcripts chunk sequentially with order and paragraphs preserved")
             try await testAutomaticDeadlineCancelsSlowCleanup()
             print("GREEN: Automatic cleanup deadline cancels slow generation")
+            try await testCleanupInstrumentationRecordsLifecycleMetrics()
+            print("GREEN: Cleanup availability, start, completion, and fallback metrics are recorded")
             try testCleanPersistenceLeavesRawUntouchedAndRecordsInsertionSource()
             print("GREEN: clean.txt is separate from raw.txt and insertion source is durable")
             try testCleanInsertionReadsCleanText()
             print("GREEN: Automatic insertion can use clean.txt without touching raw.txt")
+            try testApprovedEvaluationCorpusProtectsTechnicalTokens()
+            print("GREEN: Approved evaluation corpus preserves protected technical tokens")
             exit(0)
         } catch {
             print("FAIL: Instant mode does not initialize Foundation Models: " + String(describing: error))
@@ -154,6 +158,41 @@ Return only the cleaned transcript.
         }
     }
 
+    private static func testCleanupInstrumentationRecordsLifecycleMetrics() async throws {
+        let metrics = TranscriptCleanupMetrics(forwarding: NoopTranscriptCleanupInstrumentation())
+        let coordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: { FixedResultCleaner(result: .success("cleaned")) },
+            instrumentation: metrics
+        )
+        _ = await coordinator.resolve(
+            mode: .clean,
+            rawText: "raw",
+            deadlineNanoseconds: 100_000_000
+        )
+        let snapshot = metrics.snapshot()
+        guard snapshot.availabilityCount == 1,
+              snapshot.cleanupStartCount == 1,
+              snapshot.cleanupCompletionCount == 1,
+              snapshot.fallbackCount == 0 else {
+            throw ContractFailure(message: "cleanup lifecycle metrics did not record the successful path")
+        }
+
+        let fallbackCoordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: { FixedResultCleaner(result: .timedOut) },
+            instrumentation: metrics
+        )
+        _ = await fallbackCoordinator.resolve(
+            mode: .clean,
+            rawText: "raw",
+            deadlineNanoseconds: 100_000_000
+        )
+        let fallbackSnapshot = metrics.snapshot()
+        guard fallbackSnapshot.timeoutCount == 1,
+              fallbackSnapshot.fallbackCount == 1 else {
+            throw ContractFailure(message: "cleanup timeout and fallback metrics were not recorded")
+        }
+    }
+
     private static func testCleanPersistenceLeavesRawUntouchedAndRecordsInsertionSource() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("oigo-issue8-" + UUID().uuidString, isDirectory: true)
@@ -178,6 +217,22 @@ Return only the cleaned transcript.
               FileManager.default.fileExists(atPath: reloaded.rawTextURL.path),
               FileManager.default.fileExists(atPath: reloaded.cleanTextURL.path) else {
             throw ContractFailure(message: "clean persistence changed raw text or lost insertion metadata")
+        }
+        let changedRaw = try store.persistRawText("changed raw", for: reloaded)
+        guard try store.readRawText(for: changedRaw) == "changed raw",
+              try store.readCleanText(for: changedRaw).isEmpty else {
+            throw ContractFailure(message: "a raw transcript replacement left stale clean output available")
+        }
+        let fallbackSession = try store.update(
+            changedRaw,
+            state: .completed,
+            insertionOutcome: .pasted,
+            insertionTextSource: .raw,
+            cleanupFallbackReason: "automatic cleanup exceeded its deadline"
+        )
+        guard fallbackSession.metadata.insertionTextSource == .raw,
+              fallbackSession.metadata.cleanupFallbackReason?.contains("deadline") == true else {
+            throw ContractFailure(message: "raw fallback source or reason was not durable")
         }
     }
 
@@ -215,6 +270,42 @@ Return only the cleaned transcript.
             throw ContractFailure(message: "clean insertion did not use the separate clean transcript")
         }
     }
+
+    private static func testApprovedEvaluationCorpusProtectsTechnicalTokens() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/cleanup-corpus-v1.json")
+        let cases = try JSONDecoder().decode([EvaluationCase].self, from: Data(contentsOf: url))
+        guard cases.count >= 3 else {
+            throw ContractFailure(message: "cleanup evaluation corpus is too small to review")
+        }
+        for sample in cases {
+            guard sample.approved,
+                  !sample.rawTranscript.isEmpty,
+                  !sample.modelOutput.isEmpty,
+                  !sample.expectedMeaning.isEmpty,
+                  !sample.protectedTechnicalTokens.isEmpty else {
+                throw ContractFailure(message: "evaluation corpus contains an unapproved or incomplete sample")
+            }
+            for token in sample.protectedTechnicalTokens {
+                guard sample.rawTranscript.contains(token),
+                      sample.modelOutput.contains(token) else {
+                    throw ContractFailure(
+                        message: "evaluation sample changed protected token: " + sample.id
+                    )
+                }
+            }
+        }
+    }
+}
+
+private struct EvaluationCase: Codable {
+    let id: String
+    let rawTranscript: String
+    let modelOutput: String
+    let expectedMeaning: String
+    let protectedTechnicalTokens: [String]
+    let approved: Bool
 }
 
 private final class RecordingCleanerFactory: @unchecked Sendable {

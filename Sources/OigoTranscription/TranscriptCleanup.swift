@@ -103,7 +103,7 @@ public struct TranscriptCleanupDecision: Equatable, Sendable {
 }
 
 @available(macOS 26.0, *)
-public enum TranscriptCleanupEvent: String, Sendable {
+public enum TranscriptCleanupEvent: String, Hashable, Sendable {
     case availability
     case cleanupStart
     case cleanupCompletion
@@ -522,6 +522,66 @@ public final class TranscriptCleanupSignposts: TranscriptCleanupInstrumentation,
         case .resourceRelease:
             os_signpost(.event, log: log, name: "cleanup-resource-release")
         }
+    }
+}
+
+@available(macOS 26.0, *)
+public struct TranscriptCleanupMetricSnapshot: Equatable, Sendable {
+    public let availabilityCount: Int
+    public let cleanupStartCount: Int
+    public let cleanupCompletionCount: Int
+    public let timeoutCount: Int
+    public let fallbackCount: Int
+    public let resourceReleaseCount: Int
+
+    public init(
+        availabilityCount: Int = 0,
+        cleanupStartCount: Int = 0,
+        cleanupCompletionCount: Int = 0,
+        timeoutCount: Int = 0,
+        fallbackCount: Int = 0,
+        resourceReleaseCount: Int = 0
+    ) {
+        self.availabilityCount = availabilityCount
+        self.cleanupStartCount = cleanupStartCount
+        self.cleanupCompletionCount = cleanupCompletionCount
+        self.timeoutCount = timeoutCount
+        self.fallbackCount = fallbackCount
+        self.resourceReleaseCount = resourceReleaseCount
+    }
+}
+
+@available(macOS 26.0, *)
+public final class TranscriptCleanupMetrics: TranscriptCleanupInstrumentation, @unchecked Sendable {
+    private let lock = NSLock()
+    private var counts: [TranscriptCleanupEvent: Int] = [:]
+    private let forwarding: TranscriptCleanupInstrumentation
+
+    public init(
+        forwarding: TranscriptCleanupInstrumentation = TranscriptCleanupSignposts()
+    ) {
+        self.forwarding = forwarding
+    }
+
+    public func record(_ event: TranscriptCleanupEvent) {
+        lock.lock()
+        counts[event, default: 0] += 1
+        lock.unlock()
+        forwarding.record(event)
+    }
+
+    public func snapshot() -> TranscriptCleanupMetricSnapshot {
+        lock.lock()
+        let snapshot = TranscriptCleanupMetricSnapshot(
+            availabilityCount: counts[.availability, default: 0],
+            cleanupStartCount: counts[.cleanupStart, default: 0],
+            cleanupCompletionCount: counts[.cleanupCompletion, default: 0],
+            timeoutCount: counts[.timeout, default: 0],
+            fallbackCount: counts[.fallback, default: 0],
+            resourceReleaseCount: counts[.resourceRelease, default: 0]
+        )
+        lock.unlock()
+        return snapshot
     }
 }
 

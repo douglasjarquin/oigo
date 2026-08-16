@@ -474,8 +474,12 @@ public final class SessionStore: @unchecked Sendable {
             if let insertionOutcome {
                 metadata.insertionOutcome = insertionOutcome
                 metadata.insertionFailureReason = insertionFailureReason
-                metadata.insertionTextSource = insertionTextSource
-                metadata.cleanupFallbackReason = cleanupFallbackReason
+                if let insertionTextSource {
+                    metadata.insertionTextSource = insertionTextSource
+                }
+                if let cleanupFallbackReason {
+                    metadata.cleanupFallbackReason = cleanupFallbackReason
+                }
             }
 
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
@@ -579,6 +583,7 @@ public final class SessionStore: @unchecked Sendable {
                 in: directoryFD,
                 at: current.rawTextURL
             )
+            try invalidateCleanText(for: current, in: directoryFD)
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
             try removePendingPersistence(in: directoryFD, at: current.directoryURL)
             return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
@@ -661,6 +666,7 @@ public final class SessionStore: @unchecked Sendable {
             guard Int64(after.st_size) == targetRawTextByteCount else {
                 throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
             }
+            try invalidateCleanText(for: current, in: directoryFD)
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
             try removePendingPersistence(in: directoryFD, at: current.directoryURL)
             return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
@@ -854,6 +860,7 @@ public final class SessionStore: @unchecked Sendable {
                 in: directoryFD,
                 at: current.rawTextURL
             )
+            try invalidateCleanText(for: current, in: directoryFD)
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
             try removePendingPersistence(in: directoryFD, at: current.directoryURL)
             return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
@@ -1430,6 +1437,24 @@ public final class SessionStore: @unchecked Sendable {
         let data = try encoder.encode(metadata)
         try rejectSymlink(named: url.lastPathComponent, in: directoryFD, at: url, allowMissing: true)
         try atomicWrite(data, named: url.lastPathComponent, in: directoryFD, at: url)
+    }
+
+    private func invalidateCleanText(
+        for session: DictationSession,
+        in directoryFD: Int32
+    ) throws {
+        try rejectSymlink(
+            named: "clean.txt",
+            in: directoryFD,
+            at: session.cleanTextURL,
+            allowMissing: true
+        )
+        try removeEntry(
+            named: "clean.txt",
+            in: directoryFD,
+            at: session.cleanTextURL,
+            allowMissing: true
+        )
     }
 
     private func consumeMetadataWriteFailure() -> Bool {

@@ -3,9 +3,12 @@ import OigoCore
 
 @MainActor
 final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
-    private let loadTranscript: (SessionHistoryEntry) -> Result<String, Error>
+    private let loadTranscript: (SessionHistoryEntry, SessionTextSource) -> Result<String, Error>
     private let copyRawTranscript: (SessionHistoryEntry) -> Void
+    private let copyCleanTranscript: (SessionHistoryEntry) -> Void
     private let pasteAgain: (SessionHistoryEntry) -> Void
+    private let pasteCleanAgain: (SessionHistoryEntry) -> Void
+    private let cleanAgain: (SessionHistoryEntry) -> Void
     private let playRecording: (SessionHistoryEntry) -> Void
     private let retryTranscription: (SessionHistoryEntry) -> Void
     private let revealRecording: (SessionHistoryEntry) -> Void
@@ -19,8 +22,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private let transcriptView = NSTextView()
     private let failureLabel = NSTextField(labelWithString: "")
     private let messageLabel = NSTextField(labelWithString: "")
+    private let transcriptVersionPopup = NSPopUpButton()
     private let copyButton = NSButton(title: "Copy Raw Transcript", target: nil, action: nil)
+    private let copyCleanButton = NSButton(title: "Copy Clean Transcript", target: nil, action: nil)
     private let pasteAgainButton = NSButton(title: "Paste Again", target: nil, action: nil)
+    private let pasteCleanAgainButton = NSButton(title: "Paste Clean Again", target: nil, action: nil)
+    private let cleanAgainButton = NSButton(title: "Clean Again", target: nil, action: nil)
     private let playButton = NSButton(title: "Play Recording", target: nil, action: nil)
     private let retryButton = NSButton(title: "Retry Transcription", target: nil, action: nil)
     private let revealButton = NSButton(title: "Reveal Recording", target: nil, action: nil)
@@ -40,9 +47,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }()
 
     init(
-        loadTranscript: @escaping (SessionHistoryEntry) -> Result<String, Error>,
+        loadTranscript: @escaping (SessionHistoryEntry, SessionTextSource) -> Result<String, Error>,
         copyRawTranscript: @escaping (SessionHistoryEntry) -> Void,
+        copyCleanTranscript: @escaping (SessionHistoryEntry) -> Void,
         pasteAgain: @escaping (SessionHistoryEntry) -> Void,
+        pasteCleanAgain: @escaping (SessionHistoryEntry) -> Void,
+        cleanAgain: @escaping (SessionHistoryEntry) -> Void,
         playRecording: @escaping (SessionHistoryEntry) -> Void,
         retryTranscription: @escaping (SessionHistoryEntry) -> Void,
         revealRecording: @escaping (SessionHistoryEntry) -> Void,
@@ -51,7 +61,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     ) {
         self.loadTranscript = loadTranscript
         self.copyRawTranscript = copyRawTranscript
+        self.copyCleanTranscript = copyCleanTranscript
         self.pasteAgain = pasteAgain
+        self.pasteCleanAgain = pasteCleanAgain
+        self.cleanAgain = cleanAgain
         self.playRecording = playRecording
         self.retryTranscription = retryTranscription
         self.revealRecording = revealRecording
@@ -127,7 +140,14 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         case "transcript":
             text = entry.firstTranscriptLine ?? "No transcript"
         case "source":
-            text = entry.textSource == .processed ? "Processed" : "Raw"
+            text = switch entry.session.metadata.insertionTextSource {
+            case .raw:
+                "Raw"
+            case .clean:
+                "Clean"
+            case nil:
+                entry.textSource == .processed ? "Clean available" : "Raw"
+            }
         case "status":
             text = Self.statusText(entry.session.metadata.state)
         case "paste":
@@ -152,6 +172,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         _ = notification
+        selectedTranscriptSource = .raw
         updateDetail(for: selectedEntry)
     }
 
@@ -160,9 +181,32 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         copyRawTranscript(selectedEntry)
     }
 
+    @objc private func copyCleanTranscriptAction() {
+        guard let selectedEntry else { return }
+        copyCleanTranscript(selectedEntry)
+    }
+
     @objc private func pasteAgainAction() {
         guard let selectedEntry else { return }
         pasteAgain(selectedEntry)
+    }
+
+    @objc private func pasteCleanAgainAction() {
+        guard let selectedEntry else { return }
+        pasteCleanAgain(selectedEntry)
+    }
+
+    @objc private func cleanAgainAction() {
+        guard let selectedEntry else { return }
+        cleanAgain(selectedEntry)
+    }
+
+    @objc private func transcriptVersionAction() {
+        guard let selectedEntry else { return }
+        selectedTranscriptSource = transcriptVersionPopup.indexOfSelectedItem == 1
+            ? .processed
+            : .raw
+        updateDetail(for: selectedEntry)
     }
 
     @objc private func playRecordingAction() {
@@ -196,6 +240,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
         return entries[row]
     }
+
+    private var selectedTranscriptSource: SessionTextSource = .raw
 
     private func configureWindow() {
         guard let contentView = window?.contentView else {
@@ -255,7 +301,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         tableView.addTableColumn(column(identifier: "date", title: "Date / Time", width: 145))
         tableView.addTableColumn(column(identifier: "duration", title: "Duration", width: 55))
         tableView.addTableColumn(column(identifier: "transcript", title: "Transcript", width: 130))
-        tableView.addTableColumn(column(identifier: "source", title: "Source", width: 100))
+        tableView.addTableColumn(column(identifier: "source", title: "Inserted", width: 100))
         tableView.addTableColumn(column(identifier: "status", title: "Status", width: 90))
         tableView.addTableColumn(column(identifier: "paste", title: "Paste", width: 92))
         tableView.delegate = self
@@ -290,27 +336,45 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         transcriptScroll.documentView = transcriptView
 
         configureButton(copyButton, action: #selector(copyRawTranscriptAction))
+        configureButton(copyCleanButton, action: #selector(copyCleanTranscriptAction))
         configureButton(pasteAgainButton, action: #selector(pasteAgainAction))
+        configureButton(pasteCleanAgainButton, action: #selector(pasteCleanAgainAction))
+        configureButton(cleanAgainButton, action: #selector(cleanAgainAction))
         configureButton(playButton, action: #selector(playRecordingAction))
         configureButton(retryButton, action: #selector(retryTranscriptionAction))
         configureButton(revealButton, action: #selector(revealRecordingAction))
         configureButton(deleteButton, action: #selector(deleteSessionAction))
 
-        let firstRow = NSStackView(views: [copyButton, pasteAgainButton, playButton])
-        let secondRow = NSStackView(views: [retryButton, revealButton, deleteButton])
-        for row in [firstRow, secondRow] {
+        transcriptVersionPopup.addItems(withTitles: ["Raw transcript", "Clean transcript"])
+        transcriptVersionPopup.target = self
+        transcriptVersionPopup.action = #selector(transcriptVersionAction)
+        transcriptVersionPopup.controlSize = .small
+        transcriptVersionPopup.toolTip = "Choose which durable transcript version to display"
+
+        let firstRow = NSStackView(views: [transcriptVersionPopup, copyButton, copyCleanButton])
+        let secondRow = NSStackView(views: [cleanAgainButton, pasteAgainButton, pasteCleanAgainButton])
+        let thirdRow = NSStackView(views: [playButton, retryButton, revealButton, deleteButton])
+        for row in [firstRow, secondRow, thirdRow] {
             row.orientation = .horizontal
             row.distribution = .fillEqually
             row.spacing = 8
         }
 
         let stack = NSStackView(
-            views: [detailTitle, detailStatus, failureLabel, transcriptScroll, firstRow, secondRow, messageLabel]
+            views: [detailTitle, detailStatus, failureLabel, transcriptScroll, firstRow, secondRow, thirdRow, messageLabel]
         )
         stack.orientation = .vertical
         stack.spacing = 10
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 16, bottom: 20, right: 20)
+        stack.alignment = .leading
         stack.translatesAutoresizingMaskIntoConstraints = false
+        for row in [firstRow, secondRow, thirdRow] {
+            row.translatesAutoresizingMaskIntoConstraints = false
+            row.widthAnchor.constraint(
+                equalTo: stack.widthAnchor,
+                constant: -(stack.edgeInsets.left + stack.edgeInsets.right)
+            ).isActive = true
+        }
         transcriptScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
         return stack
     }
@@ -321,20 +385,21 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             detailStatus.stringValue = "Select a session to inspect its transcript and actions."
             failureLabel.stringValue = ""
             transcriptView.string = ""
+            transcriptVersionPopup.selectItem(at: 0)
             setActionButtons(enabled: false, entry: nil)
             return
         }
 
         detailTitle.stringValue = dateFormatter.string(from: entry.session.metadata.createdAt)
         detailStatus.stringValue = Self.statusText(entry.session.metadata.state)
-            + " · " + (entry.textSource == .processed ? "Processed source" : "Raw source")
+            + " · " + (selectedTranscriptSource == .processed ? "Clean transcript" : "Raw transcript")
         failureLabel.stringValue = [
             entry.session.metadata.failureReason,
             entry.session.metadata.insertionFailureReason
         ]
             .compactMap { $0 }
             .joined(separator: " · ")
-        switch loadTranscript(entry) {
+        switch loadTranscript(entry, selectedTranscriptSource) {
         case .success(let transcript):
             transcriptView.string = transcript
         case .failure(let error):
@@ -351,6 +416,13 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         } == true
         copyButton.isEnabled = canUseTranscript
         pasteAgainButton.isEnabled = canUseTranscript
+        let canUseCleanTranscript = canUseTranscript && entry.map {
+            FileManager.default.fileExists(atPath: $0.session.cleanTextURL.path)
+        } == true
+        transcriptVersionPopup.isEnabled = enabled && entry != nil
+        copyCleanButton.isEnabled = canUseCleanTranscript
+        pasteCleanAgainButton.isEnabled = canUseCleanTranscript
+        cleanAgainButton.isEnabled = canUseTranscript
         playButton.isEnabled = enabled && entry.map { FileManager.default.fileExists(atPath: $0.session.audioURL.path) } == true
         retryButton.isEnabled = enabled && entry.map {
             [.failed, .interrupted].contains($0.session.metadata.state)

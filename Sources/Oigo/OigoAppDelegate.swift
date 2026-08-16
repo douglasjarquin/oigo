@@ -10,6 +10,7 @@ import OigoInsertion
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private enum InsertionDisplayStatus: String {
         case finalizing = "Finalizing"
+        case cleaning = "Cleaning"
         case pasted = "Pasted"
         case copied = "Copied"
         case failed = "Failed"
@@ -22,6 +23,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let playback = AudioPlayback()
     private let shortcutRegistrar = CarbonGlobalShortcutRegistrar()
     private let statusSurface = StatusSurfaceController()
+    private let transcriptCleanupMetrics = TranscriptCleanupMetrics()
+    private lazy var transcriptCleanup: TranscriptCleanupCoordinator = {
+        let metrics = transcriptCleanupMetrics
+        return TranscriptCleanupCoordinator(
+            cleanerFactory: {
+                FoundationModelsTranscriptCleaner(instrumentation: metrics)
+            },
+            instrumentation: metrics
+        )
+    }()
     private var sessionStore: SessionStore?
     private var lastSession: DictationSession?
     private var livePreview = ""
@@ -33,6 +44,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var revealItem: NSMenuItem?
     private var retryItem: NSMenuItem?
     private var shortcut = OigoAppDelegate.loadShortcut()
+    private var cleanupMode = OigoAppDelegate.loadCleanupMode()
     private var targetSnapshot: InsertionTargetSnapshot?
     private var insertionDisplayStatus: InsertionDisplayStatus?
     private var toggleTaskInFlight = false
@@ -67,13 +79,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
-        let window = SettingsWindowController(shortcut: shortcut) { [weak self] shortcut in
+        let window = SettingsWindowController(shortcut: shortcut, cleanupMode: cleanupMode) { [weak self] shortcut, cleanupMode in
             guard let self else {
                 return
             }
             self.shortcut = shortcut
+            self.cleanupMode = cleanupMode
             Self.saveShortcut(shortcut)
+            Self.saveCleanupMode(cleanupMode)
             self.registerShortcut()
+            self.updateSurface()
         }
         settingsWindow = window
         window.showWindow(nil)
@@ -84,15 +99,24 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openHistory() {
         if historyWindow == nil {
             historyWindow = HistoryWindowController(
-                loadTranscript: { [weak self] entry in
-                    self?.loadTranscript(for: entry)
+                loadTranscript: { [weak self] entry, source in
+                    self?.loadTranscript(for: entry, source: source)
                         ?? .failure(SessionStoreError.missingSession(entry.id))
                 },
                 copyRawTranscript: { [weak self] entry in
                     self?.copyRawTranscript(for: entry)
                 },
+                copyCleanTranscript: { [weak self] entry in
+                    self?.copyCleanTranscript(for: entry)
+                },
                 pasteAgain: { [weak self] entry in
                     self?.pasteAgain(for: entry)
+                },
+                pasteCleanAgain: { [weak self] entry in
+                    self?.pasteCleanAgain(for: entry)
+                },
+                cleanAgain: { [weak self] entry in
+                    self?.cleanAgain(for: entry)
                 },
                 playRecording: { [weak self] entry in
                     self?.playRecording(for: entry)
@@ -247,17 +271,38 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                       let store = sessionStore else {
                     throw DictationCoordinatorError.recordingNotActive
                 }
-                let insertionSession = try coordinator.beginInsertion(using: store)
+                let insertionSession = try coordinator.beginInsertion(
+                    using: store,
+                    requiresCleanup: cleanupMode == .clean
+                )
+                if cleanupMode == .clean {
+                    insertionDisplayStatus = .cleaning
+                }
                 updateSurface()
-                let result = insertion.insertRawText(
+                let decision = try await resolveCleanup(
                     for: insertionSession,
+                    store: store
+                )
+                if cleanupMode == .clean {
+                    _ = try coordinator.finishCleanup()
+                }
+                let result = insertion.insertText(
+                    for: insertionSession,
+                    source: decision.insertionSource,
                     store: store,
                     target: snapshot
                 )
                 lastSession = try coordinator.finishInsertion(
                     outcome: result.outcome,
-                    reason: result.reason
+                    reason: result.reason,
+                    insertionSource: decision.insertionSource,
+                    cleanupFallbackReason: decision.fallbackReason?.description
                 )
+                if let fallbackReason = decision.fallbackReason {
+                    historyWindow?.showMessage(
+                        "Clean unavailable. Inserted the raw transcript: " + fallbackReason.description
+                    )
+                }
                 insertionDisplayStatus = Self.displayStatus(for: result.outcome)
                 targetSnapshot = nil
                 livePreview = ""
@@ -272,7 +317,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             updateSurface()
         } catch {
-            if coordinator.state == .inserting {
+            if [.cleaning, .inserting].contains(coordinator.state) {
                 lastSession = coordinator.failInsertion(reason: String(describing: error))
             }
             targetSnapshot = nil
@@ -328,15 +373,60 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         updateSurface()
     }
 
-    private func loadTranscript(for entry: SessionHistoryEntry) -> Result<String, Error> {
+    private func loadTranscript(
+        for entry: SessionHistoryEntry,
+        source: SessionTextSource
+    ) -> Result<String, Error> {
         guard let store = sessionStore else {
             return .failure(SessionStoreError.missingSession(entry.id))
         }
         do {
-            return .success(try store.readRawText(for: entry.session))
+            let transcript = switch source {
+            case .raw:
+                try store.readRawText(for: entry.session)
+            case .processed:
+                try store.readCleanText(for: entry.session)
+            }
+            return .success(transcript)
         } catch {
             return .failure(error)
         }
+    }
+
+    private func resolveCleanup(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptCleanupDecision {
+        let rawText = try store.readRawText(for: session)
+        guard cleanupMode == .clean else {
+            return TranscriptCleanupDecision(
+                rawText: rawText,
+                insertionText: rawText,
+                cleanText: nil,
+                insertionSource: .raw
+            )
+        }
+
+        var decision = await transcriptCleanup.resolve(
+            mode: .clean,
+            rawText: rawText,
+            deadlineNanoseconds: 4_000_000_000
+        )
+        if let cleanText = decision.cleanText {
+            do {
+                _ = try store.persistCleanText(cleanText, for: session)
+            } catch {
+                decision = TranscriptCleanupDecision(
+                    rawText: rawText,
+                    insertionText: rawText,
+                    cleanText: nil,
+                    insertionSource: .raw,
+                    fallbackReason: .persistenceFailure(String(describing: error)),
+                    chunkCount: decision.chunkCount
+                )
+            }
+        }
+        return decision
     }
 
     private func copyRawTranscript(for entry: SessionHistoryEntry) {
@@ -354,6 +444,103 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             historyWindow?.showMessage("Raw transcript copied to the clipboard.")
         } catch {
             historyWindow?.showMessage(Self.friendlyError("Copy failed", error))
+        }
+    }
+
+    private func copyCleanTranscript(for entry: SessionHistoryEntry) {
+        guard let store = sessionStore else {
+            return
+        }
+        do {
+            let cleanText = try store.readCleanText(for: entry.session)
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            guard pasteboard.setString(cleanText, forType: .string) else {
+                historyWindow?.showMessage("Copy failed: the clean transcript could not be placed on the clipboard.")
+                return
+            }
+            historyWindow?.showMessage("Clean transcript copied to the clipboard.")
+        } catch {
+            historyWindow?.showMessage(Self.friendlyError("Copy failed", error))
+        }
+    }
+
+    private func cleanAgain(for entry: SessionHistoryEntry) {
+        guard let store = sessionStore else {
+            return
+        }
+        historyWindow?.showMessage("Cleaning the saved raw transcript…")
+        Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            do {
+                let rawText = try store.readRawText(for: entry.session)
+                let decision = await self.transcriptCleanup.resolve(
+                    mode: .clean,
+                    rawText: rawText,
+                    deadlineNanoseconds: 4_000_000_000
+                )
+                guard let cleanText = decision.cleanText else {
+                    self.historyWindow?.showMessage(
+                        "Clean Again used no output. Raw transcript remains available: "
+                            + (decision.fallbackReason?.description ?? "cleanup did not complete")
+                    )
+                    return
+                }
+                _ = try store.persistCleanText(cleanText, for: entry.session)
+                self.historyWindow?.showMessage("Clean transcript saved. Raw transcript was unchanged.")
+                self.refreshHistory()
+            } catch {
+                self.historyWindow?.showMessage(Self.friendlyError("Clean Again failed", error))
+            }
+        }
+    }
+
+    private func pasteCleanAgain(for entry: SessionHistoryEntry) {
+        guard let store = sessionStore else {
+            return
+        }
+        historyWindow?.window?.orderOut(nil)
+        NSApp.hide(nil)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                return
+            }
+            defer {
+                self.historyWindow?.showAndFocus()
+                self.updateSurface()
+            }
+            let target = self.insertion.captureTarget()
+            let result = self.insertion.pasteAgain(
+                for: entry.session,
+                source: .clean,
+                store: store,
+                target: target
+            )
+            do {
+                let updated = try store.update(
+                    entry.session,
+                    state: entry.session.metadata.state,
+                    at: Date(),
+                    insertionOutcome: result.outcome,
+                    insertionFailureReason: result.reason,
+                    insertionTextSource: .clean
+                )
+                self.lastSession = updated
+                self.insertionDisplayStatus = Self.displayStatus(for: result.outcome)
+                switch result.outcome {
+                case .pasted:
+                    self.historyWindow?.showMessage("Clean transcript pasted again.")
+                case .copied, .secureRejected:
+                    self.historyWindow?.showMessage("Clean transcript copied. " + (result.reason ?? "Paste was not sent."))
+                case .failed:
+                    self.historyWindow?.showMessage("Paste Clean Again failed: " + (result.reason ?? "the paste could not be completed"))
+                }
+                self.refreshHistory()
+            } catch {
+                self.historyWindow?.showMessage(Self.friendlyError("Paste Clean Again failed", error))
+            }
         }
     }
 
@@ -383,7 +570,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     state: entry.session.metadata.state,
                     at: Date(),
                     insertionOutcome: result.outcome,
-                    insertionFailureReason: result.reason
+                    insertionFailureReason: result.reason,
+                    insertionTextSource: .raw
                 )
                 self.lastSession = updated
                 self.insertionDisplayStatus = Self.displayStatus(for: result.outcome)
@@ -583,6 +771,18 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         UserDefaults.standard.set(data, forKey: "globalToggleShortcut")
+    }
+
+    private static func loadCleanupMode() -> TranscriptCleanupMode {
+        guard let rawValue = UserDefaults.standard.string(forKey: "transcriptCleanupMode"),
+              let mode = TranscriptCleanupMode(rawValue: rawValue) else {
+            return .instant
+        }
+        return mode
+    }
+
+    private static func saveCleanupMode(_ mode: TranscriptCleanupMode) {
+        UserDefaults.standard.set(mode.rawValue, forKey: "transcriptCleanupMode")
     }
 
     private static func friendlyError(_ prefix: String, _ error: Error) -> String {
