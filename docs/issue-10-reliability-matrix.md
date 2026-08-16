@@ -7,8 +7,8 @@ This matrix records the issue #10 reliability scenarios against the v1 implement
 | Scenario | Result | Evidence | v1 limitation |
 | --- | --- | --- | --- |
 | Normal capture stop preserves the session and releases capture resources | PASS | `oigo-issue4-contract-tests`, `oigo-issue10-contract-tests` | Uses deterministic capture fixtures in contract tests. |
-| Audio input device changes during capture | PASS | `oigo-issue10-contract-tests` device interruption scenario and `oigo-issue4-contract-tests` interruption recovery | Physical device switching was not performed during this run. |
-| Audio input format or engine configuration changes | PASS | `oigo-issue4-contract-tests` interruption recovery | Uses the notification-shaped fixture rather than changing a live device format. |
+| Audio input device changes during capture | INCONCLUSIVE | `oigo-issue10-contract-tests` device interruption scenario and `oigo-issue4-contract-tests` interruption recovery | Physical device switching was not performed during this run; the deterministic interruption path passes. |
+| Audio input format or engine configuration changes | INCONCLUSIVE | `oigo-issue4-contract-tests` interruption recovery | A live device format change was not performed; the notification-shaped fixture path passes. |
 | System sleep interrupts capture | INCONCLUSIVE | `AudioRecorder` registers `NSWorkspace.willSleepNotification` | The host was not put to sleep during QA. |
 | Screen lock or workspace resign-active interrupts capture | INCONCLUSIVE | `AudioRecorder` registers `NSWorkspace.sessionDidResignActiveNotification` | The host was not locked during QA. |
 | Microphone permission is revoked while capture is active | INCONCLUSIVE | `AudioRecorder` checks `AVAudioApplication.shared.recordPermission` before forwarding each buffer | Permission was not changed during QA. |
