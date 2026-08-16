@@ -24,9 +24,11 @@ private struct OigoIssue10ContractTests {
             ("stale callback cannot fail a new session", testStaleCallbackCannotFailNewSession),
             ("rapid cancellation cycles release capture", testRapidCancellationCyclesReleaseCapture),
             ("cancellation terminalizes processing without paste", testCancellationTerminalizesProcessingWithoutPaste),
+            ("cancellation metadata failure retains terminal state", testCancellationMetadataFailureRetainsTerminalState),
             ("fault injection matrix is isolated", testFaultInjectionMatrix),
             ("shutdown waits for registered task", testShutdownWaitsForRegisteredTask),
-            ("transcription shutdown waits for registered task", testTranscriptionShutdownWaitsForRegisteredTask)
+            ("transcription shutdown waits for registered task", testTranscriptionShutdownWaitsForRegisteredTask),
+            ("transcription shutdown cancels active transcription", testTranscriptionShutdownCancelsActiveTranscription)
         ]
 
         var failures = 0
@@ -107,16 +109,13 @@ private struct OigoIssue10ContractTests {
         defer { cleanup(root) }
         let store = try SessionStore(rootDirectory: root)
         let capture = ScriptedAudioCapture()
-        let coordinator = DictationCoordinator()
+        let raceFaults = DictationFaultInjector()
+        let coordinator = DictationCoordinator(faultInjector: raceFaults)
         let first = try coordinator.startRecording(using: capture, store: store)
+        raceFaults.arm(.cancellationRace)
         _ = try coordinator.cancelRecording()
         let second = try coordinator.startRecording(using: capture, store: store)
-
-        let raceFaults = DictationFaultInjector()
-        raceFaults.arm(.cancellationRace)
-        if raceFaults.consume(.cancellationRace) {
-            capture.emitFailure("stale device failure", callbackIndex: 0)
-        }
+        coordinator.deliverCancellationRaceForTesting()
         await Task.yield()
 
         let savedFirst = try store.load(id: first.id)
@@ -158,7 +157,8 @@ private struct OigoIssue10ContractTests {
     private static func testCancellationTerminalizesProcessingWithoutPaste() async throws {
         let root = try temporaryDirectory()
         defer { cleanup(root) }
-        let store = try SessionStore(rootDirectory: root)
+        let faults = DictationFaultInjector()
+        let store = try SessionStore(rootDirectory: root, faultInjector: faults)
         let capture = ScriptedAudioCapture()
         let coordinator = DictationCoordinator()
         let transcription = ProcessingTranscriptionController()
@@ -173,13 +173,58 @@ private struct OigoIssue10ContractTests {
             throw ContractFailure(message: "processing fixture did not persist a canonical transcript")
         }
         _ = try coordinator.beginInsertion(using: store, requiresCleanup: true)
-        let terminal = coordinator.failInsertion(reason: "dictation operation cancelled")
+        let processingTask = try coordinator.startTask {
+            while !Task.isCancelled {
+                await Task.yield()
+            }
+        }
+        faults.arm(.diskWriteFailure)
+        processingTask.cancel()
+        await coordinator.cancelActiveWork()
+        await processingTask.value
+        let terminal = coordinator.currentSession
         let saved = try store.load(id: session.id)
         guard terminal?.metadata.insertionOutcome == .failed,
               saved.metadata.insertionOutcome == .failed,
               coordinator.state == .failed,
               !coordinator.hasActiveWork else {
             throw ContractFailure(message: "processing cancellation left work active or insertable")
+        }
+    }
+
+    private static func testCancellationMetadataFailureRetainsTerminalState() async throws {
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let faults = DictationFaultInjector()
+        let store = try SessionStore(rootDirectory: root, faultInjector: faults)
+        let capture = ScriptedAudioCapture()
+        let coordinator = DictationCoordinator()
+        let transcription = ProcessingTranscriptionController()
+        let session = try await coordinator.startRecordingWithTranscription(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        _ = try await coordinator.stopRecordingWithTranscription()
+        _ = try coordinator.beginInsertion(using: store, requiresCleanup: true)
+        let processingTask = try coordinator.startTask {
+            while !Task.isCancelled {
+                await Task.yield()
+            }
+        }
+        faults.arm(.diskWriteFailure, times: 2)
+        processingTask.cancel()
+        await coordinator.cancelActiveWork()
+        await processingTask.value
+        let terminal = coordinator.currentSession
+        let saved = try store.load(id: session.id)
+        guard terminal?.metadata.insertionOutcome == .failed,
+              terminal?.metadata.insertionFailureReason == "dictation operation cancelled",
+              saved.metadata.insertionOutcome == nil,
+              coordinator.state == .failed,
+              !coordinator.hasActiveWork else {
+            throw ContractFailure(message: "cancellation metadata failure did not retain an in-memory terminal insertion result")
         }
     }
 
@@ -265,13 +310,12 @@ private struct OigoIssue10ContractTests {
     private static func testShutdownWaitsForRegisteredTask() async throws {
         let coordinator = DictationCoordinator()
         let receipt = ShutdownReceipt()
-        let task = Task { @MainActor in
+        _ = try coordinator.startTask {
             while !Task.isCancelled {
                 await Task.yield()
             }
             receipt.finished = true
         }
-        try coordinator.register(task: task)
         await coordinator.shutdownAndWait()
         guard receipt.finished, coordinator.activeTaskCount == 0 else {
             throw ContractFailure(message: "shutdown returned before registered child task cleanup completed")
@@ -281,16 +325,36 @@ private struct OigoIssue10ContractTests {
     private static func testTranscriptionShutdownWaitsForRegisteredTask() async throws {
         let coordinator = DictationCoordinator()
         let receipt = ShutdownReceipt()
-        let task = Task { @MainActor in
+        _ = try coordinator.startTask {
             while !Task.isCancelled {
                 await Task.yield()
             }
             receipt.finished = true
         }
-        try coordinator.register(task: task)
         await coordinator.shutdownWithTranscription()
         guard receipt.finished, coordinator.activeTaskCount == 0 else {
             throw ContractFailure(message: "transcription shutdown returned before registered child task cleanup completed")
+        }
+    }
+
+    private static func testTranscriptionShutdownCancelsActiveTranscription() async throws {
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let capture = ScriptedAudioCapture()
+        let transcription = ProcessingTranscriptionController()
+        let coordinator = DictationCoordinator()
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        await coordinator.shutdownWithTranscription()
+        guard !transcription.isRunningForTesting,
+              coordinator.state == .interrupted,
+              !coordinator.hasActiveWork else {
+            throw ContractFailure(message: "transcription shutdown did not cancel active transcription and release coordinator work")
         }
     }
 
@@ -456,6 +520,10 @@ private final class ProcessingTranscriptionController: TranscriptionController, 
     private var session: DictationSession?
     private var store: SessionStore?
     private var isRunning = false
+
+    var isRunningForTesting: Bool {
+        isRunning
+    }
 
     func start(
         session: DictationSession,
