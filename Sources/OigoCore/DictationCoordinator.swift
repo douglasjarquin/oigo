@@ -1193,8 +1193,12 @@ public final class DictationCoordinator {
             currentSession = interruptedSession
             releaseCapture()
         }
-        activeTask?.cancel()
+        let task = activeTask
         activeTask = nil
+        task?.cancel()
+        if let task {
+            _ = await task.value
+        }
         diagnostics.record("coordinator shutdown")
     }
 }

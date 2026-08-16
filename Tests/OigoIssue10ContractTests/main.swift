@@ -25,7 +25,8 @@ private struct OigoIssue10ContractTests {
             ("rapid cancellation cycles release capture", testRapidCancellationCyclesReleaseCapture),
             ("cancellation terminalizes processing without paste", testCancellationTerminalizesProcessingWithoutPaste),
             ("fault injection matrix is isolated", testFaultInjectionMatrix),
-            ("shutdown waits for registered task", testShutdownWaitsForRegisteredTask)
+            ("shutdown waits for registered task", testShutdownWaitsForRegisteredTask),
+            ("transcription shutdown waits for registered task", testTranscriptionShutdownWaitsForRegisteredTask)
         ]
 
         var failures = 0
@@ -216,8 +217,11 @@ private struct OigoIssue10ContractTests {
             }
         }
 
+        let cleanupFaults = DictationFaultInjector()
+        cleanupFaults.arm(.cleanupTimeout)
         let cleaner = TranscriptCleanupCoordinator(
-            cleanerFactory: { TimeoutCleaner() }
+            cleanerFactory: { SuccessfulCleaner() },
+            faultInjector: cleanupFaults
         )
         let cleanupDecision = await cleaner.resolve(
             mode: .clean,
@@ -271,6 +275,22 @@ private struct OigoIssue10ContractTests {
         await coordinator.shutdownAndWait()
         guard receipt.finished, coordinator.activeTaskCount == 0 else {
             throw ContractFailure(message: "shutdown returned before registered child task cleanup completed")
+        }
+    }
+
+    private static func testTranscriptionShutdownWaitsForRegisteredTask() async throws {
+        let coordinator = DictationCoordinator()
+        let receipt = ShutdownReceipt()
+        let task = Task { @MainActor in
+            while !Task.isCancelled {
+                await Task.yield()
+            }
+            receipt.finished = true
+        }
+        try coordinator.register(task: task)
+        await coordinator.shutdownWithTranscription()
+        guard receipt.finished, coordinator.activeTaskCount == 0 else {
+            throw ContractFailure(message: "transcription shutdown returned before registered child task cleanup completed")
         }
     }
 
@@ -370,7 +390,7 @@ private final class ScriptedAudioCapture: AudioCapturing, @unchecked Sendable {
 }
 
 @available(macOS 26.0, *)
-private struct TimeoutCleaner: TranscriptCleaner {
+private struct SuccessfulCleaner: TranscriptCleaner {
     func availability() -> TranscriptCleanupAvailability {
         .available
     }
@@ -381,7 +401,7 @@ private struct TimeoutCleaner: TranscriptCleaner {
         chunk: String,
         deadlineNanoseconds: UInt64
     ) async -> TranscriptCleanupGeneration {
-        .timedOut
+        .success(chunk)
     }
 }
 
