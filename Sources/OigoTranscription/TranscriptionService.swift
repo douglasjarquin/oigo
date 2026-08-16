@@ -38,6 +38,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private let lock = NSLock()
     private let configuredLocale: Locale
     private let faultInjector: DictationFaultInjector?
+    private let instrumentation: PerformanceInstrumentation
     private var lifecycle = Lifecycle.idle
     private var startWaiters: [CheckedContinuation<Void, Never>] = []
     private var cancellationRequested = false
@@ -51,6 +52,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private var previewTask: Task<Void, Never>?
     private var pendingPreview: String?
     private var lastPreviewNanoseconds: UInt64 = 0
+    private var firstVolatileResultReported = false
     private var transcriptStore = TranscriptStore()
     private var session: DictationSession?
     private var sessionStore: SessionStore?
@@ -60,18 +62,24 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private var analysisError: TranscriptionError?
     private var lastError: TranscriptionError?
 
-    public init(locale: Locale = Locale(identifier: "en-US")) {
+    public init(
+        locale: Locale = Locale(identifier: "en-US"),
+        instrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
+    ) {
         configuredLocale = locale
         faultInjector = nil
+        self.instrumentation = instrumentation
     }
 
     @_spi(Testing)
     public init(
         locale: Locale = Locale(identifier: "en-US"),
-        faultInjector: DictationFaultInjector?
+        faultInjector: DictationFaultInjector?,
+        instrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
     ) {
         configuredLocale = locale
         self.faultInjector = faultInjector
+        self.instrumentation = instrumentation
     }
 
     @_spi(Testing)
@@ -435,6 +443,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             finalizedText: finalizedText,
             rawTextByteCount: rawTextByteCount
         )
+        instrumentation.mark(.transcriptionFinalized)
         await releaseResources()
         if let finalError {
             throw finalError
@@ -713,6 +722,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             }
             lifecycle = .starting
             cancellationRequested = false
+            firstVolatileResultReported = false
             return true
         }
     }
@@ -801,6 +811,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             lifecycle = .idle
         }
         await SpeechModels.endRetention()
+        instrumentation.mark(.resourcesReleased)
     }
 
     private func clearRetryResources() {
@@ -868,6 +879,16 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 isFinal: true
             ))
         } else {
+            let shouldMark = withLock {
+                guard !firstVolatileResultReported else {
+                    return false
+                }
+                firstVolatileResultReported = true
+                return true
+            }
+            if shouldMark {
+                instrumentation.mark(.firstVolatileResult)
+            }
             schedulePreview(text)
         }
     }

@@ -122,6 +122,7 @@ public final class SystemAudioDeviceMonitor: AudioDeviceMonitoring, @unchecked S
 public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private let lock = NSLock()
     private let deviceMonitor: AudioDeviceMonitoring
+    private let instrumentation: PerformanceInstrumentation
     private var engine: AVAudioEngine?
     private var audioFile: AVAudioFile?
     private var audioFileDescriptor: AudioFileDescriptor?
@@ -133,9 +134,14 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var recording = false
     private var failureReported = false
+    private var firstBufferReported = false
 
-    public init(deviceMonitor: AudioDeviceMonitoring = SystemAudioDeviceMonitor()) {
+    public init(
+        deviceMonitor: AudioDeviceMonitoring = SystemAudioDeviceMonitor(),
+        instrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
+    ) {
         self.deviceMonitor = deviceMonitor
+        self.instrumentation = instrumentation
     }
 
     public func captureFormat() throws -> AudioCaptureFormat {
@@ -246,6 +252,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         self.onFailure = onFailure
         recording = true
         failureReported = false
+        firstBufferReported = false
         lock.unlock()
 
         do {
@@ -285,6 +292,8 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             lock.lock()
             self.lifecycleObservers = lifecycleObservers
             lock.unlock()
+            instrumentation.mark(.audioEngineStartBegin)
+            defer { instrumentation.mark(.audioEngineStartEnd) }
             engine.prepare()
             try engine.start()
         } catch {
@@ -317,6 +326,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         var forwardedBuffer: AudioCaptureBuffer?
         var failure: (@Sendable (String) -> Void)?
         var failureDescription: String?
+        var markFirstBuffer = false
 
         lock.lock()
         guard recording, !failureReported, let audioFile else {
@@ -325,6 +335,10 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         }
         do {
             try audioFile.write(from: buffer)
+            if !firstBufferReported {
+                firstBufferReported = true
+                markFirstBuffer = true
+            }
             callback = onBuffer
             forwardedBuffer = AudioCaptureBuffer(
                 frameCount: Int(buffer.frameLength),
@@ -345,6 +359,9 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             cancel()
             failure(failureDescription)
         } else if let callback, let forwardedBuffer {
+            if markFirstBuffer {
+                instrumentation.mark(.firstAudioBuffer)
+            }
             callback(forwardedBuffer)
         }
     }
@@ -450,6 +467,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             return nil
         }
         recording = false
+        firstBufferReported = false
         let resources = TeardownResources(
             engine: engine,
             onFinish: onFinish,
@@ -500,6 +518,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         resources.engine?.stop()
         resources.onFinish?()
         resources.descriptor?.close()
+        instrumentation.mark(.recordingStopped)
     }
 }
 

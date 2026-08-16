@@ -48,6 +48,7 @@
         A00000010000000000000027 /* LaunchAtLoginService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000024 /* LaunchAtLoginService.swift */; };
         A00000010000000000000028 /* OnboardingWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000025 /* OnboardingWindowController.swift */; };
         A00000010000000000000029 /* ProductContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000026 /* ProductContracts.swift */; };
+        A00000010000000000000030 /* PerformanceContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000027 /* PerformanceContracts.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -134,6 +135,7 @@
         B00000010000000000000024 /* LaunchAtLoginService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginService.swift; sourceTree = "<group>"; };
         B00000010000000000000025 /* OnboardingWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWindowController.swift; sourceTree = "<group>"; };
         B00000010000000000000026 /* ProductContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductContracts.swift; sourceTree = "<group>"; };
+        B00000010000000000000027 /* PerformanceContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceContracts.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -234,6 +236,7 @@
                 B00000010000000000000012 /* SessionStore.swift */,
                 B00000010000000000000016 /* TranscriptionContracts.swift */,
                 B00000010000000000000026 /* ProductContracts.swift */,
+                B00000010000000000000027 /* PerformanceContracts.swift */,
             );
             path = Sources/OigoCore;
             sourceTree = "<group>";
@@ -471,6 +474,7 @@
                 A0000001000000000000000F /* SessionStore.swift in Sources */,
                 A00000010000000000000016 /* TranscriptionContracts.swift in Sources */,
                 A00000010000000000000029 /* ProductContracts.swift in Sources */,
+                A00000010000000000000030 /* PerformanceContracts.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
