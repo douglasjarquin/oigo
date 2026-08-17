@@ -37,3 +37,9 @@ jobs:
         run: swift run oigo-issue7-contract-tests
       - name: Issue eight transcript cleanup contract harness
         run: swift run oigo-issue8-contract-tests
+      - name: Issue nine onboarding and settings contract harness
+        run: swift run oigo-issue9-contract-tests
+      - name: Issue ten reliability contract harness
+        run: swift run oigo-issue10-contract-tests
+      - name: Issue eleven performance and lifecycle contract harness
+        run: swift run oigo-issue11-performance-check

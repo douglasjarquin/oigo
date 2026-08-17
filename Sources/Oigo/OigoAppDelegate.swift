@@ -11,6 +11,7 @@ import OigoInsertion
 @MainActor
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = DictationCoordinator()
+    private let performanceInstrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
     private let recorder = AudioRecorder()
     private var transcription: TranscriptionService?
     private let insertion = InsertionService()
@@ -454,6 +455,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleToggle(allowBeforeSetup: Bool = false) {
+        performanceInstrumentation.mark(.shortcutReceived)
         guard allowBeforeSetup || onboardingStore.load().isComplete else {
             showOnboarding(OigoSystemSupportEvaluator.current())
             return
@@ -556,12 +558,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 insertionDisplayStatus = .pasting
                 updateSurface()
                 explainAccessibilityBeforePaste()
-                let result = insertion.insertText(
-                    for: insertionSession,
-                    source: decision.insertionSource,
-                    store: store,
-                    target: snapshot
-                )
+                let result: InsertionResult = {
+                    performanceInstrumentation.mark(.insertionStart)
+                    defer { performanceInstrumentation.mark(.insertionEnd) }
+                    return insertion.insertText(
+                        for: insertionSession,
+                        source: decision.insertionSource,
+                        store: store,
+                        target: snapshot
+                    )
+                }()
                 lastSession = try coordinator.finishInsertion(
                     outcome: result.outcome,
                     reason: result.reason,
@@ -712,6 +718,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             )
         }
 
+        performanceInstrumentation.mark(.cleanupStart)
+        defer { performanceInstrumentation.mark(.cleanupEnd) }
         var decision = await transcriptCleanup.resolve(
             mode: .clean,
             rawText: rawText,
@@ -1194,7 +1202,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
            transcription.configuredLocaleIdentifier == identifier {
             return transcription
         }
-        let service = TranscriptionService(locale: Locale(identifier: identifier))
+        let service = TranscriptionService(
+            locale: Locale(identifier: identifier),
+            instrumentation: performanceInstrumentation
+        )
         transcription = service
         return service
     }

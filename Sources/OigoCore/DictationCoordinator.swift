@@ -2,6 +2,83 @@ import Foundation
 import Darwin
 import os
 
+public enum PerformanceEvent: String, CaseIterable, Codable, Hashable, Sendable {
+    case shortcutReceived = "shortcut-received"
+    case sessionPersisted = "session-persisted"
+    case audioEngineStartBegin = "audio-engine-start-begin"
+    case audioEngineStartEnd = "audio-engine-start-end"
+    case firstAudioBuffer = "first-audio-buffer"
+    case firstVolatileResult = "first-volatile-result"
+    case recordingStopped = "recording-stopped"
+    case transcriptionFinalized = "transcription-finalized"
+    case cleanupStart = "cleanup-start"
+    case cleanupEnd = "cleanup-end"
+    case insertionStart = "insertion-start"
+    case insertionEnd = "insertion-end"
+    case resourcesReleased = "resources-released"
+}
+
+public protocol PerformanceInstrumentation: Sendable {
+    func mark(_ event: PerformanceEvent)
+}
+
+public final class OSLogPerformanceInstrumentation: PerformanceInstrumentation, @unchecked Sendable {
+    private let log = OSLog(subsystem: "com.oigo.app", category: "performance")
+
+    public init() {}
+
+    public func mark(_ event: PerformanceEvent) {
+        switch event {
+        case .shortcutReceived:
+            os_signpost(.event, log: log, name: "shortcut-received")
+        case .sessionPersisted:
+            os_signpost(.event, log: log, name: "session-persisted")
+        case .audioEngineStartBegin:
+            os_signpost(.event, log: log, name: "audio-engine-start-begin")
+        case .audioEngineStartEnd:
+            os_signpost(.event, log: log, name: "audio-engine-start-end")
+        case .firstAudioBuffer:
+            os_signpost(.event, log: log, name: "first-audio-buffer")
+        case .firstVolatileResult:
+            os_signpost(.event, log: log, name: "first-volatile-result")
+        case .recordingStopped:
+            os_signpost(.event, log: log, name: "recording-stopped")
+        case .transcriptionFinalized:
+            os_signpost(.event, log: log, name: "transcription-finalized")
+        case .cleanupStart:
+            os_signpost(.event, log: log, name: "cleanup-start")
+        case .cleanupEnd:
+            os_signpost(.event, log: log, name: "cleanup-end")
+        case .insertionStart:
+            os_signpost(.event, log: log, name: "insertion-start")
+        case .insertionEnd:
+            os_signpost(.event, log: log, name: "insertion-end")
+        case .resourcesReleased:
+            os_signpost(.event, log: log, name: "resources-released")
+        }
+    }
+}
+
+@_spi(Testing)
+public final class RecordingPerformanceInstrumentation: PerformanceInstrumentation, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedEvents: [PerformanceEvent] = []
+
+    public init() {}
+
+    public var events: [PerformanceEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedEvents
+    }
+
+    public func mark(_ event: PerformanceEvent) {
+        lock.lock()
+        recordedEvents.append(event)
+        lock.unlock()
+    }
+}
+
 public enum DictationState: String, CaseIterable, Codable, Sendable {
     case idle
     case preparing
@@ -138,8 +215,17 @@ public struct DictationTransitionRecord: Equatable, Sendable {
 public final class DictationDiagnostics: @unchecked Sendable {
     private let logger = Logger(subsystem: "com.oigo.app", category: "dictation")
     private let signpostLog = OSLog(subsystem: "com.oigo.app", category: "dictation")
+    private let instrumentation: PerformanceInstrumentation
 
-    public init() {}
+    public init(
+        instrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
+    ) {
+        self.instrumentation = instrumentation
+    }
+
+    public func mark(_ event: PerformanceEvent) {
+        instrumentation.mark(event)
+    }
 
     public func record(_ transition: DictationTransitionRecord) {
         logger.info(
@@ -204,6 +290,17 @@ public final class DictationCoordinator {
         activeTask == nil ? 0 : 1
     }
 
+    @_spi(Testing)
+    public var activeResourceCount: Int {
+        [
+            activeCapture != nil,
+            activeAudioDescriptor != nil,
+            activeTranscription != nil,
+            sessionStore != nil,
+            activeOperationID != nil
+        ].filter { $0 }.count
+    }
+
     public var hasActiveTranscription: Bool {
         activeTranscription != nil
     }
@@ -260,6 +357,7 @@ public final class DictationCoordinator {
         }
 
         let session = try store.createSession(now: now)
+        diagnostics.mark(.sessionPersisted)
         var preparedSession = session
         let operationID = UUID()
         do {
@@ -345,6 +443,7 @@ public final class DictationCoordinator {
         }
 
         let session = try store.createSession(now: now)
+        diagnostics.mark(.sessionPersisted)
         var preparedSession = session
         let operationID = UUID()
         do {
@@ -550,6 +649,7 @@ public final class DictationCoordinator {
         do {
             stoppingSession = try store.update(session, state: .stopping, at: date)
             try capture.stop()
+            diagnostics.mark(.recordingStopped)
             let completedSession = try store.update(
                 stoppingSession,
                 state: .completed,
@@ -600,6 +700,7 @@ public final class DictationCoordinator {
         do {
             stoppingSession = try store.update(session, state: .stopping, at: date)
             try capture.stop()
+            diagnostics.mark(.recordingStopped)
             let result = try await withTaskCancellationHandler(operation: {
                 try await transcription.finish()
             }, onCancel: {
@@ -937,6 +1038,7 @@ public final class DictationCoordinator {
         }
 
         capture.cancel()
+        diagnostics.mark(.recordingStopped)
         do {
             let finishedSession = try store.update(
                 session,
@@ -1154,6 +1256,7 @@ public final class DictationCoordinator {
         sessionStore = nil
         pendingTranscriptionTerminalState = nil
         activeOperationID = nil
+        diagnostics.mark(.resourcesReleased)
     }
 
     private func beginTerminalOperation() -> Bool {
@@ -1388,8 +1491,8 @@ public final class ToggleShortcutController {
 }
 
 public enum IdlePolicy {
-    public static let maxIdleCPUPercent = 0.5
-    public static let maxIdlePhysicalFootprintBytes: UInt64 = 90 * 1024 * 1024
+    public static let maxIdleCPUPercent = PerformanceBudgetCatalog.idleCPUHardLimit
+    public static let maxIdlePhysicalFootprintBytes = PerformanceBudgetCatalog.idlePhysicalFootprintHardLimitBytes
     public static let usesRecurringPolling = false
     public static let createsProcessingServicesAtLaunch = false
     public static let createsProcessingServicesOnDemand = true
