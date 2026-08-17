@@ -18,6 +18,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let openAccessibilitySettings: () -> Void
     private let startTest: () -> Void
     private let stopTest: () -> Void
+    private let cancelTest: () -> Void
     private let openHistory: () -> Void
     private let onComplete: () -> Void
     private let onClose: () -> Void
@@ -27,7 +28,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var microphoneState: OigoPermissionState
     private var accessibilityState: OigoPermissionState
     private var accessibilityRequestAttempted = false
-    private var testComplete = false
+    private var testOutcome: OigoOnboardingTestOutcome = .pending
     private var testRunning = false
     private var completed = false
 
@@ -40,6 +41,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let modifiersField = NSTextField(string: "")
     private let testField = NSTextField(string: "")
     private let actionButton = NSButton(title: "", target: nil, action: nil)
+    private let skipButton = NSButton(title: "Skip test", target: nil, action: nil)
     private let backButton = NSButton(title: "Back", target: nil, action: nil)
     private let nextButton = NSButton(title: "Continue", target: nil, action: nil)
     private let historyButton = NSButton(title: "Open History", target: nil, action: nil)
@@ -62,6 +64,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         openAccessibilitySettings: @escaping () -> Void,
         startTest: @escaping () -> Void,
         stopTest: @escaping () -> Void,
+        cancelTest: @escaping () -> Void,
         openHistory: @escaping () -> Void,
         onComplete: @escaping () -> Void,
         onClose: @escaping () -> Void
@@ -80,6 +83,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.openAccessibilitySettings = openAccessibilitySettings
         self.startTest = startTest
         self.stopTest = stopTest
+        self.cancelTest = cancelTest
         self.openHistory = openHistory
         self.onComplete = onComplete
         self.onClose = onClose
@@ -111,7 +115,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         _ = notification
         if testRunning {
             testRunning = false
-            stopTest()
+            cancelTest()
         }
         if support.isSupported, !completed {
             saveStep(currentStep)
@@ -135,13 +139,13 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func setTestResult(transcript: String, mode: OigoProcessingMode, copied: Bool) {
-        testComplete = !transcript.isEmpty
+        testOutcome = transcript.isEmpty ? .pending : .passed
         testRunning = false
         testField.stringValue = transcript
         let clipboardStatus = copied ? "ready" : "not available"
-        statusLabel.stringValue = testComplete
+        statusLabel.stringValue = testOutcome == .passed
             ? "Recording and transcription succeeded in " + mode.displayName + " mode. Clipboard output: " + clipboardStatus + "."
-            : "The test did not produce a transcript. Try again or open History to inspect the saved recording."
+            : "The test did not produce a transcript. Try again or skip the test."
         actionButton.title = "Start test dictation"
         renderButtons()
     }
@@ -164,6 +168,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         historyButton.action = #selector(openHistoryAction)
         actionButton.target = self
         actionButton.action = #selector(performAction)
+        skipButton.target = self
+        skipButton.action = #selector(skipTestAction)
         backButton.target = self
         backButton.action = #selector(goBack)
         nextButton.target = self
@@ -186,6 +192,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             statusLabel,
             historyButton,
             actionButton,
+            skipButton,
             NSView(),
             NSStackView(views: [backButton, nextButton])
         ])
@@ -226,8 +233,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         keyCodeField.superview?.isHidden = currentStep != .shortcut
         testField.isHidden = !isSupported || currentStep != .testDictation
         historyButton.isHidden = currentStep != .recovery
+        skipButton.isHidden = currentStep != .testDictation
         statusLabel.stringValue = status(for: currentStep)
-        actionButton.isHidden = !isSupported || ![.language, .microphone, .insertion, .testDictation, .recovery].contains(currentStep)
+        actionButton.isHidden = !isSupported || ![.language, .microphone, .insertion, .testDictation].contains(currentStep)
         backButton.isHidden = !isSupported || currentStep == .system
         nextButton.isHidden = !isSupported
         if !isSupported {
@@ -247,8 +255,6 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
                 : "Allow Accessibility (optional)"
         } else if currentStep == .testDictation {
             actionButton.title = testRunning ? "Stop test dictation" : "Start test dictation"
-        } else if currentStep == .recovery {
-            actionButton.title = "Finish setup"
         }
         renderButtons()
     }
@@ -263,7 +269,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             nextButton.isEnabled = languageReady
         }
         if currentStep == .testDictation {
-            nextButton.isEnabled = testComplete
+            nextButton.isEnabled = testOutcome.allowsContinue
         }
     }
 
@@ -294,11 +300,30 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             return "Current microphone state: " + microphoneState.rawValue.capitalized
         case .insertion:
             return "Current Accessibility state: " + accessibilityState.rawValue.capitalized
-        case .testDictation where testComplete:
+        case .testDictation where testOutcome == .passed:
             return "Test complete."
+        case .testDictation where testOutcome == .skipped:
+            return "Test skipped. You can run it later from Settings."
         default:
             return ""
         }
+    }
+
+    @objc private func skipTestAction() {
+        guard currentStep == .testDictation else {
+            return
+        }
+        if testRunning {
+            testRunning = false
+            cancelTest()
+        }
+        testOutcome = .skipped
+        guard let next = nextStep(after: currentStep) else {
+            return
+        }
+        currentStep = next
+        saveStep(next)
+        render()
     }
 
     private func loadLanguagesIfNeeded() {
@@ -370,10 +395,6 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             if testRunning { startTest() } else { stopTest() }
             actionButton.title = testRunning ? "Stop test dictation" : "Start test dictation"
             renderButtons()
-        case .recovery:
-            completed = true
-            onComplete()
-            window?.close()
         default:
             break
         }
@@ -408,6 +429,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             saveLanguage(selectedLanguage)
         }
         guard let next = nextStep(after: currentStep) else {
+            completed = true
             onComplete()
             window?.close()
             return

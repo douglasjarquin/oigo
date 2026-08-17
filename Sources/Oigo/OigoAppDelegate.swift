@@ -238,7 +238,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 self?.handleToggle(allowBeforeSetup: true)
             },
             stopTest: { [weak self] in
-                self?.stopTestDictation()
+                self?.finishTestDictation()
+            },
+            cancelTest: { [weak self] in
+                self?.cancelTestDictation()
             },
             openHistory: { [weak self] in
                 self?.openHistory()
@@ -474,7 +477,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func stopTestDictation() {
+    private func cancelTestDictation() {
         let activeToggleTask = toggleTask
         activeToggleTask?.cancel()
         Task { @MainActor [weak self] in
@@ -495,6 +498,20 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             self.insertionDisplayStatus = nil
             self.statusSurface.hide()
             self.updateSurface()
+        }
+    }
+
+    private func finishTestDictation() {
+        let activeToggleTask = toggleTask
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let activeToggleTask {
+                await activeToggleTask.value
+            }
+            guard self.coordinator.state == .recording else {
+                return
+            }
+            await self.performToggle()
         }
     }
 

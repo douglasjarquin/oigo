@@ -184,6 +184,16 @@ public enum OigoOnboardingStep: String, Codable, CaseIterable, Sendable {
     }
 }
 
+public enum OigoOnboardingTestOutcome: String, Equatable, Sendable {
+    case pending
+    case passed
+    case skipped
+
+    public var allowsContinue: Bool {
+        self != .pending
+    }
+}
+
 public struct OigoOnboardingState: Codable, Equatable, Sendable {
     public var step: OigoOnboardingStep
 

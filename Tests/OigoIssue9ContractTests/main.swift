@@ -140,6 +140,12 @@ private struct OigoIssue9ContractTests {
             throw ContractFailure(message: "Instant mode incorrectly requires Foundation Models")
         }
 
+        guard !OigoOnboardingTestOutcome.pending.allowsContinue,
+              OigoOnboardingTestOutcome.passed.allowsContinue,
+              OigoOnboardingTestOutcome.skipped.allowsContinue else {
+            throw ContractFailure(message: "onboarding test could not pass or be skipped")
+        }
+
         let module = DictationTranscriber(
             locale: Locale(identifier: "en-US"),
             preset: .progressiveLongDictation
