@@ -594,7 +594,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             switch coordinator.state {
             case .idle, .complete, .failed, .cancelled, .interrupted:
                 insertionDisplayStatus = nil
-                lastSession = try await withPersistedSession { [self] persistedSession, store in
+                lastSession = try await DurableSessionDictationBoundary.withPersistedSession(
+                    using: storageCapability
+                ) { [self] persistedSession, store in
                     pendingSessionBoundary = persistedSession
                     lastSession = persistedSession
                     try await ensureMicrophonePermission()
@@ -744,15 +746,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             )
             NSLog("Oigo rejected the toggle command: %@", failureReason)
             updateSurface()
-        }
-    }
-
-    private func withPersistedSession<T>(
-        _ operation: @MainActor (DictationSession, SessionStore) async throws -> T
-    ) async throws -> T {
-        try await storageCapability.withHealthyStore { store in
-            let session = try store.createSession()
-            return try await operation(session, store)
         }
     }
 

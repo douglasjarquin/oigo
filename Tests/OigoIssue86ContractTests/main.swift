@@ -41,8 +41,9 @@ struct OigoIssue86ContractTests {
         var insertionConstructed = 0
         var startReached = 0
         do {
-            _ = try await capability.withHealthyStore { store in
-                _ = try store.createSession()
+            _ = try await DurableSessionDictationBoundary.withPersistedSession(
+                using: capability
+            ) { _, _ in
                 recorderConstructed += 1
                 transcriberConstructed += 1
                 insertionConstructed += 1
@@ -110,8 +111,9 @@ struct OigoIssue86ContractTests {
         guard capability.diagnosticsExport() == nil else {
             throw ContractFailure.diagnosticsExportWasNotPreserved
         }
-        let reached = try await capability.withHealthyStore { receivedStore in
-            let persistedSession = try receivedStore.createSession()
+        let reached = try await DurableSessionDictationBoundary.withPersistedSession(
+            using: capability
+        ) { persistedSession, receivedStore in
             guard receivedStore === store else {
                 return false
             }

@@ -691,3 +691,16 @@ public final class DurableSessionCapability {
         currentAttemptCompletion = nil
     }
 }
+
+public enum DurableSessionDictationBoundary {
+    @MainActor
+    public static func withPersistedSession<T>(
+        using capability: DurableSessionCapability,
+        _ operation: @MainActor (DictationSession, SessionStore) async throws -> T
+    ) async throws -> T {
+        try await capability.withHealthyStore { store in
+            let session = try store.createSession()
+            return try await operation(session, store)
+        }
+    }
+}
