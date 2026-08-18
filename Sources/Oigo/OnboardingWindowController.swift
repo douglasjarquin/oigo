@@ -11,6 +11,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let checkSpeechAssets: (String) async -> SpeechAssetState
     private let saveLanguage: (String) -> Void
     private let saveStep: (OigoOnboardingStep) -> Void
+    private let saveInputSelection: (OigoInputSelection) -> Void
     private let requestMicrophone: () async -> OigoPermissionState
     private let openMicrophoneSettings: () -> Void
     private let registrationStatus: () -> GlobalShortcutRegistrationStatus
@@ -35,11 +36,16 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var testRunning = false
     private var completed = false
     private var committedShortcut: ToggleShortcut
+    private var inputMenuSelections: [OigoInputSelection] = []
+    private var selectedInput: OigoInputSelection
 
     private let progressLabel = NSTextField(labelWithString: "")
     private let titleLabel = NSTextField(labelWithString: "")
     private let bodyLabel = NSTextField(wrappingLabelWithString: "")
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
+    private let inputPopup = NSPopUpButton()
+    private let inputLabel = NSTextField(labelWithString: "Microphone input")
+    private let inputRow = NSStackView()
     private let languagePopup = NSPopUpButton()
     private let shortcutRecorder: ShortcutRecorderControl
     private let testField = NSTextField(string: "")
@@ -53,12 +59,15 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         support: OigoSystemSupportResult,
         initialStep: OigoOnboardingStep = .system,
         globalShortcut: ToggleShortcut,
+        inputDevices: [OigoInputDevice],
+        selectedInput: OigoInputSelection,
         microphoneState: OigoPermissionState,
         accessibilityState: OigoPermissionState,
         loadSupportedLanguages: @escaping () async -> [String],
         checkSpeechAssets: @escaping (String) async -> SpeechAssetState,
         saveLanguage: @escaping (String) -> Void,
         saveStep: @escaping (OigoOnboardingStep) -> Void,
+        saveInputSelection: @escaping (OigoInputSelection) -> Void,
         requestMicrophone: @escaping () async -> OigoPermissionState,
         openMicrophoneSettings: @escaping () -> Void,
         registrationStatus: @escaping () -> GlobalShortcutRegistrationStatus,
@@ -76,10 +85,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     ) {
         self.support = support
         self.currentStep = initialStep
+        self.selectedInput = selectedInput
         self.loadSupportedLanguages = loadSupportedLanguages
         self.checkSpeechAssets = checkSpeechAssets
         self.saveLanguage = saveLanguage
         self.saveStep = saveStep
+        self.saveInputSelection = saveInputSelection
         self.requestMicrophone = requestMicrophone
         self.openMicrophoneSettings = openMicrophoneSettings
         self.registrationStatus = registrationStatus
@@ -109,6 +120,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        configureInputMenu(devices: inputDevices, selected: selectedInput)
         configureWindow()
         render()
     }
@@ -126,6 +138,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             cancelTest()
         }
         if support.isSupported, !completed {
+            saveInputSelection(selectedInputFromMenu())
             saveStep(currentStep)
         }
         onClose()
@@ -142,6 +155,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func updateInputDevices(_ devices: [OigoInputDevice]) {
+        selectedInput = selectedInputFromMenu()
+        configureInputMenu(devices: devices, selected: selectedInput)
     }
 
     func focusTestField() {
@@ -191,10 +209,17 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         nextButton.target = self
         nextButton.action = #selector(goForward)
 
+        inputRow.addArrangedSubview(inputLabel)
+        inputRow.addArrangedSubview(inputPopup)
+        inputRow.orientation = .horizontal
+        inputRow.alignment = .centerY
+        inputRow.spacing = 8
+        inputLabel.setContentHuggingPriority(.required, for: .horizontal)
         let stack = NSStackView(views: [
             progressLabel,
             titleLabel,
             bodyLabel,
+            inputRow,
             languagePopup,
             shortcutRecorder,
             testField,
@@ -220,8 +245,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -24),
             bodyLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            inputRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             languagePopup.widthAnchor.constraint(equalToConstant: 280),
             shortcutRecorder.widthAnchor.constraint(equalToConstant: 280),
+            inputPopup.widthAnchor.constraint(equalToConstant: 280),
             testField.widthAnchor.constraint(equalTo: stack.widthAnchor),
             actionButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
             historyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140),
@@ -238,6 +265,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         bodyLabel.stringValue = isSupported ? body(for: currentStep) : support.reason
         languagePopup.isHidden = currentStep != .language
         shortcutRecorder.isHidden = currentStep != .shortcut
+        inputRow.isHidden = currentStep != .microphone
         testField.isHidden = !isSupported || currentStep != .testDictation
         historyButton.isHidden = currentStep != .recovery
         skipButton.isHidden = currentStep != .testDictation
@@ -362,6 +390,27 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    private func configureInputMenu(
+        devices: [OigoInputDevice],
+        selected: OigoInputSelection
+    ) {
+        let items = OigoInputMenu.items(devices: devices, selected: selected)
+        inputMenuSelections = items.map(\.selection)
+        inputPopup.removeAllItems()
+        inputPopup.addItems(withTitles: items.map(\.title))
+        if let selectedIndex = items.firstIndex(where: { $0.selection == selected }) {
+            inputPopup.selectItem(at: selectedIndex)
+        }
+    }
+
+    private func selectedInputFromMenu() -> OigoInputSelection {
+        let index = inputPopup.indexOfSelectedItem
+        guard inputMenuSelections.indices.contains(index) else {
+            return .systemDefault
+        }
+        return inputMenuSelections[index]
+    }
+
     @objc private func performAction() {
         switch currentStep {
         case .language:
@@ -447,6 +496,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         if currentStep == .language,
            let selectedLanguage = languagePopup.selectedItem?.title {
             saveLanguage(selectedLanguage)
+        }
+        if currentStep == .microphone {
+            selectedInput = selectedInputFromMenu()
+            saveInputSelection(selectedInput)
         }
         guard let next = nextStep(after: currentStep) else {
             completed = true

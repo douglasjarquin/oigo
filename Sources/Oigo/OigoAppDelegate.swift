@@ -13,7 +13,9 @@ import OigoHotKey
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = DictationCoordinator()
     private let performanceInstrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
-    private let recorder = AudioRecorder()
+    private let deviceMonitor = SystemAudioDeviceMonitor()
+    private let deviceInventoryMonitor = SystemAudioDeviceMonitor()
+    private lazy var recorder = AudioRecorder(deviceMonitor: deviceMonitor)
     private var transcription: TranscriptionService?
     private let insertion = InsertionService()
     private let playback = AudioPlayback()
@@ -58,6 +60,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var settings = OigoSettingsStore().load()
     private var targetSnapshot: InsertionTargetSnapshot?
     private var insertionDisplayStatus: OigoHUDProcessingState?
+    private var failureDetail: String?
     private var onboardingWindow: OnboardingWindowController?
     private var recordingStartedAt: Date?
     private var previewThrottle = OigoHUDPreviewThrottle()
@@ -67,11 +70,15 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var cleanAgainTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
     private var workspaceInterruptionTask: Task<Void, Never>?
+    private var workspaceInterruptionOperationID: UUID?
     private var workspaceObservers: [NSObjectProtocol] = []
+    private let lifecycleOperationRegistry = OperationTaskRegistry()
+    private let lifecycleOperationID = UUID()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
         NSApp.setActivationPolicy(.accessory)
+        startInputDeviceInventoryMonitor()
         let support = OigoSystemSupportEvaluator.current()
         guard support.isSupported else {
             showOnboarding(support)
@@ -92,6 +99,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         _ = sender
         shortcutRegistrar.unregister()
         shortcutBridge.reset()
+        deviceInventoryMonitor.stop()
         removeWorkspaceInterruptionObservers()
         statusSurface.hide()
         playback.stop()
@@ -101,28 +109,33 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         let activeWorkspaceInterruptionTask = workspaceInterruptionTask
         activeToggleTask?.cancel()
         activeCleanAgainTask?.cancel()
+        activeRetryTask?.cancel()
+        activeWorkspaceInterruptionTask?.cancel()
         if coordinator.hasActiveWork
             || activeToggleTask != nil
             || activeCleanAgainTask != nil
             || activeRetryTask != nil
             || activeWorkspaceInterruptionTask != nil {
             Task { @MainActor [weak self] in
-                if let activeToggleTask {
-                    await activeToggleTask.value
+                guard let self else {
+                    NSApp.reply(toApplicationShouldTerminate: true)
+                    return
                 }
-                if let activeCleanAgainTask {
-                    await activeCleanAgainTask.value
-                }
-                if self?.coordinator.hasActiveTranscription == true {
-                    await self?.coordinator.shutdownWithTranscription()
-                } else {
-                    await self?.coordinator.shutdownAndWait()
-                }
-                if let activeRetryTask {
-                    await activeRetryTask.value
-                }
-                if let activeWorkspaceInterruptionTask {
-                    await activeWorkspaceInterruptionTask.value
+                _ = try? await BoundedOperation.run(
+                    operationID: self.lifecycleOperationID,
+                    stage: .shutdown,
+                    timeout: TranscriptionTimeoutPolicy.production.budget(for: .shutdown),
+                    registry: self.lifecycleOperationRegistry
+                ) { @MainActor [weak self] in
+                    guard let self else {
+                        return
+                    }
+                    await self.finishApplicationTermination(
+                        activeToggleTask: activeToggleTask,
+                        activeCleanAgainTask: activeCleanAgainTask,
+                        activeRetryTask: activeRetryTask,
+                        activeWorkspaceInterruptionTask: activeWorkspaceInterruptionTask
+                    )
                 }
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
@@ -130,6 +143,59 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         coordinator.shutdown()
         return .terminateNow
+    }
+
+    private func finishApplicationTermination(
+        activeToggleTask: Task<Void, Never>?,
+        activeCleanAgainTask: Task<Void, Never>?,
+        activeRetryTask: Task<Void, Never>?,
+        activeWorkspaceInterruptionTask: Task<Void, Never>?
+    ) async {
+        if let activeToggleTask {
+            _ = try? await BoundedOperation.run(
+                operationID: lifecycleOperationID,
+                stage: .shutdown,
+                timeout: TranscriptionTimeoutPolicy.production.budget(for: .shutdown),
+                registry: lifecycleOperationRegistry
+            ) {
+                await activeToggleTask.value
+            }
+        }
+        if let activeCleanAgainTask {
+            _ = try? await BoundedOperation.run(
+                operationID: lifecycleOperationID,
+                stage: .shutdown,
+                timeout: TranscriptionTimeoutPolicy.production.budget(for: .shutdown),
+                registry: lifecycleOperationRegistry
+            ) {
+                await activeCleanAgainTask.value
+            }
+        }
+        if coordinator.hasActiveTranscription {
+            await coordinator.shutdownWithTranscription()
+        } else {
+            await coordinator.shutdownAndWait()
+        }
+        if let activeRetryTask {
+            _ = try? await BoundedOperation.run(
+                operationID: lifecycleOperationID,
+                stage: .shutdown,
+                timeout: TranscriptionTimeoutPolicy.production.budget(for: .shutdown),
+                registry: lifecycleOperationRegistry
+            ) {
+                await activeRetryTask.value
+            }
+        }
+        if let activeWorkspaceInterruptionTask {
+            _ = try? await BoundedOperation.run(
+                operationID: lifecycleOperationID,
+                stage: .shutdown,
+                timeout: TranscriptionTimeoutPolicy.production.budget(for: .shutdown),
+                registry: lifecycleOperationRegistry
+            ) {
+                await activeWorkspaceInterruptionTask.value
+            }
+        }
     }
 
     @objc private func toggleDictation() {
@@ -152,6 +218,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func presentSettings(supportedLocales: [String]) {
         let window = SettingsWindowController(
             settings: settings,
+            inputDevices: currentInputDevices(),
             supportedLocales: supportedLocales,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
@@ -202,6 +269,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             support: support,
             initialStep: initialStep,
             globalShortcut: settings.globalShortcut,
+            inputDevices: currentInputDevices(),
+            selectedInput: settings.selectedInput,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
             loadSupportedLanguages: { [weak self] in
@@ -240,6 +309,17 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             saveStep: { [weak self] step in
                 self?.onboardingStore.save(OigoOnboardingState(step: step))
+            },
+            saveInputSelection: { [weak self] selection in
+                guard let self else { return }
+                let updatedSettings = self.settings.with(selectedInput: selection)
+                do {
+                    try self.settingsStore.save(updatedSettings)
+                    self.settings = updatedSettings
+                    self.recorder.setInputSelection(selection)
+                } catch {
+                    self.showSettingsPersistenceFailure(error)
+                }
             },
             requestMicrophone: {
                 _ = await AudioRecorder.requestMicrophonePermission()
@@ -481,32 +561,48 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleWorkspaceInterruption(_ reason: String) {
         workspaceInterruptionTask?.cancel()
+        let operationID = UUID()
+        workspaceInterruptionOperationID = operationID
         workspaceInterruptionTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            let activeToggleTask = toggleTask
-            let activeCleanAgainTask = cleanAgainTask
-            let activeRetryTask = retryTask
-            activeToggleTask?.cancel()
-            activeCleanAgainTask?.cancel()
-            activeRetryTask?.cancel()
-            await coordinator.cancelActiveWork(reason: reason)
-            if let activeToggleTask {
-                await activeToggleTask.value
+            _ = try? await BoundedOperation.run(
+                operationID: operationID,
+                stage: .interruption,
+                timeout: TranscriptionTimeoutPolicy.production.budget(for: .interruption),
+                registry: lifecycleOperationRegistry
+            ) { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+                let activeToggleTask = self.toggleTask
+                let activeCleanAgainTask = self.cleanAgainTask
+                let activeRetryTask = self.retryTask
+                activeToggleTask?.cancel()
+                activeCleanAgainTask?.cancel()
+                activeRetryTask?.cancel()
+                await self.coordinator.cancelActiveWork(reason: reason)
+                if let activeToggleTask {
+                    await activeToggleTask.value
+                }
+                if let activeCleanAgainTask {
+                    await activeCleanAgainTask.value
+                }
+                if let activeRetryTask {
+                    await activeRetryTask.value
+                }
+                self.lastSession = self.coordinator.currentSession ?? self.lastSession
+                self.recordingStartedAt = nil
+                self.targetSnapshot = nil
+                self.livePreview = ""
+                self.insertionDisplayStatus = nil
             }
-            if let activeCleanAgainTask {
-                await activeCleanAgainTask.value
+            guard self.workspaceInterruptionOperationID == operationID else {
+                return
             }
-            if let activeRetryTask {
-                await activeRetryTask.value
-            }
-            lastSession = coordinator.currentSession ?? lastSession
-            recordingStartedAt = nil
-            targetSnapshot = nil
-            livePreview = ""
-            insertionDisplayStatus = nil
-            shortcutBridge.reset()
-            updateSurface()
-            workspaceInterruptionTask = nil
+            self.shortcutBridge.reset()
+            self.updateSurface()
+            self.workspaceInterruptionTask = nil
+            self.workspaceInterruptionOperationID = nil
         }
     }
 
@@ -644,11 +740,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     SessionStore.defaultRootDirectory()
                 )
             }
+            failureDetail = nil
             insertionDisplayStatus = nil
             shortcutFeedbackDetail = nil
             try await ensureMicrophonePermission()
             try Task.checkCancellation()
             targetSnapshot = insertion.captureTarget()
+            recorder.setInputSelection(settings.selectedInput)
             let format = try recorder.captureFormat()
             try Task.checkCancellation()
             let service = transcriptionService()
@@ -676,6 +774,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             if !coordinator.hasActiveWork {
                 insertionDisplayStatus = nil
             }
+            failureDetail = nil
             updateSurface()
         } catch {
             if coordinator.hasActiveWork {
@@ -686,11 +785,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             targetSnapshot = nil
             recordingStartedAt = nil
             insertionDisplayStatus = .failed
+            failureDetail = Self.friendlyError("Dictation failed", error)
             if let session = coordinator.currentSession,
                [.failed, .interrupted].contains(session.metadata.state) {
                 lastSession = session
             }
-            historyWindow?.showMessage(Self.friendlyError("Dictation failed", error))
+            historyWindow?.showMessage(failureDetail ?? Self.friendlyError("Dictation failed", error))
             onboardingWindow?.setTestResult(
                 transcript: "",
                 mode: settings.defaultMode,
@@ -1359,7 +1459,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         } else if let insertionDisplayStatus {
             statusSurface.showProcessing(
                 insertionDisplayStatus,
-                detail: shortcutFeedbackDetail ?? Self.hudDetail(for: insertionDisplayStatus),
+                detail: shortcutFeedbackDetail
+                    ?? failureDetail
+                    ?? Self.hudDetail(for: insertionDisplayStatus),
                 anchoredTo: statusItem?.button
             )
         } else {
@@ -1526,6 +1628,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         settings = newSettings
+        recorder.setInputSelection(settings.selectedInput)
         if previousSettings.localeIdentifier != settings.localeIdentifier {
             transcription = nil
         }
@@ -1534,6 +1637,20 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         updateSurface()
         return nil
+    }
+
+    private func currentInputDevices() -> [OigoInputDevice] {
+        (try? deviceInventoryMonitor.currentDevices()) ?? []
+    }
+
+    private func startInputDeviceInventoryMonitor() {
+        deviceInventoryMonitor.start { [weak self] devices in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.settingsWindow?.updateInputDevices(devices)
+                self.onboardingWindow?.updateInputDevices(devices)
+            }
+        }
     }
 
     private func validateShortcut(_ candidate: ToggleShortcut) -> OigoShortcutValidation {
