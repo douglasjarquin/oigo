@@ -1,0 +1,21 @@
+version: 1
+agent: codex
+review:
+  required: true
+ci:
+  required: true
+commands:
+  test: |
+    set -e
+    swift build
+    swift build --product Oigo
+    swift run oigo-spike-contract-tests
+    swift run oigo-issue3-contract-tests
+    swift run oigo-issue4-contract-tests
+    swift run oigo-issue5-contract-tests
+    swift run oigo-issue6-contract-tests
+    swift run oigo-issue7-contract-tests
+    swift run oigo-issue8-contract-tests
+    swift run oigo-issue9-contract-tests
+    swift run oigo-issue10-contract-tests
+    swift run oigo-issue11-performance-check
