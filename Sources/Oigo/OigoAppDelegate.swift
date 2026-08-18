@@ -12,7 +12,9 @@ import OigoInsertion
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = DictationCoordinator()
     private let performanceInstrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
-    private let recorder = AudioRecorder()
+    private let deviceMonitor = SystemAudioDeviceMonitor()
+    private let deviceInventoryMonitor = SystemAudioDeviceMonitor()
+    private lazy var recorder = AudioRecorder(deviceMonitor: deviceMonitor)
     private var transcription: TranscriptionService?
     private let insertion = InsertionService()
     private let playback = AudioPlayback()
@@ -45,6 +47,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var settings = OigoSettingsStore().load()
     private var targetSnapshot: InsertionTargetSnapshot?
     private var insertionDisplayStatus: OigoHUDProcessingState?
+    private var failureDetail: String?
     private var onboardingWindow: OnboardingWindowController?
     private var recordingStartedAt: Date?
     private var previewThrottle = OigoHUDPreviewThrottle()
@@ -60,6 +63,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
         NSApp.setActivationPolicy(.accessory)
+        startInputDeviceInventoryMonitor()
         let support = OigoSystemSupportEvaluator.current()
         guard support.isSupported else {
             showOnboarding(support)
@@ -79,6 +83,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
         shortcutRegistrar.unregister()
+        deviceInventoryMonitor.stop()
         removeWorkspaceInterruptionObservers()
         statusSurface.hide()
         playback.stop()
@@ -197,6 +202,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func presentSettings(supportedLocales: [String]) {
         let window = SettingsWindowController(
             settings: settings,
+            inputDevices: currentInputDevices(),
             supportedLocales: supportedLocales,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
@@ -241,6 +247,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             support: support,
             initialStep: initialStep,
             globalShortcut: settings.globalShortcut,
+            inputDevices: currentInputDevices(),
+            selectedInput: settings.selectedInput,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
             loadSupportedLanguages: { [weak self] in
@@ -274,6 +282,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             saveStep: { [weak self] step in
                 self?.onboardingStore.save(OigoOnboardingState(step: step))
+            },
+            saveInputSelection: { [weak self] selection in
+                guard let self else { return }
+                self.settings = self.settings.with(selectedInput: selection)
+                self.settingsStore.save(self.settings)
+                self.recorder.setInputSelection(selection)
             },
             requestMicrophone: {
                 _ = await AudioRecorder.requestMicrophonePermission()
@@ -601,10 +615,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                         SessionStore.defaultRootDirectory()
                     )
                 }
+                failureDetail = nil
                 insertionDisplayStatus = nil
                 try await ensureMicrophonePermission()
                 try Task.checkCancellation()
                 targetSnapshot = insertion.captureTarget()
+                recorder.setInputSelection(settings.selectedInput)
                 let format = try recorder.captureFormat()
                 try Task.checkCancellation()
                 let service = transcriptionService()
@@ -701,6 +717,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             if !coordinator.hasActiveWork {
                 insertionDisplayStatus = nil
             }
+            failureDetail = nil
             updateSurface()
             return
         } catch {
@@ -711,11 +728,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             targetSnapshot = nil
             recordingStartedAt = nil
             insertionDisplayStatus = .failed
+            failureDetail = Self.friendlyError("Dictation failed", error)
             if let session = coordinator.currentSession,
                [.failed, .interrupted].contains(session.metadata.state) {
                 lastSession = session
             }
-            historyWindow?.showMessage(Self.friendlyError("Dictation failed", error))
+            historyWindow?.showMessage(failureDetail ?? Self.friendlyError("Dictation failed", error))
             onboardingWindow?.setTestResult(
                 transcript: "",
                 mode: settings.defaultMode,
@@ -1224,7 +1242,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         } else if let insertionDisplayStatus {
             statusSurface.showProcessing(
                 insertionDisplayStatus,
-                detail: Self.hudDetail(for: insertionDisplayStatus),
+                detail: failureDetail ?? Self.hudDetail(for: insertionDisplayStatus),
                 anchoredTo: statusItem?.button
             )
         } else {
@@ -1330,12 +1348,27 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         settings = newSettings
         settingsStore.save(settings)
+        recorder.setInputSelection(settings.selectedInput)
         if previousSettings.localeIdentifier != settings.localeIdentifier {
             transcription = nil
         }
         registerShortcut()
         updateSurface()
         return nil
+    }
+
+    private func currentInputDevices() -> [OigoInputDevice] {
+        (try? deviceInventoryMonitor.currentDevices()) ?? []
+    }
+
+    private func startInputDeviceInventoryMonitor() {
+        deviceInventoryMonitor.start { [weak self] devices in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.settingsWindow?.updateInputDevices(devices)
+                self.onboardingWindow?.updateInputDevices(devices)
+            }
+        }
     }
 
     private func validateShortcut(_ candidate: ToggleShortcut) -> OigoShortcutValidation {

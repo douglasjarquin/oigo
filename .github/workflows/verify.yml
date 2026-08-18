@@ -45,3 +45,5 @@ jobs:
         run: swift run oigo-issue11-performance-check
       - name: Issue seventy-eight transcription lifecycle contract harness
         run: swift run oigo-issue78-contract-tests
+      - name: Issue seventy-six input selection contract harness
+        run: swift run oigo-issue76-contract-tests
