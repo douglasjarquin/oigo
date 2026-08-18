@@ -23,6 +23,7 @@ private struct OigoIssue78ContractTests {
             ("startup timeout preserves ownership", testStartupTimeoutPreservesOwnership),
             ("retry timeout preserves canonical raw text", testRetryTimeoutPreservesCanonicalRawText),
             ("retry commit rejects terminal state", testRetryCommitRejectsTerminalState),
+            ("shutdown terminalization rejects completed retry", testShutdownTerminalizationRejectsCompletedRetry),
             ("late retry commit cannot override timeout", testLateRetryCommitCannotOverrideTimeout),
             ("interruption timeout preserves terminal outcome", testInterruptionTimeoutPreservesTerminalOutcome),
             ("shutdown timeout replies with stable outcome", testShutdownTimeoutRepliesWithStableOutcome),
@@ -469,6 +470,52 @@ private struct OigoIssue78ContractTests {
               try store.readRawText(for: released) == "prior canonical",
               try retryStagingFiles(in: released).isEmpty else {
             throw ContractFailure(message: "late retry commit changed the terminal outcome or canonical raw text")
+        }
+    }
+
+    @MainActor
+    private static func testShutdownTerminalizationRejectsCompletedRetry() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue78-shutdown-retry-state-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let created = try store.createSession()
+        let failed = try store.update(
+            created,
+            state: .failed,
+            failureReason: "live transcription failed",
+            failureCode: .transcriptionFailed
+        )
+        let retrying = try store.beginTranscriptionRetry(for: failed)
+        _ = try store.persistRawText("prior canonical", for: retrying)
+        let staging = try store.beginRawTextStaging(for: retrying)
+        try store.appendRawText("late replacement", to: staging, for: retrying)
+        let completed = try store.commitRawTextStaging(
+            staging,
+            for: retrying,
+            expectedState: .retrying,
+            resultingState: .completed
+        )
+
+        do {
+            _ = try store.update(
+                retrying,
+                state: .interrupted,
+                failureReason: "application shutdown",
+                expectedState: .retrying
+            )
+            throw ContractFailure(message: "shutdown terminalization overwrote a completed retry")
+        } catch let error as SessionStoreError {
+            guard case .stateChanged = error else {
+                throw ContractFailure(message: "shutdown terminalization returned the wrong stale-state error: " + error.description)
+            }
+        }
+
+        let winner = try store.load(id: completed.id)
+        guard winner.metadata.state == .completed,
+              try store.readRawText(for: winner) == "late replacement" else {
+            throw ContractFailure(message: "shutdown terminalization changed the winning retry outcome")
         }
     }
 

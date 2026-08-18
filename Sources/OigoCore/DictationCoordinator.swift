@@ -676,10 +676,24 @@ public final class DictationCoordinator {
                     retryingSession,
                     state: .interrupted,
                     at: Date(),
-                    failureReason: "application shutdown"
+                    failureReason: "application shutdown",
+                    expectedState: .retrying
                 )
-                _ = try? apply(.interrupt)
-                currentSession = interruptedSession ?? persistedSession ?? retryingSession
+                if let interruptedSession {
+                    _ = try? apply(.interrupt)
+                    currentSession = interruptedSession
+                } else if let reconciledSession = try? store.load(id: retryingSession.id),
+                          reconciledSession.metadata.state == .completed {
+                    _ = try? apply(.retryCompleted)
+                    currentSession = reconciledSession
+                    lastFailureReason = nil
+                    lastFailureCode = nil
+                    diagnostics.record("saved audio transcription completed during shutdown")
+                    return reconciledSession
+                } else {
+                    _ = try? apply(.interrupt)
+                    currentSession = persistedSession ?? retryingSession
+                }
             } else {
                 lastFailureReason = reason
                 let terminalSession = persistTerminalState(
