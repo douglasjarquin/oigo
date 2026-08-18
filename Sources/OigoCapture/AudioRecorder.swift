@@ -518,6 +518,8 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private var configurationObserver: NSObjectProtocol?
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var recording = false
+    private var starting = false
+    private var finishing = false
     private var failureReported = false
     private var firstBufferReported = false
     private var selectedInput: OigoInputSelection = .systemDefault
@@ -538,7 +540,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     public func setInputSelection(_ selection: OigoInputSelection) {
         lock.lock()
         selectedInput = selection
-        if !recording {
+        if !recording && !starting {
             activeSelection = selection
             preparedEngine = nil
         }
@@ -610,7 +612,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         onFailure: @escaping @Sendable (String) -> Void
     ) throws {
         lock.lock()
-        let alreadyRecording = recording
+        let alreadyRecording = recording || starting || finishing
         lock.unlock()
         guard !alreadyRecording else {
             throw AudioRecorderError.alreadyRecording
@@ -656,7 +658,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         self.onFinish = onFinish
         self.onInterruption = onInterruption
         self.onFailure = onFailure
-        recording = true
+        starting = true
         let recordingGeneration = recordingFence.begin()
         failureReported = false
         firstBufferReported = false
@@ -706,6 +708,16 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             defer { instrumentation.mark(.audioEngineStartEnd) }
             engine.prepare()
             try engine.start()
+            lock.lock()
+            let startupIsCurrent = starting && recordingFence.accepts(recordingGeneration)
+            if startupIsCurrent {
+                starting = false
+                recording = true
+            }
+            lock.unlock()
+            guard startupIsCurrent else {
+                throw AudioRecorderError.inputDeviceUnavailable
+            }
         } catch {
             cancel()
             throw AudioRecorderError.engineStartFailed(String(describing: error))
@@ -842,8 +854,9 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             guard let resources = beginTeardown(expectedGeneration: generation) else {
                 return
             }
-            finish(resources)
-            failure(failureDescription)
+            finish(resources) {
+                failure(failureDescription)
+            }
         } else if let callback, let forwardedBuffer {
             lock.lock()
             let isCurrentOperation = recording
@@ -894,12 +907,14 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
     private func beginTeardown(expectedGeneration: UInt64?) -> TeardownResources? {
         lock.lock()
-        guard recording,
+        guard recording || starting,
               expectedGeneration.map(recordingFence.accepts) ?? true else {
             lock.unlock()
             return nil
         }
         recording = false
+        starting = false
+        finishing = true
         recordingFence.invalidate()
         firstBufferReported = false
         activeSelection = nil
@@ -948,14 +963,24 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         guard let resources = beginTeardown(expectedGeneration: generation) else {
             return
         }
-        finish(resources)
-        callback?(reason)
+        finish(resources) {
+            callback?(reason)
+        }
     }
 
-    private func finish(_ resources: TeardownResources) {
+    private func finish(
+        _ resources: TeardownResources,
+        terminalCallback: (@Sendable () -> Void)? = nil
+    ) {
+        defer {
+            lock.lock()
+            finishing = false
+            lock.unlock()
+        }
         resources.engine?.inputNode.removeTap(onBus: 0)
         resources.engine?.stop()
         resources.onFinish?()
+        terminalCallback?()
         resources.descriptor?.close()
     }
 }
