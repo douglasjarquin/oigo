@@ -26,7 +26,9 @@ private struct OigoIssue82ContractTests {
         let scenarios: [(String, () throws -> Void)] = [
             ("harness smoke", testHarnessSmoke),
             ("registrar atomic replacement", testRegistrarAtomicReplacement),
-            ("registrar failure and generation", testRegistrarFailureAndGeneration)
+            ("registrar failure and generation", testRegistrarFailureAndGeneration),
+            ("intent rapid tap", testIntentRapidTap),
+            ("intent duplicates and processing", testIntentDuplicatesAndProcessing)
         ]
         let selected = scenarios.filter { normalizedFilter == nil || $0.0.contains(normalizedFilter ?? "") }
         guard !selected.isEmpty else {
@@ -125,6 +127,36 @@ private struct OigoIssue82ContractTests {
         backend.emit(.pressed, generation: firstGeneration)
         guard events.isEmpty else {
             throw ContractFailure(message: "stale callback from a replaced generation was delivered")
+        }
+    }
+
+    private static func testIntentRapidTap() throws {
+        var controller = GlobalShortcutIntentController()
+        guard controller.receive(.pressed, state: .idle) == .start,
+              controller.receive(.pressed, state: .preparing, isRepeat: true) == .ignoredRepeat,
+              controller.receive(.released, state: .preparing) == .releaseLatched,
+              controller.observe(.recording) == .stop,
+              controller.receive(.released, state: .finalizing) == .ignoredProcessing(.finalizing) else {
+            throw ContractFailure(message: "rapid press/release did not produce one latched stop without cancellation")
+        }
+    }
+
+    private static func testIntentDuplicatesAndProcessing() throws {
+        var controller = GlobalShortcutIntentController()
+        guard controller.receive(.pressed, state: .idle) == .start,
+              controller.receive(.pressed, state: .preparing) == .ignoredDuplicatePress,
+              controller.receive(.released, state: .preparing) == .releaseLatched,
+              controller.receive(.released, state: .preparing) == .ignoredDuplicateRelease,
+              controller.observe(.recording) == .stop else {
+            throw ContractFailure(message: "duplicate shortcut edges changed ownership or stop count")
+        }
+
+        var mouseOwnedRecording = GlobalShortcutIntentController()
+        guard mouseOwnedRecording.receive(.pressed, state: .recording) == .ignoredRecordingNotOwned,
+              mouseOwnedRecording.receive(.released, state: .recording) == .ignoredRecordingNotOwned,
+              controller.receive(.pressed, state: .cleaning) == .ignoredProcessing(.cleaning),
+              controller.receive(.released, state: .inserting) == .ignoredProcessing(.inserting) else {
+            throw ContractFailure(message: "processing or mouse-owned recording input was not ignored explicitly")
         }
     }
 
