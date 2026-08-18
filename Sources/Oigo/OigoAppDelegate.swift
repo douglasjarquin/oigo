@@ -47,6 +47,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var settings = OigoSettingsStore().load()
     private var targetSnapshot: InsertionTargetSnapshot?
     private var insertionDisplayStatus: OigoHUDProcessingState?
+    private var failureDetail: String?
     private var onboardingWindow: OnboardingWindowController?
     private var recordingStartedAt: Date?
     private var previewThrottle = OigoHUDPreviewThrottle()
@@ -537,6 +538,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                         SessionStore.defaultRootDirectory()
                     )
                 }
+                failureDetail = nil
                 insertionDisplayStatus = nil
                 try await ensureMicrophonePermission()
                 try Task.checkCancellation()
@@ -638,6 +640,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             if !coordinator.hasActiveWork {
                 insertionDisplayStatus = nil
             }
+            failureDetail = nil
             updateSurface()
             return
         } catch {
@@ -648,11 +651,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             targetSnapshot = nil
             recordingStartedAt = nil
             insertionDisplayStatus = .failed
+            failureDetail = Self.friendlyError("Dictation failed", error)
             if let session = coordinator.currentSession,
                [.failed, .interrupted].contains(session.metadata.state) {
                 lastSession = session
             }
-            historyWindow?.showMessage(Self.friendlyError("Dictation failed", error))
+            historyWindow?.showMessage(failureDetail ?? Self.friendlyError("Dictation failed", error))
             onboardingWindow?.setTestResult(
                 transcript: "",
                 mode: settings.defaultMode,
@@ -1161,7 +1165,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         } else if let insertionDisplayStatus {
             statusSurface.showProcessing(
                 insertionDisplayStatus,
-                detail: Self.hudDetail(for: insertionDisplayStatus),
+                detail: failureDetail ?? Self.hudDetail(for: insertionDisplayStatus),
                 anchoredTo: statusItem?.button
             )
         } else {
