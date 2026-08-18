@@ -27,7 +27,7 @@ The former shipped `49/0x900` value is retained only as an exact migration fixtu
 | Exact legacy default migration | PASS | `.omo/evidence/issue-82/task-4-shortcut-contract-final.log` | Only `49/0x900` migrates, including the legacy `globalToggleShortcut` key. |
 | Custom key-code-zero preservation | PASS | `.omo/evidence/issue-82/task-4-shortcut-keycode-zero-final.log` | `0/0x100` remains unchanged and validates successfully. |
 | Native recorder key-code-zero capture | PASS | `.omo/evidence/issue-82/task-5-recorder-keycode-zero-green.log` | Non-repeat Command-A emits one candidate and displays `⌘A`. |
-| Recorder repeat, unsupported modifier, modified Escape, and unmodified Escape behavior | PASS | `.omo/evidence/issue-82/task-10-recorder-escape-final.log` | Repeats and invalid modifiers are rejected, modified Escape is saved as a valid candidate, and unmodified Escape restores the candidate. |
+| Recorder repeat, unsupported modifier, modified Escape, and unmodified Escape behavior | PASS | `.omo/evidence/issue-82/task-13-recorder-escape-final.log` | Repeats and invalid modifiers are rejected, modified Escape is saved as a valid candidate, and unmodified Escape restores the candidate. |
 | Validation-only registration | PASS | `.omo/evidence/issue-82/task-7-configuration-atomic-save-green.log` | Probe leaves the active shortcut and generation unchanged. |
 | Atomic save and persistence | PASS | `.omo/evidence/issue-82/task-7-configuration-atomic-save-green.log` | Registration commits before persistence and both values converge. |
 | Failed save restoration | PASS | `.omo/evidence/issue-82/task-7-configuration-failure-restoration-green.log` | Registration and persistence remain on the prior working shortcut. |
@@ -38,11 +38,11 @@ The former shipped `49/0x900` value is retained only as an exact migration fixtu
 
 | Scenario | Result | Evidence | Exact limitation |
 | --- | --- | --- | --- |
-| Exact Release `Oigo.app` bundle build | PASS | `.omo/evidence/issue-82/task-12-xcode-release-build-final.log` | Xcode 26.6 on macOS 26.6.1 produced the exact unsigned Release bundle. |
-| macOS 26+ exact-bundle launch | PASS | `.omo/evidence/issue-82/task-12-native-launch-final.log` | The exact bundle launched with isolated defaults and was closed by the harness. |
-| Separate global key-down and key-up with another app frontmost | INCONCLUSIVE | `.omo/evidence/issue-82/task-12-native-prerequisites-final.log` | Computer Use Accessibility and Screen Recording permissions remained unavailable, so OS-level edge automation was not run. |
-| Microphone, Speech, and Input Monitoring acceptance | INCONCLUSIVE | `.omo/evidence/issue-82/task-12-native-prerequisites-final.log` | Permission-backed live capture was not attempted and no TCC or Accessibility state was changed. |
-| Focus preservation through recording and insertion | INCONCLUSIVE | `.omo/evidence/issue-82/task-12-native-prerequisites-final.log` | TextEdit was launched as a disposable frontmost target, but the exact bundle could not be driven through global edges without native permissions. |
+| Exact Release `Oigo.app` bundle build | PASS | `.omo/evidence/issue-82/task-13-xcode-release-build-final.log` | Xcode 26.6 on macOS 26.6.1 produced the exact unsigned Release bundle. |
+| macOS 26+ exact-bundle launch | PASS | `.omo/evidence/issue-82/task-13-native-launch-final.log` | The exact bundle launched with isolated defaults and was closed by the harness. |
+| Separate global key-down and key-up with another app frontmost | INCONCLUSIVE | `.omo/evidence/issue-82/task-13-native-prerequisites-final.log` | Computer Use Accessibility and Screen Recording permissions remained unavailable, so OS-level edge automation was not run. |
+| Microphone, Speech, and Input Monitoring acceptance | INCONCLUSIVE | `.omo/evidence/issue-82/task-13-native-prerequisites-final.log` | Permission-backed live capture was not attempted and no TCC or Accessibility state was changed. |
+| Focus preservation through recording and insertion | INCONCLUSIVE | `.omo/evidence/issue-82/task-13-native-prerequisites-final.log` | TextEdit was launched as a disposable frontmost target, but the exact bundle could not be driven through global edges without native permissions. |
 
 Unavailable native rows are not substituted with SwiftPM, direct callback, unsigned-binary, or frontmost-Oigo evidence.
 
