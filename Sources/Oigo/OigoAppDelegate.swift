@@ -35,6 +35,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }()
     private var sessionStore: SessionStore?
     private var lastSession: DictationSession?
+    private var pendingSessionBoundary: DictationSession?
+    private var reportedMalformedSessionCount = 0
     private var livePreview = ""
     private var settingsWindow: SettingsWindowController?
     private var historyWindow: HistoryWindowController?
@@ -160,7 +162,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             supportedLocales: supportedLocales,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
-            storageHealth: storageCapability.health,
+            storageHealth: displayedStorageHealth,
             save: { [weak self] settings in
                 self?.applySettings(settings) ?? "Oigo is no longer available."
             },
@@ -207,7 +209,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             globalShortcut: settings.globalShortcut,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
-            storageHealth: storageCapability.health,
+            storageHealth: displayedStorageHealth,
             loadSupportedLanguages: { [weak self] in
                 guard let self else { return [] }
                 guard self.storageCapability.health.isReady else { return [] }
@@ -592,12 +594,15 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             switch coordinator.state {
             case .idle, .complete, .failed, .cancelled, .interrupted:
                 guard storageCapability.health.isReady,
-                      let sessionStore else {
+                      let store = sessionStore else {
                     throw DurableSessionAccessError.storageUnavailable(
                         storageCapability.health.failureCategory
                     )
                 }
                 insertionDisplayStatus = nil
+                let persistedSession = try store.createSession()
+                pendingSessionBoundary = persistedSession
+                lastSession = persistedSession
                 try await ensureMicrophonePermission()
                 try Task.checkCancellation()
                 targetSnapshot = insertion.captureTarget()
@@ -606,9 +611,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 let service = transcriptionService()
                 recordingStartedAt = Date()
                 previewThrottle = OigoHUDPreviewThrottle()
-                lastSession = try await coordinator.startRecordingWithTranscription(
+                lastSession = try await coordinator.startPersistedRecordingWithTranscription(
+                    persistedSession,
                     using: recorder,
-                    store: sessionStore,
+                    store: store,
                     transcription: service,
                     format: format,
                     onUpdate: { [weak self] update in
@@ -617,6 +623,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                         }
                     }
                 )
+                pendingSessionBoundary = nil
             case .recording:
                 guard storageCapability.health.isReady else {
                     throw DurableSessionAccessError.storageUnavailable(
@@ -703,6 +710,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             updateSurface()
         } catch is CancellationError {
             await coordinator.cancelActiveWork()
+            settlePendingSessionBoundary(
+                reason: "dictation operation cancelled",
+                cancelled: true
+            )
             lastSession = coordinator.currentSession ?? lastSession
             recordingStartedAt = nil
             targetSnapshot = nil
@@ -716,6 +727,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             if coordinator.hasActiveWork {
                 await coordinator.cancelActiveWork(reason: String(describing: error))
             }
+            settlePendingSessionBoundary(
+                reason: String(describing: error),
+                cancelled: false
+            )
             markStorageUnhealthyIfNeeded(error)
             lastSession = coordinator.currentSession ?? lastSession
             targetSnapshot = nil
@@ -1179,8 +1194,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         do {
             let report = try store.listHistoryReport()
+            reportedMalformedSessionCount = report.malformedSessionCount
             lastSession = report.entries.first?.session
             historyWindow?.reload(entries: report.entries)
+            settingsWindow?.setStorageHealth(displayedStorageHealth)
+            onboardingWindow?.setStorageHealth(displayedStorageHealth)
         } catch {
             markStorageUnhealthyIfNeeded(error)
             historyWindow?.showMessage(
@@ -1263,7 +1281,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         instantModeItem?.state = settings.defaultMode == .instant ? .on : .off
         cleanModeItem?.state = settings.defaultMode == .clean ? .on : .off
         modeMenuItem?.isEnabled = setupComplete && storageReady && !isRecording
-        storageStatusItem?.title = storageCapability.health.statusMessage
+        storageStatusItem?.title = displayedStorageHealth.statusMessage
         retryStorageItem?.isEnabled = !storageReady && storageCapability.health != .checking
         launchAtLoginItem?.state = launchAtLoginController.isEnabled ? .on : .off
         statusItem?.button?.title = "Oigo"
@@ -1335,9 +1353,33 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         updateSurface()
     }
 
+    private func settlePendingSessionBoundary(reason: String, cancelled: Bool) {
+        guard let pendingSessionBoundary else {
+            return
+        }
+        self.pendingSessionBoundary = nil
+        guard coordinator.currentSession?.id != pendingSessionBoundary.id,
+              let store = sessionStore else {
+            return
+        }
+        let state: DictationSessionState = cancelled ? .cancelled : .failed
+        let failureCode = cancelled
+            ? DictationFailureCode.cancelled
+            : DictationFailureCode.infer(from: reason)
+        lastSession = (try? store.update(
+            pendingSessionBoundary,
+            state: state,
+            failureReason: reason,
+            failureCode: failureCode
+        )) ?? pendingSessionBoundary
+    }
+
     private func storageCapabilityDidChange() {
         sessionStore = storageCapability.store
         if storageCapability.health.isReady {
+            if case .ready(let report) = storageCapability.health {
+                reportedMalformedSessionCount = report.malformedSessionCount
+            }
             lastSession = storageCapability.history.first?.session
             historyWindow?.reload(entries: storageCapability.history)
             if onboardingStore.load().isComplete {
@@ -1345,11 +1387,25 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
         } else {
             unregisterShortcut()
-            historyWindow?.showMessage(storageCapability.health.statusMessage)
+            reportedMalformedSessionCount = 0
+            historyWindow?.showMessage(displayedStorageHealth.statusMessage)
         }
-        settingsWindow?.setStorageHealth(storageCapability.health)
-        onboardingWindow?.setStorageHealth(storageCapability.health)
+        settingsWindow?.setStorageHealth(displayedStorageHealth)
+        onboardingWindow?.setStorageHealth(displayedStorageHealth)
         updateSurface()
+    }
+
+    private var displayedStorageHealth: DurableSessionHealth {
+        guard case .ready(let report) = storageCapability.health else {
+            return storageCapability.health
+        }
+        return .ready(
+            DurableSessionBootstrapReport(
+                recoveredSessionCount: report.recoveredSessionCount,
+                historyEntryCount: report.historyEntryCount,
+                malformedSessionCount: reportedMalformedSessionCount
+            )
+        )
     }
 
     private func markStorageUnhealthyIfNeeded(_ error: Error) {

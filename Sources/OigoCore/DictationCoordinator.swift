@@ -435,6 +435,46 @@ public final class DictationCoordinator {
         now: Date = Date(),
         onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in }
     ) async throws -> DictationSession {
+        try await startRecordingWithTranscriptionInternal(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: format,
+            session: nil,
+            now: now,
+            onUpdate: onUpdate
+        )
+    }
+
+    public func startPersistedRecordingWithTranscription(
+        _ session: DictationSession,
+        using capture: AudioCapturing,
+        store: SessionStore,
+        transcription: TranscriptionController,
+        format: AudioCaptureFormat,
+        now: Date = Date(),
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in }
+    ) async throws -> DictationSession {
+        try await startRecordingWithTranscriptionInternal(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: format,
+            session: session,
+            now: now,
+            onUpdate: onUpdate
+        )
+    }
+
+    private func startRecordingWithTranscriptionInternal(
+        using capture: AudioCapturing,
+        store: SessionStore,
+        transcription: TranscriptionController,
+        format: AudioCaptureFormat,
+        session: DictationSession?,
+        now: Date,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+    ) async throws -> DictationSession {
         guard activeCapture == nil else {
             throw DictationCoordinatorError.workAlreadyActive
         }
@@ -442,9 +482,14 @@ public final class DictationCoordinator {
             throw DictationTransitionError.illegal(from: state, event: .start)
         }
 
-        let session = try store.createSession(now: now)
+        let persistedSession: DictationSession
+        if let session {
+            persistedSession = session
+        } else {
+            persistedSession = try store.createSession(now: now)
+        }
         diagnostics.mark(.sessionPersisted)
-        var preparedSession = session
+        var preparedSession = persistedSession
         let operationID = UUID()
         do {
             pendingTranscriptionTerminalState = nil
@@ -453,11 +498,11 @@ public final class DictationCoordinator {
             activeTranscription = transcription
             activeOperationID = operationID
             sessionStore = store
-            currentSession = session
+            currentSession = persistedSession
 
             try await withTaskCancellationHandler(operation: {
                 try await transcription.start(
-                    session: session,
+                    session: persistedSession,
                     format: format,
                     store: store,
                     onUpdate: { [weak self] update in
@@ -476,7 +521,7 @@ public final class DictationCoordinator {
             })
             try Task.checkCancellation()
             preparedSession = try store.update(
-                session,
+                persistedSession,
                 state: .recording,
                 at: now
             )

@@ -10,6 +10,7 @@ struct OigoIssue86ContractTests {
             try await storageGateDoesNotReachDictationDependenciesWhenUnhealthy()
             try await healthyStorageExposesThePersistedStore()
             try await failureMatrixExposesStableCategories()
+            try rootPathSwapIsRejectedWithoutTouchingThePinnedRoot()
             try malformedChildrenDoNotPoisonValidHistory()
             try await retryCoalescesAndFencesStaleCompletions()
             try await shutdownCancelsBootstrapBeforeRecoveryContinues()
@@ -275,6 +276,50 @@ struct OigoIssue86ContractTests {
         }
         guard try store.load(id: completed.id).metadata.state == .completed else {
             throw ContractFailure.validSessionWasChanged
+        }
+    }
+
+    private static func rootPathSwapIsRejectedWithoutTouchingThePinnedRoot() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("oigo-issue86-root-swap-" + UUID().uuidString, isDirectory: true)
+        let movedRoot = root.deletingLastPathComponent()
+            .appendingPathComponent(root.lastPathComponent + "-moved", isDirectory: true)
+        let alternateRoot = root.deletingLastPathComponent()
+            .appendingPathComponent(root.lastPathComponent + "-alternate", isDirectory: true)
+        defer {
+            try? fileManager.removeItem(at: root)
+            try? fileManager.removeItem(at: movedRoot)
+            try? fileManager.removeItem(at: alternateRoot)
+        }
+
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: false)
+        try fileManager.createDirectory(at: alternateRoot, withIntermediateDirectories: false)
+        let store = try SessionStore(rootDirectory: root)
+        try fileManager.moveItem(at: root, to: movedRoot)
+        try fileManager.createSymbolicLink(at: root, withDestinationURL: alternateRoot)
+
+        do {
+            _ = try store.createSession()
+            throw ContractFailure.rootSwapWasNotRejected
+        } catch let failure as DurableSessionBootstrapFailure {
+            guard failure.category == .rootIdentityViolation, failure.isFatal else {
+                throw ContractFailure.unexpectedStorageError(String(describing: failure))
+            }
+        }
+        guard try fileManager.contentsOfDirectory(
+            at: movedRoot,
+            includingPropertiesForKeys: nil,
+            options: []
+        ).isEmpty else {
+            throw ContractFailure.rootSwapTouchedPinnedRoot
+        }
+        guard try fileManager.contentsOfDirectory(
+            at: alternateRoot,
+            includingPropertiesForKeys: nil,
+            options: []
+        ).isEmpty else {
+            throw ContractFailure.rootSwapTouchedAlternateRoot
         }
     }
 
@@ -620,6 +665,9 @@ private enum ContractFailure: Error, CustomStringConvertible {
     case rootIdentityWasNotFatal
     case directStoreAcceptedInvalidRoot
     case rootRecoveryModifiedTarget
+    case rootSwapWasNotRejected
+    case rootSwapTouchedPinnedRoot
+    case rootSwapTouchedAlternateRoot
     case historyFailureWasNotClassified
     case malformedChildIsolationFailed
     case malformedCountWasNotReported
@@ -662,6 +710,12 @@ private enum ContractFailure: Error, CustomStringConvertible {
             "direct SessionStore construction accepted an invalid root"
         case .rootRecoveryModifiedTarget:
             "root identity recovery modified a symlink target"
+        case .rootSwapWasNotRejected:
+            "a root path swap was not rejected"
+        case .rootSwapTouchedPinnedRoot:
+            "a rejected root path swap touched the pinned root"
+        case .rootSwapTouchedAlternateRoot:
+            "a rejected root path swap touched the alternate root"
         case .historyFailureWasNotClassified:
             "history metadata failure was not classified as a metadata or recovery failure"
         case .malformedChildIsolationFailed:
