@@ -120,7 +120,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         description.textColor = .secondaryLabelColor
 
         let shortcutTitle = NSTextField(labelWithString: "Global shortcut")
-        let shortcutHelp = NSTextField(wrappingLabelWithString: "Click the recorder and press a shortcut. The default is Shift-Command-Space. Validation never displaces the current working registration.")
+        let shortcutHelp = NSTextField(
+            wrappingLabelWithString: "Click the recorder and press a shortcut. The default is \(ToggleShortcut.default.displayName). Validation never displaces the current working registration."
+        )
         shortcutHelp.textColor = .secondaryLabelColor
         let modeLabel = NSTextField(labelWithString: "Default mode")
         let localeLabel = NSTextField(labelWithString: "Dictation language")

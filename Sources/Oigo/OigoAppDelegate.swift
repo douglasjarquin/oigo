@@ -435,7 +435,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             shortcutBridge.reset()
         } catch {
-            NSLog("Oigo could not register the global toggle shortcut: %@", String(describing: error))
+            NSLog("Oigo could not register the global shortcut: %@", String(describing: error))
             shortcutBridge.reset()
             updateSurface()
         }
@@ -1326,9 +1326,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.button?.title = "Oigo"
         switch shortcutRegistrar.status {
         case .active(let shortcut, _):
-            shortcutStatusItem?.title = "Global Shortcut: " + shortcut.displayName
-            statusItem?.button?.toolTip = shortcutFeedbackDetail
-                ?? "Global shortcut active: " + shortcut.displayName
+            if let error = shortcutRegistrar.lastError {
+                shortcutStatusItem?.title = "Global Shortcut Active - Open Settings…"
+                statusItem?.button?.toolTip = "Global shortcut active: \(shortcut.displayName). Last registration error: \(error)"
+            } else {
+                shortcutStatusItem?.title = "Global Shortcut: " + shortcut.displayName
+                statusItem?.button?.toolTip = shortcutFeedbackDetail
+                    ?? "Global shortcut active: " + shortcut.displayName
+            }
         case .inactive(let message):
             let error = shortcutRegistrar.lastError ?? message
             shortcutStatusItem?.title = "Global Shortcut Inactive - Open Settings…"
