@@ -154,19 +154,32 @@ public protocol DurableSessionBootstrapping: Sendable {
     func bootstrap() async throws -> DurableSessionBootstrapResult
 }
 
-private final class DurableSessionAttemptWaiter: @unchecked Sendable {
+private final class DurableSessionAttemptCompletion: @unchecked Sendable {
     private let lock = NSLock()
-    private var didResume = false
+    private var didSignal = false
+    private var continuation: AsyncStream<Void>.Continuation?
+    let stream: AsyncStream<Void>
 
-    func resume(_ continuation: CheckedContinuation<Void, Never>) {
+    init() {
+        var streamContinuation: AsyncStream<Void>.Continuation?
+        stream = AsyncStream { continuation in
+            streamContinuation = continuation
+        }
+        continuation = streamContinuation
+    }
+
+    func signal() {
         lock.lock()
-        guard !didResume else {
+        guard !didSignal else {
             lock.unlock()
             return
         }
-        didResume = true
+        didSignal = true
+        let continuation = continuation
+        self.continuation = nil
         lock.unlock()
-        continuation.resume()
+        continuation?.yield(())
+        continuation?.finish()
     }
 }
 
@@ -481,7 +494,8 @@ public final class DurableSessionCapability {
 
     private let bootstrapper: any DurableSessionBootstrapping
     private var currentAttempt: Task<Void, Never>?
-    private var pendingShutdownAttempts: [Task<Void, Never>] = []
+    private var currentAttemptCompletion: DurableSessionAttemptCompletion?
+    private var pendingShutdownCompletions: [DurableSessionAttemptCompletion] = []
     private var generation: UInt64 = 0
     private var lastFailureDiagnosticsExport: String?
 
@@ -503,9 +517,12 @@ public final class DurableSessionCapability {
         generation &+= 1
         if let currentAttempt {
             currentAttempt.cancel()
-            pendingShutdownAttempts.append(currentAttempt)
+            if let currentAttemptCompletion {
+                pendingShutdownCompletions.append(currentAttemptCompletion)
+            }
         }
         currentAttempt = nil
+        currentAttemptCompletion = nil
     }
 
     public func markUnhealthy(
@@ -524,29 +541,44 @@ public final class DurableSessionCapability {
 
     public func waitForCurrentAttempt() async {
         let task = currentAttempt
-        let pendingAttempts = task == nil ? pendingShutdownAttempts : []
+        let completion = currentAttemptCompletion
+        let pendingCompletions = task == nil ? pendingShutdownCompletions : []
         if task == nil {
-            pendingShutdownAttempts.removeAll(keepingCapacity: false)
+            pendingShutdownCompletions.removeAll(keepingCapacity: false)
         }
-        if let task {
-            await waitForAttempt(task)
+        let deadline = DispatchTime.now().uptimeNanoseconds
+            &+ Self.shutdownWaitNanoseconds
+        if let completion {
+            await waitForAttempt(completion, until: deadline)
         }
-        for attempt in pendingAttempts {
-            await waitForAttempt(attempt)
+        for completion in pendingCompletions {
+            guard DispatchTime.now().uptimeNanoseconds < deadline else {
+                break
+            }
+            await waitForAttempt(completion, until: deadline)
         }
     }
 
-    private func waitForAttempt(_ attempt: Task<Void, Never>) async {
-        let waiter = DurableSessionAttemptWaiter()
-        await withCheckedContinuation { continuation in
-            Task.detached {
-                await attempt.value
-                waiter.resume(continuation)
+    private func waitForAttempt(
+        _ completion: DurableSessionAttemptCompletion,
+        until deadline: UInt64
+    ) async {
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now < deadline else {
+            return
+        }
+        let remaining = deadline - now
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for await _ in completion.stream {
+                    break
+                }
             }
-            Task.detached {
-                try? await Task.sleep(nanoseconds: Self.shutdownWaitNanoseconds)
-                waiter.resume(continuation)
+            group.addTask {
+                try? await Task.sleep(nanoseconds: remaining)
             }
+            _ = await group.next()
+            group.cancelAll()
         }
     }
 
@@ -569,6 +601,7 @@ public final class DurableSessionCapability {
         }
         generation &+= 1
         let attempt = generation
+        let completion = DurableSessionAttemptCompletion()
         health = .checking
         store = nil
         history = []
@@ -576,7 +609,9 @@ public final class DurableSessionCapability {
         onChange?()
 
         let bootstrapper = self.bootstrapper
+        currentAttemptCompletion = completion
         currentAttempt = Task { [weak self] in
+            defer { completion.signal() }
             do {
                 let result = try await bootstrapper.bootstrap()
                 guard !Task.isCancelled else {
@@ -635,5 +670,6 @@ public final class DurableSessionCapability {
             return
         }
         currentAttempt = nil
+        currentAttemptCompletion = nil
     }
 }

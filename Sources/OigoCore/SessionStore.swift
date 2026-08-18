@@ -2183,12 +2183,6 @@ public final class SessionStore: @unchecked Sendable {
 
     private func verifyWriteCapability() throws {
         try ensureRootPathIdentity()
-        if faultInjector?.consume(.diskWriteFailure) == true {
-            throw DurableSessionBootstrapFailure(
-                category: .insufficientSpaceOrWriteFailure,
-                isFatal: false
-            )
-        }
 
         let probeDirectoryName = ".storage-health-" + UUID().uuidString
         let probeURL = rootDirectory.appendingPathComponent(
@@ -2222,6 +2216,12 @@ public final class SessionStore: @unchecked Sendable {
         }
         guard probeFD >= 0 else {
             throw storageFailure(for: errno)
+        }
+        if faultInjector?.consume(.diskWriteFailure) == true {
+            throw DurableSessionBootstrapFailure(
+                category: .insufficientSpaceOrWriteFailure,
+                isFatal: false
+            )
         }
 
         try atomicWrite(

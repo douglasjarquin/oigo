@@ -525,9 +525,11 @@ struct OigoIssue86ContractTests {
         let capability = DurableSessionCapability(
             bootstrapper: NeverEndingBootstrapper()
         )
-        capability.start()
         let startedAt = Date()
-        capability.shutdown()
+        for _ in 0..<3 {
+            capability.start()
+            capability.shutdown()
+        }
         await capability.waitForCurrentAttempt()
         guard Date().timeIntervalSince(startedAt) < 2.5 else {
             throw ContractFailure.shutdownWaitWasNotBounded
