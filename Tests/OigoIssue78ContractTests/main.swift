@@ -28,6 +28,7 @@ private struct OigoIssue78ContractTests {
             ("coordinator shutdown preserves completed retry", testCoordinatorShutdownPreservesCompletedRetry),
             ("interruption timeout preserves terminal outcome", testInterruptionTimeoutPreservesTerminalOutcome),
             ("shutdown timeout replies with stable outcome", testShutdownTimeoutRepliesWithStableOutcome),
+            ("shutdown classifies typed timeout without detail", testShutdownClassifiesTypedTimeout),
             ("one hundred lifecycle cycles release resources", testOneHundredLifecycleCyclesReleaseResources),
             ("one hundred adversarial lifecycle cycles release resources", testOneHundredAdversarialLifecycleCyclesReleaseResources)
         ]
@@ -607,6 +608,31 @@ private struct OigoIssue78ContractTests {
         _ = await shutdownTask.value
         guard try await waitForResourcesToRelease(coordinator) else {
             throw ContractFailure(message: "shutdown loser remained owned after release")
+        }
+    }
+
+    @MainActor
+    private static func testShutdownClassifiesTypedTimeout() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue78-typed-shutdown-timeout-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let coordinator = DictationCoordinator(timeoutPolicy: .testing)
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: ContractAudioCapture(),
+            store: store,
+            transcription: TypedTimeoutCancellationController(),
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+
+        await coordinator.shutdownWithTranscription()
+
+        guard coordinator.currentSession?.metadata.state == .failed,
+              coordinator.currentSession?.metadata.failureCode == .transcriptionTimedOut,
+              coordinator.currentSession?.metadata.failureReason == "application shutdown speech timeout",
+              try await waitForResourcesToRelease(coordinator) else {
+            throw ContractFailure(message: "typed shutdown timeout lost its stable classification or retained private detail")
         }
     }
 
@@ -1482,6 +1508,47 @@ private final class NonCooperativeCancellationController: TranscriptionControlle
         lock.lock()
         defer { lock.unlock() }
         return body()
+    }
+}
+
+@available(macOS 26.0, *)
+private struct PrivateShutdownTimeoutError: Error, TranscriptionTimeoutEvidence, Sendable {
+    let stage: TranscriptionStage = .shutdown
+}
+
+@available(macOS 26.0, *)
+private final class TypedTimeoutCancellationController: TranscriptionController, @unchecked Sendable {
+    func start(
+        session: DictationSession,
+        format: AudioCaptureFormat,
+        store: SessionStore,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+    ) async throws {
+        _ = session
+        _ = format
+        _ = store
+        _ = onUpdate
+    }
+
+    func append(_ buffer: AudioCaptureBuffer) {
+        _ = buffer
+    }
+
+    func finish() async throws -> TranscriptionResult {
+        TranscriptionResult(finalizedText: "", rawTextByteCount: 0)
+    }
+
+    func cancel() async throws -> TranscriptionResult? {
+        throw PrivateShutdownTimeoutError()
+    }
+
+    func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult {
+        _ = session
+        _ = store
+        throw TranscriptionError.analysisFailed("typed timeout fixture does not retry")
     }
 }
 

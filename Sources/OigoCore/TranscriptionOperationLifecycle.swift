@@ -75,7 +75,11 @@ public struct TranscriptionTimeoutPolicy: Equatable, Sendable {
     }
 }
 
-public enum BoundedOperationError: Error, Equatable, Sendable, CustomStringConvertible {
+public protocol TranscriptionTimeoutEvidence: Error, Sendable {
+    var stage: TranscriptionStage { get }
+}
+
+public enum BoundedOperationError: Error, Equatable, Sendable, CustomStringConvertible, TranscriptionTimeoutEvidence {
     case timedOut(TranscriptionStage)
 
     public var stage: TranscriptionStage {

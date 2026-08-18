@@ -1173,7 +1173,7 @@ public final class DictationCoordinator {
             }
         } catch {
             let failureReason = Self.failureReason(for: error)
-            let timedOut = error is BoundedOperationError
+            let timedOut = error is any TranscriptionTimeoutEvidence
                 || DictationFailureCode.infer(from: failureReason) == .transcriptionTimedOut
             let terminalState = timedOut ? state : .failed
             let terminalEvent = timedOut ? event : .fail
@@ -1376,7 +1376,7 @@ public final class DictationCoordinator {
     }
 
     private static func failureReason(for error: Error) -> String {
-        if let timeout = error as? BoundedOperationError {
+        if let timeout = error as? any TranscriptionTimeoutEvidence {
             switch timeout.stage {
             case .startup:
                 return "transcription startup timed out"
@@ -1796,8 +1796,7 @@ public final class DictationCoordinator {
                 result = nil
                 terminalState = .failed
                 terminalEvent = .fail
-                if error is BoundedOperationError
-                    || DictationFailureCode.infer(from: String(describing: error)) == .transcriptionTimedOut {
+                if error is any TranscriptionTimeoutEvidence {
                     terminalReason = "application shutdown speech timeout"
                     terminalFailureCode = .transcriptionTimedOut
                 } else {
