@@ -56,6 +56,8 @@
         A00000010000000000000035 /* GlobalShortcutRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000029 /* GlobalShortcutRegistration.swift */; };
         A00000010000000000000036 /* GlobalShortcutIntentController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000030 /* GlobalShortcutIntentController.swift */; };
         A00000010000000000000037 /* ShortcutPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000031 /* ShortcutPresentation.swift */; };
+        A00000010000000000000038 /* ShortcutFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000032 /* ShortcutFormatter.swift */; };
+        A00000010000000000000039 /* ShortcutRecorderControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000033 /* ShortcutRecorderControl.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -161,6 +163,8 @@
         B00000010000000000000029 /* GlobalShortcutRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutRegistration.swift; sourceTree = "<group>"; };
         B00000010000000000000030 /* GlobalShortcutIntentController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutIntentController.swift; sourceTree = "<group>"; };
         B00000010000000000000031 /* ShortcutPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutPresentation.swift; sourceTree = "<group>"; };
+        B00000010000000000000032 /* ShortcutFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutFormatter.swift; sourceTree = "<group>"; };
+        B00000010000000000000033 /* ShortcutRecorderControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorderControl.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -269,6 +273,8 @@
             children = (
                 B00000010000000000000004 /* GlobalHotKeyRegistrar.swift */,
                 B00000010000000000000029 /* GlobalShortcutRegistration.swift */,
+                B00000010000000000000032 /* ShortcutFormatter.swift */,
+                B00000010000000000000033 /* ShortcutRecorderControl.swift */,
             );
             path = Sources/OigoHotKey;
             sourceTree = "<group>";
@@ -540,6 +546,8 @@
             files = (
                 A00000010000000000000004 /* GlobalHotKeyRegistrar.swift in Sources */,
                 A00000010000000000000035 /* GlobalShortcutRegistration.swift in Sources */,
+                A00000010000000000000038 /* ShortcutFormatter.swift in Sources */,
+                A00000010000000000000039 /* ShortcutRecorderControl.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import AppKit
 import OigoCore
 import OigoHotKey
 
@@ -31,7 +32,9 @@ private struct OigoIssue82ContractTests {
             ("intent rapid tap", testIntentRapidTap),
             ("intent duplicates and processing", testIntentDuplicatesAndProcessing),
             ("shortcut contract default and migration", testShortcutContractDefaultAndMigration),
-            ("shortcut keycode zero", testShortcutKeyCodeZero)
+            ("shortcut keycode zero", testShortcutKeyCodeZero),
+            ("recorder keycode zero", testRecorderKeyCodeZero),
+            ("recorder rejection", testRecorderRejection)
         ]
         let selected = scenarios.filter { normalizedFilter == nil || $0.0.contains(normalizedFilter ?? "") }
         guard !selected.isEmpty else {
@@ -233,6 +236,138 @@ private struct OigoIssue82ContractTests {
         ).isAvailable else {
             throw ContractFailure(message: "modifier-free shortcut was accepted")
         }
+    }
+
+    private static func testRecorderKeyCodeZero() throws {
+        let original = ToggleShortcut.default
+        let recorder = ShortcutRecorderControl(shortcut: original)
+        var candidates: [ToggleShortcut] = []
+        recorder.onCandidateChange = { candidates.append($0) }
+
+        recorder.keyDown(with: try keyEvent(
+            keyCode: 0,
+            modifiers: [.command],
+            characters: "a",
+            isARepeat: false
+        ))
+        guard candidates.isEmpty, recorder.shortcut == original else {
+            throw ContractFailure(message: "recorder accepted a key while it was not active")
+        }
+
+        recorder.beginRecording()
+        recorder.keyDown(with: try keyEvent(
+            keyCode: 0,
+            modifiers: [.command],
+            characters: "a",
+            isARepeat: true
+        ))
+        guard candidates.isEmpty, recorder.isRecording else {
+            throw ContractFailure(message: "recorder accepted a repeated key event")
+        }
+
+        recorder.keyDown(with: try keyEvent(
+            keyCode: 0,
+            modifiers: [.command],
+            characters: "a",
+            isARepeat: false
+        ))
+        guard candidates == [ToggleShortcut(keyCode: 0, modifiers: ToggleShortcutModifiers.command)],
+              recorder.shortcut == candidates[0],
+              recorder.displayValue == "⌘A",
+              !recorder.isRecording else {
+            throw ContractFailure(message: "recorder did not accept and display key code zero")
+        }
+    }
+
+    private static func testRecorderRejection() throws {
+        let original = ToggleShortcut.default
+        let recorder = ShortcutRecorderControl(shortcut: original)
+        var errors: [String] = []
+        recorder.onValidationError = { errors.append($0) }
+
+        recorder.beginRecording()
+        recorder.keyDown(with: try keyEvent(
+            keyCode: 0,
+            modifiers: [],
+            characters: "a",
+            isARepeat: false
+        ))
+        guard recorder.shortcut == original,
+              recorder.isRecording,
+              errors.last?.contains("modifier") == true else {
+            throw ContractFailure(message: "recorder did not reject a modifier-free shortcut")
+        }
+
+        recorder.beginRecording()
+        recorder.keyDown(with: try keyEvent(
+            keyCode: 12,
+            modifiers: [.capsLock],
+            characters: "q",
+            isARepeat: false
+        ))
+        guard recorder.shortcut == original,
+              recorder.isRecording,
+              errors.last?.contains("supported") == true else {
+            throw ContractFailure(message: "recorder did not reject an unsupported modifier")
+        }
+
+        guard ShortcutFormatter.displayName(
+            for: ToggleShortcut(keyCode: 36, modifiers: ToggleShortcutModifiers.command)
+        ) == "⌘Return" else {
+            throw ContractFailure(message: "special key was not formatted readably")
+        }
+
+        recorder.keyDown(with: try keyEvent(
+            keyCode: 12,
+            modifiers: [.command],
+            characters: "q",
+            isARepeat: false
+        ))
+        let accepted = recorder.shortcut
+        guard accepted == ToggleShortcut(keyCode: 12, modifiers: ToggleShortcutModifiers.command) else {
+            throw ContractFailure(message: "recorder did not retain the accepted candidate")
+        }
+
+        recorder.beginRecording()
+        recorder.keyDown(with: try keyEvent(
+            keyCode: 13,
+            modifiers: [.command],
+            characters: "w",
+            isARepeat: false
+        ))
+        recorder.beginRecording()
+        recorder.keyDown(with: try keyEvent(
+            keyCode: 53,
+            modifiers: [],
+            characters: "\u{1b}",
+            isARepeat: false
+        ))
+        guard recorder.shortcut == ToggleShortcut(keyCode: 13, modifiers: ToggleShortcutModifiers.command) else {
+            throw ContractFailure(message: "Escape did not restore the original recorder candidate")
+        }
+    }
+
+    private static func keyEvent(
+        keyCode: UInt16,
+        modifiers: NSEvent.ModifierFlags,
+        characters: String,
+        isARepeat: Bool
+    ) throws -> NSEvent {
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: isARepeat,
+            keyCode: keyCode
+        ) else {
+            throw ContractFailure(message: "could not construct deterministic key event")
+        }
+        return event
     }
 
     private static func activeGeneration(of registrar: CarbonGlobalShortcutRegistrar) throws -> UInt64 {

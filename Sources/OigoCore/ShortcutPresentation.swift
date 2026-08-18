@@ -1,11 +1,3 @@
-public enum ToggleShortcutModifiers {
-    public static let command: UInt32 = 0x100
-    public static let shift: UInt32 = 0x200
-    public static let option: UInt32 = 0x800
-    public static let control: UInt32 = 0x1000
-    public static let supportedMask: UInt32 = command | shift | option | control
-}
-
 public enum OigoShortcutPresentation {
     public static func displayName(for shortcut: ToggleShortcut) -> String {
         var components: [String] = []

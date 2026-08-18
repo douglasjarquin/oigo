@@ -414,16 +414,24 @@ public enum OigoShortcutValidation: Equatable, Sendable {
     }
 }
 
+public enum ToggleShortcutModifiers {
+    public static let command: UInt32 = 0x100
+    public static let shift: UInt32 = 0x200
+    public static let option: UInt32 = 0x800
+    public static let control: UInt32 = 0x1000
+    public static let supportedMask: UInt32 = command | shift | option | control
+}
+
 public enum OigoShortcutValidator {
     public static func validate(
         _ shortcut: ToggleShortcut,
         occupied: [ToggleShortcut]
     ) -> OigoShortcutValidation {
         guard shortcut.modifiers & ToggleShortcutModifiers.supportedMask != 0 else {
-            return .invalid("Choose Command, Shift, Option, or Control for the global shortcut")
+            return .invalid("Choose at least one supported modifier for the global shortcut")
         }
         guard shortcut.modifiers & ~ToggleShortcutModifiers.supportedMask == 0 else {
-            return .invalid("Choose only Command, Shift, Option, or Control for the global shortcut")
+            return .invalid("Choose only supported modifiers for the global shortcut")
         }
         guard !occupied.contains(shortcut) else {
             return .conflict("That shortcut is already registered by another application")
