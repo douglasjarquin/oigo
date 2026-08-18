@@ -839,9 +839,20 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         lock.unlock()
 
         if let failure, let failureDescription {
-            cancel()
+            guard let resources = beginTeardown(expectedGeneration: generation) else {
+                return
+            }
+            finish(resources)
             failure(failureDescription)
         } else if let callback, let forwardedBuffer {
+            lock.lock()
+            let isCurrentOperation = recording
+                && recordingFence.accepts(generation)
+                && !failureReported
+            lock.unlock()
+            guard isCurrentOperation else {
+                return
+            }
             if markFirstBuffer {
                 instrumentation.mark(.firstAudioBuffer)
             }
@@ -878,8 +889,13 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     }
 
     private func beginTeardown() -> TeardownResources? {
+        beginTeardown(expectedGeneration: nil)
+    }
+
+    private func beginTeardown(expectedGeneration: UInt64?) -> TeardownResources? {
         lock.lock()
-        guard recording else {
+        guard recording,
+              expectedGeneration.map(recordingFence.accepts) ?? true else {
             lock.unlock()
             return nil
         }
@@ -919,21 +935,20 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
     private func handleInterruption(_ reason: String, generation: UInt64? = nil) {
         lock.lock()
-        if let generation, !recordingFence.accepts(generation) {
+        guard recording,
+              !failureReported,
+              generation.map(recordingFence.accepts) ?? true else {
             lock.unlock()
             return
         }
         let callback = onInterruption
-        let shouldNotify = recording && !failureReported
-        if shouldNotify {
-            failureReported = true
-        }
+        failureReported = true
         lock.unlock()
 
-        guard shouldNotify else {
+        guard let resources = beginTeardown(expectedGeneration: generation) else {
             return
         }
-        cancel()
+        finish(resources)
         callback?(reason)
     }
 
