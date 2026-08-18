@@ -173,6 +173,7 @@ public final class OigoSettingsStore {
 
     public func save(_ settings: OigoSettings) throws {
         let data: Data
+        let previousData = defaults.data(forKey: Self.key)
         do {
             data = try JSONEncoder().encode(settings)
         } catch {
@@ -181,9 +182,34 @@ public final class OigoSettingsStore {
         do {
             try writeData(data)
         } catch let error as OigoSettingsStoreError {
+            do {
+                try restore(previousData)
+            } catch let restoreError {
+                throw OigoSettingsStoreError.writeFailed(
+                    "\(error.localizedDescription); settings rollback failed: \(restoreError.localizedDescription)"
+                )
+            }
             throw error
         } catch {
+            do {
+                try restore(previousData)
+            } catch let restoreError {
+                throw OigoSettingsStoreError.writeFailed(
+                    "\(error); settings rollback failed: \(restoreError.localizedDescription)"
+                )
+            }
             throw OigoSettingsStoreError.writeFailed(String(describing: error))
+        }
+    }
+
+    private func restore(_ data: Data?) throws {
+        if let data {
+            defaults.set(data, forKey: Self.key)
+        } else {
+            defaults.removeObject(forKey: Self.key)
+        }
+        guard defaults.data(forKey: Self.key) == data else {
+            throw OigoSettingsStoreError.writeRejected
         }
     }
 }

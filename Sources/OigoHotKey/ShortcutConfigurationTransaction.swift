@@ -10,6 +10,7 @@ public protocol GlobalShortcutRegistrationClient: AnyObject {
         onEvent: @escaping @MainActor (GlobalShortcutEvent) -> Void
     ) throws
     func probe(shortcut: ToggleShortcut) throws
+    func unregister()
 }
 
 @MainActor
@@ -85,15 +86,22 @@ public final class ShortcutConfigurationTransaction {
             try persist(candidate)
         } catch {
             var failure = "Shortcut save failed: \(error)"
+            var compensationFailed = false
             do {
                 try restore()
             } catch let restorePersistenceError {
+                compensationFailed = true
                 failure += ". Previous settings could not be restored: \(restorePersistenceError)"
             }
             do {
                 try registrar.register(shortcut: previous, onEvent: onEvent)
             } catch let restoreError {
+                compensationFailed = true
                 failure += ". Previous registration could not be restored: \(restoreError)"
+            }
+            if compensationFailed {
+                registrar.unregister()
+                failure += ". Shortcut registration was disabled until the prior settings can be restored"
             }
             let validation = OigoShortcutValidation.conflict(failure)
             configurationError = Self.message(for: validation)

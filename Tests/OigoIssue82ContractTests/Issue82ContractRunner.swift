@@ -48,7 +48,8 @@ private struct OigoIssue82ContractTests {
             ("app bridge processing feedback", testAppBridgeProcessingFeedback),
             ("configuration atomic save", testConfigurationAtomicSave),
             ("configuration failure restoration", testConfigurationFailureRestoration),
-            ("settings store persistence failure restoration", testSettingsStorePersistenceFailureRestoration)
+            ("settings store persistence failure restoration", testSettingsStorePersistenceFailureRestoration),
+            ("compound rollback failure fails closed", testCompoundRollbackFailureFailsClosed)
         ]
         let selected = scenarios.filter { normalizedFilter == nil || $0.0.contains(normalizedFilter ?? "") }
         guard !selected.isEmpty else {
@@ -610,6 +611,40 @@ private struct OigoIssue82ContractTests {
         }
     }
 
+    private static func testCompoundRollbackFailureFailsClosed() throws {
+        let oldShortcut = ToggleShortcut.default
+        let newShortcut = ToggleShortcut(keyCode: 0, modifiers: ToggleShortcutModifiers.command)
+        let registrar = RecordingConfigurationRegistrationClient(active: oldShortcut)
+        registrar.failFor = oldShortcut
+        let transaction = ShortcutConfigurationTransaction(
+            committedShortcut: oldShortcut,
+            registrar: registrar,
+            onEvent: { _ in }
+        )
+
+        let result = transaction.save(
+            newShortcut,
+            persist: { _ in
+                throw SettingsWriteFailure.diskFull
+            },
+            restore: {
+                throw SettingsWriteFailure.diskFull
+            }
+        )
+        guard result.isConflict,
+              registrar.status == .inactive("Global shortcut is not registered"),
+              transaction.committedShortcut == oldShortcut,
+              transaction.lastError?.contains("Shortcut registration was disabled") == true,
+              registrar.calls == [
+                  "register:0/256",
+                  "unregister:49/768",
+                  "register:49/768",
+                  "unregister:0/256"
+              ] else {
+            throw ContractFailure(message: "compound rollback failure did not fail closed with actionable state")
+        }
+    }
+
     private static func activeGeneration(of registrar: CarbonGlobalShortcutRegistrar) throws -> UInt64 {
         guard case .active(_, let generation) = registrar.status else {
             throw ContractFailure(message: "registrar was not active")
@@ -662,6 +697,15 @@ private final class RecordingConfigurationRegistrationClient: GlobalShortcutRegi
             lastError = TestRegistrationError(shortcut: shortcut).description
             throw TestRegistrationError(shortcut: shortcut)
         }
+        lastError = nil
+    }
+
+    func unregister() {
+        if case .active(let shortcut, _) = status {
+            calls.append("unregister:\(shortcut.keyCode)/\(shortcut.modifiers)")
+        }
+        generation += 1
+        status = .inactive("Global shortcut is not registered")
         lastError = nil
     }
 }
