@@ -1424,11 +1424,11 @@ public final class DictationCoordinator {
     ) -> DictationFailureCode? {
         switch state {
         case .cancelled:
-            reason?.lowercased().contains("timed out") == true
+            DictationFailureCode.infer(from: reason ?? "cancelled") == .transcriptionTimedOut
                 ? .transcriptionTimedOut
                 : .cancelled
         case .interrupted:
-            reason?.lowercased().contains("timed out") == true
+            DictationFailureCode.infer(from: reason ?? "recording was interrupted") == .transcriptionTimedOut
                 ? .transcriptionTimedOut
                 : .infer(from: reason ?? "recording was interrupted", interruption: true)
         case .failed:

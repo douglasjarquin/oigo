@@ -31,6 +31,7 @@ private struct OigoIssue78ContractTests {
             ("shutdown classifies typed timeout without detail", testShutdownClassifiesTypedTimeout),
             ("shutdown ignores untyped timeout prose", testShutdownIgnoresUntypedTimeoutProse),
             ("failure codes ignore untrusted timeout prose", testFailureCodesIgnoreUntrustedTimeoutProse),
+            ("interruption ignores untyped timeout prose", testInterruptionIgnoresUntypedTimeoutProse),
             ("one hundred lifecycle cycles release resources", testOneHundredLifecycleCyclesReleaseResources),
             ("one hundred adversarial lifecycle cycles release resources", testOneHundredAdversarialLifecycleCyclesReleaseResources)
         ]
@@ -670,6 +671,39 @@ private struct OigoIssue78ContractTests {
               DictationFailureCode.infer(from: "a deadline was mentioned in a transcript") == .unknownFailure,
               DictationFailureCode.infer(from: "transcription shutdown timed out") == .transcriptionTimedOut else {
             throw ContractFailure(message: "untrusted timeout prose changed the failure code")
+        }
+    }
+
+    @MainActor
+    private static func testInterruptionIgnoresUntypedTimeoutProse() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue78-untyped-interruption-timeout-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let coordinator = DictationCoordinator(timeoutPolicy: .testing)
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: ContractAudioCapture(),
+            store: store,
+            transcription: TypedTimeoutCancellationController(
+                cancellationError: OrdinaryTimeoutProseError()
+            ),
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+
+        do {
+            _ = try await coordinator.interruptRecordingWithTranscription(reason: "sleep")
+            throw ContractFailure(message: "untyped interruption timeout prose did not throw")
+        } catch is ContractFailure {
+            throw ContractFailure(message: "untyped interruption timeout prose did not throw")
+        } catch {
+        }
+
+        guard coordinator.currentSession?.metadata.state == .failed,
+              coordinator.currentSession?.metadata.failureCode == .unknownFailure,
+              coordinator.currentSession?.metadata.failureReason == "operation failed",
+              try await waitForResourcesToRelease(coordinator) else {
+            throw ContractFailure(message: "untyped interruption timeout prose changed the terminal failure code")
         }
     }
 
