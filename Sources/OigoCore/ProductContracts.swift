@@ -46,6 +46,117 @@ public enum OigoAudioRetention: String, Codable, CaseIterable, Sendable {
     }
 }
 
+public struct OigoInputDevice: Codable, Equatable, Hashable, Sendable {
+    public let uid: String
+    public let displayName: String
+    public let deviceID: UInt32
+    public let inputChannelCount: Int
+    public let nominalSampleRate: Double
+    public let isAlive: Bool
+    public let isDefault: Bool
+
+    public init(
+        uid: String,
+        displayName: String,
+        deviceID: UInt32,
+        inputChannelCount: Int,
+        nominalSampleRate: Double,
+        isAlive: Bool,
+        isDefault: Bool
+    ) {
+        self.uid = uid
+        self.displayName = displayName
+        self.deviceID = deviceID
+        self.inputChannelCount = inputChannelCount
+        self.nominalSampleRate = nominalSampleRate
+        self.isAlive = isAlive
+        self.isDefault = isDefault
+    }
+}
+
+public enum OigoInputSelection: Codable, Equatable, Hashable, Sendable {
+    case systemDefault
+    case pinned(uid: String)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case uid
+    }
+
+    private enum Kind: String, Codable {
+        case systemDefault
+        case pinned
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .systemDefault:
+            self = .systemDefault
+        case .pinned:
+            self = .pinned(uid: try container.decode(String.self, forKey: .uid))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .systemDefault:
+            try container.encode(Kind.systemDefault, forKey: .kind)
+        case .pinned(let uid):
+            try container.encode(Kind.pinned, forKey: .kind)
+            try container.encode(uid, forKey: .uid)
+        }
+    }
+}
+
+public enum OigoInputDeviceResolutionError: Error, Equatable, CustomStringConvertible, Sendable {
+    case noAvailableInput
+    case pinnedInputUnavailable
+
+    public var description: String {
+        switch self {
+        case .noAvailableInput:
+            "no available microphone input was found; connect an input or choose another source in Oigo Settings"
+        case .pinnedInputUnavailable:
+            "the selected microphone is unavailable; reconnect it or choose another source in Oigo Settings"
+        }
+    }
+}
+
+public enum OigoInputDeviceCatalog {
+    public static func visibleDevices(from devices: [OigoInputDevice]) -> [OigoInputDevice] {
+        devices
+            .filter { $0.isAlive && $0.inputChannelCount > 0 }
+            .sorted {
+                let nameOrder = $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
+                if nameOrder != .orderedSame {
+                    return nameOrder == .orderedAscending
+                }
+                return $0.uid < $1.uid
+            }
+    }
+
+    public static func resolve(
+        _ selection: OigoInputSelection,
+        from devices: [OigoInputDevice]
+    ) throws -> OigoInputDevice {
+        let visibleDevices = visibleDevices(from: devices)
+        switch selection {
+        case .systemDefault:
+            guard let device = visibleDevices.first(where: \.isDefault) else {
+                throw OigoInputDeviceResolutionError.noAvailableInput
+            }
+            return device
+        case .pinned(let uid):
+            guard let device = visibleDevices.first(where: { $0.uid == uid }) else {
+                throw OigoInputDeviceResolutionError.pinnedInputUnavailable
+            }
+            return device
+        }
+    }
+}
+
 public struct OigoSettings: Codable, Equatable, Sendable {
     public static let `default` = OigoSettings()
 
@@ -56,6 +167,18 @@ public struct OigoSettings: Codable, Equatable, Sendable {
     public var audioRetention: OigoAudioRetention
     public var keepSuccessfulAudioIndefinitely: Bool
     public var launchAtLogin: Bool
+    public var selectedInput: OigoInputSelection
+
+    private enum CodingKeys: String, CodingKey {
+        case globalShortcut
+        case localeIdentifier
+        case defaultMode
+        case showVolatilePreview
+        case audioRetention
+        case keepSuccessfulAudioIndefinitely
+        case launchAtLogin
+        case selectedInput
+    }
 
     public init(
         globalShortcut: ToggleShortcut = .default,
@@ -64,7 +187,8 @@ public struct OigoSettings: Codable, Equatable, Sendable {
         showVolatilePreview: Bool = true,
         audioRetention: OigoAudioRetention = .oneDay,
         keepSuccessfulAudioIndefinitely: Bool = false,
-        launchAtLogin: Bool = false
+        launchAtLogin: Bool = false,
+        selectedInput: OigoInputSelection = .systemDefault
     ) {
         self.globalShortcut = globalShortcut
         self.localeIdentifier = localeIdentifier
@@ -73,6 +197,33 @@ public struct OigoSettings: Codable, Equatable, Sendable {
         self.audioRetention = audioRetention
         self.keepSuccessfulAudioIndefinitely = keepSuccessfulAudioIndefinitely
         self.launchAtLogin = launchAtLogin
+        self.selectedInput = selectedInput
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            globalShortcut: try container.decode(ToggleShortcut.self, forKey: .globalShortcut),
+            localeIdentifier: try container.decode(String.self, forKey: .localeIdentifier),
+            defaultMode: try container.decode(OigoProcessingMode.self, forKey: .defaultMode),
+            showVolatilePreview: try container.decode(Bool.self, forKey: .showVolatilePreview),
+            audioRetention: try container.decode(OigoAudioRetention.self, forKey: .audioRetention),
+            keepSuccessfulAudioIndefinitely: try container.decode(Bool.self, forKey: .keepSuccessfulAudioIndefinitely),
+            launchAtLogin: try container.decode(Bool.self, forKey: .launchAtLogin),
+            selectedInput: try container.decodeIfPresent(OigoInputSelection.self, forKey: .selectedInput) ?? .systemDefault
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(globalShortcut, forKey: .globalShortcut)
+        try container.encode(localeIdentifier, forKey: .localeIdentifier)
+        try container.encode(defaultMode, forKey: .defaultMode)
+        try container.encode(showVolatilePreview, forKey: .showVolatilePreview)
+        try container.encode(audioRetention, forKey: .audioRetention)
+        try container.encode(keepSuccessfulAudioIndefinitely, forKey: .keepSuccessfulAudioIndefinitely)
+        try container.encode(launchAtLogin, forKey: .launchAtLogin)
+        try container.encode(selectedInput, forKey: .selectedInput)
     }
 
     public func with(
@@ -82,7 +233,8 @@ public struct OigoSettings: Codable, Equatable, Sendable {
         showVolatilePreview: Bool? = nil,
         audioRetention: OigoAudioRetention? = nil,
         keepSuccessfulAudioIndefinitely: Bool? = nil,
-        launchAtLogin: Bool? = nil
+        launchAtLogin: Bool? = nil,
+        selectedInput: OigoInputSelection? = nil
     ) -> OigoSettings {
         OigoSettings(
             globalShortcut: globalShortcut ?? self.globalShortcut,
@@ -92,7 +244,8 @@ public struct OigoSettings: Codable, Equatable, Sendable {
             audioRetention: audioRetention ?? self.audioRetention,
             keepSuccessfulAudioIndefinitely: keepSuccessfulAudioIndefinitely
                 ?? self.keepSuccessfulAudioIndefinitely,
-            launchAtLogin: launchAtLogin ?? self.launchAtLogin
+            launchAtLogin: launchAtLogin ?? self.launchAtLogin,
+            selectedInput: selectedInput ?? self.selectedInput
         )
     }
 }
