@@ -240,7 +240,7 @@ private struct OigoIssue9ContractTests {
         resources.close()
         guard resources.activeResourceCount == 0,
               OigoHUDProcessingState.allCases.map(\.rawValue) == [
-                  "Finalizing", "Cleaning", "Pasting", "Pasted", "Copied", "Failed"
+                  "Finalizing", "Cleaning", "Pasting", "Paste attempted", "Pasted", "Copied", "Failed"
               ] else {
             throw ContractFailure(message: "HUD resources or processing statuses outlived the session")
         }

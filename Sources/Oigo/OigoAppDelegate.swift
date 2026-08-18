@@ -1448,6 +1448,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 switch result.outcome {
                 case .pasted:
                     self.historyWindow?.showMessage("Clean transcript pasted again.")
+                case .dispatched:
+                    self.historyWindow?.showMessage(
+                        "Clean transcript paste attempted. Clipboard retained."
+                    )
                 case .copied, .secureRejected:
                     self.historyWindow?.showMessage("Clean transcript copied. " + (result.reason ?? "Paste was not sent."))
                 case .failed:
@@ -1499,6 +1503,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 switch result.outcome {
                 case .pasted:
                     self.historyWindow?.showMessage("Pasted again.")
+                case .dispatched:
+                    self.historyWindow?.showMessage("Paste attempted. Clipboard retained.")
                 case .copied, .secureRejected:
                     self.historyWindow?.showMessage("Raw transcript copied. " + (result.reason ?? "Paste was not sent."))
                 case .failed:
@@ -2141,6 +2147,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             "Applying Clean mode when available"
         case .pasting:
             "Sending the completed transcript to the original field"
+        case .pasteAttempted:
+            "Paste attempted; clipboard retained"
         case .pasted:
             "Transcript inserted"
         case .copied:
@@ -2190,6 +2198,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         switch outcome {
         case .pasted:
             .pasted
+        case .dispatched:
+            .pasteAttempted
         case .copied, .secureRejected:
             .copied
         case .failed:

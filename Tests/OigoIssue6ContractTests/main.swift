@@ -378,7 +378,7 @@ private struct OigoIssue6ContractTests {
             pasteboard: pasteboard,
             eventSender: FakeEventSender()
         ).insertRawText(for: session, store: store, target: target)
-        guard result.outcome == .pasted, sawPersistedRawText else {
+        guard result.outcome == .dispatched, sawPersistedRawText else {
             throw ContractFailure(message: "clipboard write did not observe the persisted raw transcript")
         }
     }
@@ -416,10 +416,10 @@ private struct OigoIssue6ContractTests {
             eventSender: eventSender
         ).insertRawText(for: session, store: store, target: target)
         let next = service.insertRawText(for: secondSession, store: secondStore, target: target)
-        guard first.outcome == .pasted,
+        guard first.outcome == .dispatched,
               second.outcome == .failed,
               persistedRetry.outcome == .failed,
-              next.outcome == .pasted,
+              next.outcome == .dispatched,
               pasteboard.writes == ["one shot transcript", "next session transcript"],
               eventSender.sendCalls == 2 else {
             throw ContractFailure(message: "duplicate completion attempted more than one insertion")
@@ -516,7 +516,7 @@ private final class FakeEventSender: InsertionEventSender {
             return .targetUnsafe(validation)
         }
         sendCalls += 1
-        return .sent
+        return .dispatched
     }
 }
 

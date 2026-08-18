@@ -530,6 +530,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         return switch outcome {
         case .pasted:
             "Pasted"
+        case .dispatched:
+            "Paste attempted"
         case .copied:
             "Copied"
         case .secureRejected:

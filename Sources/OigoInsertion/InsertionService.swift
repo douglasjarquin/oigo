@@ -71,13 +71,13 @@ public final class InsertionService {
         } catch {
             return InsertionResult(
                 outcome: .failed,
-                reason: source.rawValue + " transcript could not be read: " + String(describing: error)
+                reasonCode: .transcriptReadFailed
             )
         }
         guard !text.isEmpty else {
             return InsertionResult(
                 outcome: .failed,
-                reason: source.rawValue + " transcript was empty"
+                reasonCode: .transcriptEmpty
             )
         }
         do {
@@ -85,19 +85,19 @@ public final class InsertionService {
         } catch SessionStoreError.insertionAlreadyAttempted {
             return InsertionResult(
                 outcome: .failed,
-                reason: "insertion was already attempted for this session"
+                reasonCode: .insertionAlreadyAttempted
             )
         } catch {
             return InsertionResult(
                 outcome: .failed,
-                reason: "session insertion claim could not be persisted: " + String(describing: error)
+                reasonCode: .insertionAlreadyAttempted
             )
         }
         attemptedSessionID = session.id
         guard pasteboard.write(text) else {
             return InsertionResult(
                 outcome: .failed,
-                reason: source.rawValue + " transcript could not be written to the clipboard"
+                reasonCode: .clipboardWriteFailed
             )
         }
 
@@ -129,19 +129,19 @@ public final class InsertionService {
         } catch {
             return InsertionResult(
                 outcome: .failed,
-                reason: source.rawValue + " transcript could not be read: " + String(describing: error)
+                reasonCode: .transcriptReadFailed
             )
         }
         guard !text.isEmpty else {
             return InsertionResult(
                 outcome: .failed,
-                reason: source.rawValue + " transcript was empty"
+                reasonCode: .transcriptEmpty
             )
         }
         guard pasteboard.write(text) else {
             return InsertionResult(
                 outcome: .failed,
-                reason: source.rawValue + " transcript could not be written to the clipboard"
+                reasonCode: .clipboardWriteFailed
             )
         }
         return performPaste(target: target)
@@ -163,6 +163,7 @@ public final class InsertionService {
     private func performPaste(
         target: InsertionTargetSnapshot
     ) -> InsertionResult {
+        defer { targetEnvironment.discard(target) }
         if faultInjector?.consume(.targetLoss) == true {
             return Self.copyOnlyResult(for: .applicationChanged)
         }
@@ -176,14 +177,16 @@ public final class InsertionService {
                     targetEnvironment.validate(target)
                 }
             ) {
-            case .sent:
+            case .dispatched:
+                return InsertionResult(outcome: .dispatched)
+            case .verified:
                 return InsertionResult(outcome: .pasted)
             case .targetUnsafe(let validation):
                 return Self.copyOnlyResult(for: validation)
             case .failed:
                 return InsertionResult(
                     outcome: .failed,
-                    reason: "Command-V could not be synthesized"
+                    reasonCode: .eventDispatchFailed
                 )
             }
         case .accessibilityUnavailable:
@@ -196,6 +199,14 @@ public final class InsertionService {
             return Self.copyOnlyResult(for: .missingFocusedElement)
         case .nonEditableRole:
             return Self.copyOnlyResult(for: .nonEditableRole)
+        case .unsupportedTarget:
+            return Self.copyOnlyResult(for: .unsupportedTarget)
+        case .readOnlyTarget:
+            return Self.copyOnlyResult(for: .readOnlyTarget)
+        case .disabledTarget:
+            return Self.copyOnlyResult(for: .disabledTarget)
+        case .ambiguousTarget:
+            return Self.copyOnlyResult(for: .ambiguousTarget)
         }
     }
 
@@ -204,37 +215,57 @@ public final class InsertionService {
         case .secureTextField:
             return InsertionResult(
                 outcome: .secureRejected,
-                reason: "target is a secure text field"
+                reasonCode: .secureField
             )
         case .accessibilityUnavailable:
             return InsertionResult(
                 outcome: .copied,
-                reason: "Accessibility permission is unavailable"
+                reasonCode: .accessibilityUnavailable
             )
         case .applicationChanged:
             return InsertionResult(
                 outcome: .copied,
-                reason: "the frontmost application changed"
+                reasonCode: .applicationChanged
             )
         case .focusedElementChanged:
             return InsertionResult(
                 outcome: .copied,
-                reason: "the focused element changed"
+                reasonCode: .focusedElementChanged
             )
         case .missingFocusedElement:
             return InsertionResult(
                 outcome: .copied,
-                reason: "the focused element is unavailable"
+                reasonCode: .missingFocusedElement
             )
         case .nonEditableRole:
             return InsertionResult(
                 outcome: .copied,
-                reason: "the focused element is not a conventional editable field"
+                reasonCode: .nonEditableRole
+            )
+        case .unsupportedTarget:
+            return InsertionResult(
+                outcome: .copied,
+                reasonCode: .unsupportedTarget
+            )
+        case .readOnlyTarget:
+            return InsertionResult(
+                outcome: .copied,
+                reasonCode: .readOnlyTarget
+            )
+        case .disabledTarget:
+            return InsertionResult(
+                outcome: .copied,
+                reasonCode: .disabledTarget
+            )
+        case .ambiguousTarget:
+            return InsertionResult(
+                outcome: .copied,
+                reasonCode: .ambiguousTarget
             )
         case .safe:
             return InsertionResult(
                 outcome: .failed,
-                reason: "target safety changed while Command-V was being synthesized"
+                reasonCode: .targetChangedDuringDispatch
             )
         }
     }
@@ -242,6 +273,13 @@ public final class InsertionService {
 
 @MainActor
 public final class AccessibilityTargetEnvironment: InsertionTargetEnvironment {
+    private struct CapturedTarget {
+        let token: UUID
+        let element: AXUIElement
+    }
+
+    private var capturedTarget: CapturedTarget?
+
     public init() {}
 
     public func capture() -> InsertionTargetSnapshot {
@@ -254,19 +292,41 @@ public final class AccessibilityTargetEnvironment: InsertionTargetEnvironment {
                 bundleIdentifier: bundleIdentifier,
                 focusedElementIdentifier: nil,
                 role: nil,
-                isSecureTextField: false
+                isSecureTextField: false,
+                identity: nil,
+                capabilities: nil,
+                captureToken: nil
             )
         }
 
-        let focused = focusedElement(for: processIdentifier)
-        let role = focused.flatMap { stringAttribute(kAXRoleAttribute, from: $0) }
-        let subrole = focused.flatMap { stringAttribute(kAXSubroleAttribute, from: $0) }
+        guard let focused = focusedElement(for: processIdentifier) else {
+            capturedTarget = nil
+            return InsertionTargetSnapshot(
+                frontmostProcessIdentifier: processIdentifier,
+                bundleIdentifier: bundleIdentifier,
+                focusedElementIdentifier: nil,
+                role: nil,
+                isSecureTextField: false,
+                identity: nil,
+                capabilities: nil,
+                captureToken: nil
+            )
+        }
+        let role = stringAttribute(kAXRoleAttribute, from: focused)
+        let subrole = stringAttribute(kAXSubroleAttribute, from: focused)
+        let identity = targetIdentity(for: focused, role: role, subrole: subrole)
+        let capabilities = targetCapabilities(for: focused)
+        let token = UUID()
+        capturedTarget = CapturedTarget(token: token, element: focused)
         return InsertionTargetSnapshot(
             frontmostProcessIdentifier: processIdentifier,
             bundleIdentifier: bundleIdentifier,
-            focusedElementIdentifier: focused.map(elementIdentifier),
+            focusedElementIdentifier: identity.accessibilityIdentifier,
             role: role,
-            isSecureTextField: Self.isSecure(role: role, subrole: subrole)
+            isSecureTextField: Self.isSecure(role: role, subrole: subrole),
+            identity: identity,
+            capabilities: capabilities,
+            captureToken: token
         )
     }
 
@@ -288,15 +348,33 @@ public final class AccessibilityTargetEnvironment: InsertionTargetEnvironment {
 
         let role = stringAttribute(kAXRoleAttribute, from: focused)
         let subrole = stringAttribute(kAXSubroleAttribute, from: focused)
+        let identity = targetIdentity(for: focused, role: role, subrole: subrole)
+        let identityMatch: Bool?
+        if let capturedTarget,
+           capturedTarget.token == snapshot.captureToken {
+            identityMatch = CFEqual(capturedTarget.element, focused)
+        } else {
+            identityMatch = nil
+        }
         return TargetValidation.evaluate(
             snapshot: snapshot,
             currentProcessIdentifier: application.processIdentifier,
             currentBundleIdentifier: application.bundleIdentifier,
-            currentFocusedElementIdentifier: elementIdentifier(focused),
+            currentFocusedElementIdentifier: identity.accessibilityIdentifier,
             currentRole: role,
             currentIsSecureTextField: Self.isSecure(role: role, subrole: subrole),
-            accessibilityTrusted: true
+            accessibilityTrusted: true,
+            currentIdentity: identity,
+            identityMatch: identityMatch,
+            currentCapabilities: targetCapabilities(for: focused)
         )
+    }
+
+    public func discard(_ snapshot: InsertionTargetSnapshot) {
+        guard capturedTarget?.token == snapshot.captureToken else {
+            return
+        }
+        capturedTarget = nil
     }
 
     private func focusedElement(for processIdentifier: Int32) -> AXUIElement? {
@@ -328,8 +406,70 @@ public final class AccessibilityTargetEnvironment: InsertionTargetEnvironment {
         return value as? String
     }
 
-    private func elementIdentifier(_ element: AXUIElement) -> String {
-        "ax-" + String(CFHash(element), radix: 16)
+    private func targetIdentity(
+        for element: AXUIElement,
+        role: String?,
+        subrole: String?
+    ) -> InsertionTargetIdentity {
+        let window = copyElement(kAXWindowAttribute, from: element)
+        let windowIdentifier = window.flatMap {
+            stringAttribute(kAXIdentifierAttribute, from: $0)
+        }
+        var ancestry: [String] = []
+        var parent = copyElement(kAXParentAttribute, from: element)
+        for _ in 0..<8 {
+            guard let current = parent else {
+                break
+            }
+            let parentRole = stringAttribute(kAXRoleAttribute, from: current) ?? "unknown"
+            let parentIdentifier = stringAttribute(kAXIdentifierAttribute, from: current)
+            ancestry.append(parentRole + ":" + (parentIdentifier ?? ""))
+            parent = copyElement(kAXParentAttribute, from: current)
+        }
+        return InsertionTargetIdentity(
+            accessibilityIdentifier: stringAttribute(kAXIdentifierAttribute, from: element),
+            windowIdentifier: windowIdentifier,
+            role: role,
+            subrole: subrole,
+            ancestry: ancestry
+        )
+    }
+
+    private func targetCapabilities(for element: AXUIElement) -> InsertionTargetCapabilities {
+        let attributes = attributeNames(for: element)
+        let supportsValue = attributes.contains(kAXValueAttribute)
+        let supportsSelectedText = attributes.contains(kAXSelectedTextAttribute)
+        return InsertionTargetCapabilities(
+            supportsValue: supportsValue,
+            valueIsSettable: supportsValue && isSettable(kAXValueAttribute, on: element),
+            supportsSelectedText: supportsSelectedText,
+            selectedTextIsSettable: supportsSelectedText
+                && isSettable(kAXSelectedTextAttribute, on: element),
+            isEnabled: boolAttribute(kAXEnabledAttribute, from: element)
+        )
+    }
+
+    private func attributeNames(for element: AXUIElement) -> Set<String> {
+        var value: CFArray?
+        guard AXUIElementCopyAttributeNames(element, &value) == .success,
+              let value else {
+            return []
+        }
+        return Set((value as? [Any] ?? []).compactMap { $0 as? String })
+    }
+
+    private func isSettable(_ attribute: String, on element: AXUIElement) -> Bool {
+        var settable = DarwinBoolean(false)
+        return AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success
+            && settable.boolValue
+    }
+
+    private func boolAttribute(_ attribute: String, from element: AXUIElement) -> Bool? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+            return nil
+        }
+        return (value as? NSNumber)?.boolValue
     }
 
     private static func isSecure(role: String?, subrole: String?) -> Bool {
@@ -380,6 +520,6 @@ public final class CommandVPasteEventSender: InsertionEventSender {
         }
         keyDown.postToPid(processIdentifier)
         keyUp.postToPid(processIdentifier)
-        return .sent
+        return .dispatched
     }
 }
