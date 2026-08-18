@@ -1,6 +1,7 @@
 import AppKit
 import OigoCore
 import OigoTranscription
+import OigoHotKey
 
 @available(macOS 26.0, *)
 @MainActor
@@ -12,6 +13,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let saveStep: (OigoOnboardingStep) -> Void
     private let requestMicrophone: () async -> OigoPermissionState
     private let openMicrophoneSettings: () -> Void
+    private let registrationStatus: () -> GlobalShortcutRegistrationStatus
+    private let registrationError: () -> String?
     private let validateShortcut: (ToggleShortcut) -> OigoShortcutValidation
     private let saveShortcut: (ToggleShortcut) -> OigoShortcutValidation
     private let requestAccessibility: () -> OigoPermissionState
@@ -31,14 +34,14 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var testOutcome: OigoOnboardingTestOutcome = .pending
     private var testRunning = false
     private var completed = false
+    private var committedShortcut: ToggleShortcut
 
     private let progressLabel = NSTextField(labelWithString: "")
     private let titleLabel = NSTextField(labelWithString: "")
     private let bodyLabel = NSTextField(wrappingLabelWithString: "")
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let languagePopup = NSPopUpButton()
-    private let keyCodeField = NSTextField(string: "")
-    private let modifiersField = NSTextField(string: "")
+    private let shortcutRecorder: ShortcutRecorderControl
     private let testField = NSTextField(string: "")
     private let actionButton = NSButton(title: "", target: nil, action: nil)
     private let skipButton = NSButton(title: "Skip test", target: nil, action: nil)
@@ -58,6 +61,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         saveStep: @escaping (OigoOnboardingStep) -> Void,
         requestMicrophone: @escaping () async -> OigoPermissionState,
         openMicrophoneSettings: @escaping () -> Void,
+        registrationStatus: @escaping () -> GlobalShortcutRegistrationStatus,
+        registrationError: @escaping () -> String?,
         validateShortcut: @escaping (ToggleShortcut) -> OigoShortcutValidation,
         saveShortcut: @escaping (ToggleShortcut) -> OigoShortcutValidation,
         requestAccessibility: @escaping () -> OigoPermissionState,
@@ -77,6 +82,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.saveStep = saveStep
         self.requestMicrophone = requestMicrophone
         self.openMicrophoneSettings = openMicrophoneSettings
+        self.registrationStatus = registrationStatus
+        self.registrationError = registrationError
         self.validateShortcut = validateShortcut
         self.saveShortcut = saveShortcut
         self.requestAccessibility = requestAccessibility
@@ -89,6 +96,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.onClose = onClose
         self.microphoneState = microphoneState
         self.accessibilityState = accessibilityState
+        committedShortcut = globalShortcut
+        shortcutRecorder = ShortcutRecorderControl(shortcut: globalShortcut)
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 620, height: 480),
@@ -100,8 +109,6 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
-        keyCodeField.stringValue = String(globalShortcut.keyCode)
-        modifiersField.stringValue = String(globalShortcut.modifiers)
         configureWindow()
         render()
     }
@@ -113,6 +120,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         _ = notification
+        discardShortcutCandidate()
         if testRunning {
             testRunning = false
             cancelTest()
@@ -121,6 +129,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             saveStep(currentStep)
         }
         onClose()
+    }
+
+    func showRegistrationFailure(_ message: String) {
+        currentStep = .shortcut
+        statusLabel.stringValue = "Global shortcut inactive: " + message
+        render()
     }
 
     func showAndFocus() {
@@ -154,6 +168,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         guard let contentView = window?.contentView else {
             return
         }
+        shortcutRecorder.onValidationError = { [weak self] message in
+            self?.statusLabel.stringValue = message
+        }
         progressLabel.textColor = .secondaryLabelColor
         titleLabel.font = .boldSystemFont(ofSize: 22)
         bodyLabel.maximumNumberOfLines = 8
@@ -162,8 +179,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         testField.placeholderString = "Your test transcript appears here"
         testField.isEditable = false
         testField.isSelectable = true
-        keyCodeField.placeholderString = "49"
-        modifiersField.placeholderString = "2304"
+        shortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
         historyButton.target = self
         historyButton.action = #selector(openHistoryAction)
         actionButton.target = self
@@ -175,19 +191,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         nextButton.target = self
         nextButton.action = #selector(goForward)
 
-        let shortcutRow = NSStackView(views: [
-            NSTextField(labelWithString: "Key code"), keyCodeField,
-            NSTextField(labelWithString: "Modifiers"), modifiersField
-        ])
-        shortcutRow.orientation = .horizontal
-        shortcutRow.spacing = 8
-
         let stack = NSStackView(views: [
             progressLabel,
             titleLabel,
             bodyLabel,
             languagePopup,
-            shortcutRow,
+            shortcutRecorder,
             testField,
             statusLabel,
             historyButton,
@@ -212,10 +221,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             bodyLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             languagePopup.widthAnchor.constraint(equalToConstant: 280),
+            shortcutRecorder.widthAnchor.constraint(equalToConstant: 280),
             testField.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            shortcutRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            keyCodeField.widthAnchor.constraint(equalToConstant: 80),
-            modifiersField.widthAnchor.constraint(equalToConstant: 90),
             actionButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
             historyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140),
             buttons.widthAnchor.constraint(equalTo: stack.widthAnchor)
@@ -230,7 +237,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         titleLabel.stringValue = isSupported ? currentStep.title : "This Mac cannot run Oigo"
         bodyLabel.stringValue = isSupported ? body(for: currentStep) : support.reason
         languagePopup.isHidden = currentStep != .language
-        keyCodeField.superview?.isHidden = currentStep != .shortcut
+        shortcutRecorder.isHidden = currentStep != .shortcut
         testField.isHidden = !isSupported || currentStep != .testDictation
         historyButton.isHidden = currentStep != .recovery
         skipButton.isHidden = currentStep != .testDictation
@@ -271,6 +278,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         if currentStep == .testDictation {
             nextButton.isEnabled = testOutcome.allowsContinue
         }
+        if currentStep == .recovery {
+            nextButton.isEnabled = registrationStatus().isActive
+        }
     }
 
     private func body(for step: OigoOnboardingStep) -> String {
@@ -282,7 +292,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         case .microphone:
             "Oigo records audio so every dictation can be retried from History. We ask for microphone access only after this explanation."
         case .shortcut:
-            "Option-Space is the default when available. Oigo tests the choice and will not silently accept a shortcut conflict."
+            "Choose a readable global shortcut. The shipped default is \(ToggleShortcut.default.displayName), and Oigo keeps the previous working choice when registration fails."
         case .insertion:
             "Accessibility lets Oigo paste one completed transcript into the field you were using. If you decline, Copy and History still work."
         case .testDictation:
@@ -300,6 +310,13 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             return "Current microphone state: " + microphoneState.rawValue.capitalized
         case .insertion:
             return "Current Accessibility state: " + accessibilityState.rawValue.capitalized
+        case .shortcut:
+            switch registrationStatus() {
+            case .active(let shortcut, _):
+                return "Registered: " + shortcut.displayName + ". Candidate: " + shortcutRecorder.displayValue
+            case .inactive(let message):
+                return "Global shortcut inactive: " + (registrationError() ?? message)
+            }
         case .testDictation where testOutcome == .passed:
             return "Test complete."
         case .testDictation where testOutcome == .skipped:
@@ -406,23 +423,25 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         if currentStep == .shortcut {
-            guard let keyCode = UInt32(keyCodeField.stringValue),
-                  let modifiers = UInt32(modifiersField.stringValue) else {
-                statusLabel.stringValue = "Enter a working key code and modifier combination."
-                return
-            }
-            let result = validateShortcut(ToggleShortcut(keyCode: keyCode, modifiers: modifiers))
+            let candidate = shortcutRecorder.shortcut
+            let result = validateShortcut(candidate)
             guard result.isAvailable else {
-                statusLabel.stringValue = result.isConflict
-                    ? "That shortcut conflicts with another application. Choose a working combination."
-                    : "That shortcut is not valid. Choose a key and modifier."
+                statusLabel.stringValue = "Global shortcut inactive: " + Self.validationMessage(result)
+                renderButtons()
                 return
             }
-            let saved = saveShortcut(ToggleShortcut(keyCode: keyCode, modifiers: modifiers))
+            let saved = saveShortcut(candidate)
             guard saved.isAvailable else {
-                statusLabel.stringValue = "Oigo could not register that shortcut. Choose another working combination."
+                statusLabel.stringValue = "Global shortcut inactive: " + Self.validationMessage(saved)
+                renderButtons()
                 return
             }
+            guard registrationStatus().isActive else {
+                statusLabel.stringValue = "Global shortcut inactive: " + (registrationError() ?? "Registration is not active")
+                renderButtons()
+                return
+            }
+            committedShortcut = candidate
         }
         if currentStep == .language,
            let selectedLanguage = languagePopup.selectedItem?.title {
@@ -440,6 +459,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func goBack() {
+        discardShortcutCandidate()
         guard let previous = previousStep(before: currentStep) else { return }
         currentStep = previous
         saveStep(previous)
@@ -471,6 +491,20 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         case .insertion: .shortcut
         case .testDictation: .insertion
         case .recovery: .testDictation
+        }
+    }
+
+    private func discardShortcutCandidate() {
+        shortcutRecorder.cancelRecording()
+        shortcutRecorder.restoreCandidate(committedShortcut)
+    }
+
+    private static func validationMessage(_ validation: OigoShortcutValidation) -> String {
+        switch validation {
+        case .available:
+            "Registration is active"
+        case .conflict(let reason), .invalid(let reason):
+            reason
         }
     }
 }

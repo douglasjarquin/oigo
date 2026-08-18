@@ -36,7 +36,9 @@ private struct OigoIssue82ContractTests {
             ("recorder keycode zero", testRecorderKeyCodeZero),
             ("recorder rejection", testRecorderRejection),
             ("app bridge release during startup", testAppBridgeReleaseDuringStartup),
-            ("app bridge processing feedback", testAppBridgeProcessingFeedback)
+            ("app bridge processing feedback", testAppBridgeProcessingFeedback),
+            ("configuration atomic save", testConfigurationAtomicSave),
+            ("configuration failure restoration", testConfigurationFailureRestoration)
         ]
         let selected = scenarios.filter { normalizedFilter == nil || $0.0.contains(normalizedFilter ?? "") }
         guard !selected.isEmpty else {
@@ -436,6 +438,87 @@ private struct OigoIssue82ContractTests {
         }
     }
 
+    private static func testConfigurationAtomicSave() throws {
+        let oldShortcut = ToggleShortcut.default
+        let newShortcut = ToggleShortcut(keyCode: 0, modifiers: ToggleShortcutModifiers.command)
+        let registrar = RecordingConfigurationRegistrationClient(active: oldShortcut)
+        let transaction = ShortcutConfigurationTransaction(
+            committedShortcut: oldShortcut,
+            registrar: registrar,
+            onEvent: { _ in }
+        )
+        transaction.setCandidate(newShortcut)
+
+        guard transaction.validate(newShortcut).isAvailable,
+              registrar.status == .active(oldShortcut, generation: 1) else {
+            throw ContractFailure(message: "validation-only changed or dropped the working registration")
+        }
+
+        var persisted = oldShortcut
+        guard transaction.save(newShortcut, persist: { persisted = $0 }).isAvailable,
+              persisted == newShortcut,
+              transaction.committedShortcut == newShortcut,
+              transaction.candidateShortcut == newShortcut,
+              registrar.status == .active(newShortcut, generation: 2),
+              registrar.calls == [
+                  "probe:0/256",
+                  "register:0/256",
+                  "unregister:49/768"
+              ] else {
+            throw ContractFailure(message: "shortcut save did not atomically commit registration and persistence")
+        }
+
+        transaction.setCandidate(oldShortcut)
+        transaction.cancel()
+        guard transaction.candidateShortcut == newShortcut,
+              registrar.status == .active(newShortcut, generation: 2),
+              persisted == newShortcut else {
+            throw ContractFailure(message: "cancel changed the committed shortcut")
+        }
+    }
+
+    private static func testConfigurationFailureRestoration() throws {
+        let oldShortcut = ToggleShortcut.default
+        let newShortcut = ToggleShortcut(keyCode: 12, modifiers: ToggleShortcutModifiers.command)
+        let registrar = RecordingConfigurationRegistrationClient(active: oldShortcut)
+        registrar.failFor = newShortcut
+        let transaction = ShortcutConfigurationTransaction(
+            committedShortcut: oldShortcut,
+            registrar: registrar,
+            onEvent: { _ in }
+        )
+        var persisted = oldShortcut
+        guard transaction.save(newShortcut, persist: { persisted = $0 }).isConflict,
+              registrar.status == .active(oldShortcut, generation: 1),
+              persisted == oldShortcut,
+              registrar.calls == ["register:12/256"] else {
+            throw ContractFailure(message: "failed replacement displaced the prior registration or persistence")
+        }
+
+        registrar.failFor = nil
+        let persistenceFailure = transaction.save(newShortcut, persist: { _ in
+            throw ContractFailure(message: "simulated persistence failure")
+        })
+        guard persistenceFailure.isConflict,
+              registrar.status == .active(oldShortcut, generation: 3),
+              transaction.committedShortcut == oldShortcut,
+              persisted == oldShortcut,
+              registrar.calls.suffix(4) == [
+                  "register:12/256",
+                  "unregister:49/768",
+                  "register:49/768",
+                  "unregister:12/256"
+              ] else {
+            throw ContractFailure(message: "persistence failure did not restore the previous registration")
+        }
+
+        transaction.setCandidate(newShortcut)
+        transaction.cancel()
+        guard transaction.candidateShortcut == oldShortcut else {
+            throw ContractFailure(message: "close or cancel did not discard only the uncommitted candidate")
+        }
+    }
+
     private static func activeGeneration(of registrar: CarbonGlobalShortcutRegistrar) throws -> UInt64 {
         guard case .active(_, let generation) = registrar.status else {
             throw ContractFailure(message: "registrar was not active")
@@ -448,5 +531,46 @@ private struct OigoIssue82ContractTests {
             throw ContractFailure(message: "registrar was not active")
         }
         return shortcut
+    }
+}
+
+@MainActor
+private final class RecordingConfigurationRegistrationClient: GlobalShortcutRegistrationClient {
+    private(set) var status: GlobalShortcutRegistrationStatus
+    private(set) var lastError: String?
+    private(set) var calls: [String] = []
+    private var generation: UInt64
+    var failFor: ToggleShortcut?
+
+    init(active shortcut: ToggleShortcut) {
+        generation = 1
+        status = .active(shortcut, generation: generation)
+    }
+
+    func register(
+        shortcut: ToggleShortcut,
+        onEvent: @escaping @MainActor (GlobalShortcutEvent) -> Void
+    ) throws {
+        _ = onEvent
+        calls.append("register:\(shortcut.keyCode)/\(shortcut.modifiers)")
+        if failFor == shortcut {
+            lastError = TestRegistrationError(shortcut: shortcut).description
+            throw TestRegistrationError(shortcut: shortcut)
+        }
+        generation += 1
+        if case .active(let previous, _) = status {
+            calls.append("unregister:\(previous.keyCode)/\(previous.modifiers)")
+        }
+        status = .active(shortcut, generation: generation)
+        lastError = nil
+    }
+
+    func probe(shortcut: ToggleShortcut) throws {
+        calls.append("probe:\(shortcut.keyCode)/\(shortcut.modifiers)")
+        if failFor == shortcut {
+            lastError = TestRegistrationError(shortcut: shortcut).description
+            throw TestRegistrationError(shortcut: shortcut)
+        }
+        lastError = nil
     }
 }

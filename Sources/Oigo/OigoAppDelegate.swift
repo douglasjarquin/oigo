@@ -24,6 +24,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         stop: { [weak self] in self?.requestKeyboardStop() },
         feedback: { [weak self] result in self?.showShortcutFeedback(result) }
     )
+    private lazy var shortcutConfiguration = ShortcutConfigurationTransaction(
+        committedShortcut: settings.globalShortcut,
+        registrar: shortcutRegistrar,
+        onEvent: { [weak self] event in self?.handleGlobalShortcut(event) }
+    )
     private let statusSurface = StatusSurfaceController()
     private let settingsStore = OigoSettingsStore()
     private let onboardingStore = OigoOnboardingStore()
@@ -45,6 +50,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var historyWindow: HistoryWindowController?
     private var statusItem: NSStatusItem?
     private var toggleItem: NSMenuItem?
+    private var shortcutStatusItem: NSMenuItem?
     private var modeMenuItem: NSMenuItem?
     private var instantModeItem: NSMenuItem?
     private var cleanModeItem: NSMenuItem?
@@ -149,6 +155,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             supportedLocales: supportedLocales,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
+            registrationStatus: { [weak self] in
+                self?.shortcutRegistrar.status ?? .inactive("Global shortcut is not registered")
+            },
+            registrationError: { [weak self] in self?.shortcutRegistrar.lastError },
             save: { [weak self] settings in
                 self?.applySettings(settings) ?? "Oigo is no longer available."
             },
@@ -231,6 +241,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             openMicrophoneSettings: { [weak self] in
                 self?.openSystemSettings(OigoPermissionPresentation.microphone(.denied).settingsURL)
             },
+            registrationStatus: { [weak self] in
+                self?.shortcutRegistrar.status ?? .inactive("Global shortcut is not registered")
+            },
+            registrationError: { [weak self] in self?.shortcutRegistrar.lastError },
             validateShortcut: { [weak self] candidate in
                 self?.validateShortcut(candidate) ?? .invalid("Oigo is no longer available")
             },
@@ -258,6 +272,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             onComplete: { [weak self] in
                 guard let self else { return }
+                guard self.shortcutRegistrar.status.isActive else {
+                    self.onboardingWindow?.showRegistrationFailure(
+                        self.shortcutRegistrar.lastError ?? self.shortcutRegistrar.status.message
+                    )
+                    self.updateSurface()
+                    return
+                }
                 self.onboardingStore.markCompleted()
                 self.onboardingWindow = nil
                 self.registerShortcut()
@@ -332,6 +353,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         toggle.target = self
         menu.addItem(toggle)
 
+        let shortcutStatus = NSMenuItem(
+            title: "Global Shortcut Inactive - Open Settings…",
+            action: #selector(openSettings),
+            keyEquivalent: ""
+        )
+        shortcutStatus.target = self
+        menu.addItem(shortcutStatus)
+
         let mode = NSMenuItem(
             title: "Mode",
             action: nil,
@@ -392,6 +421,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         item.menu = menu
         statusItem = item
         toggleItem = toggle
+        shortcutStatusItem = shortcutStatus
         modeMenuItem = mode
         instantModeItem = instant
         cleanModeItem = clean
@@ -1294,8 +1324,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         modeMenuItem?.isEnabled = setupComplete && !isRecording
         launchAtLoginItem?.state = launchAtLoginController.isEnabled ? .on : .off
         statusItem?.button?.title = "Oigo"
-        statusItem?.button?.toolTip = shortcutFeedbackDetail
-            ?? "Global shortcut: " + settings.globalShortcut.displayName
+        switch shortcutRegistrar.status {
+        case .active(let shortcut, _):
+            shortcutStatusItem?.title = "Global Shortcut: " + shortcut.displayName
+            statusItem?.button?.toolTip = shortcutFeedbackDetail
+                ?? "Global shortcut active: " + shortcut.displayName
+        case .inactive(let message):
+            let error = shortcutRegistrar.lastError ?? message
+            shortcutStatusItem?.title = "Global Shortcut Inactive - Open Settings…"
+            statusItem?.button?.toolTip = "Global Shortcut Inactive: " + error
+        }
 
         if isRecording {
             statusSurface.showRecording(
@@ -1391,22 +1429,25 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applySettings(_ newSettings: OigoSettings) -> String? {
-        let shortcutValidation = validateShortcut(newSettings.globalShortcut)
-        if !shortcutValidation.isAvailable {
-            switch shortcutValidation {
-            case .conflict(let reason), .invalid(let reason):
-                return reason
-            case .available:
-                return nil
+        let previousSettings = settings
+        let shortcutChanged = previousSettings.globalShortcut != newSettings.globalShortcut
+        if shortcutChanged {
+            let shortcutValidation = shortcutConfiguration.save(
+                newSettings.globalShortcut,
+                persist: { _ in }
+            )
+            guard shortcutValidation.isAvailable else {
+                return Self.shortcutValidationMessage(shortcutValidation)
             }
         }
 
-        let previousSettings = settings
         if previousSettings.launchAtLogin != newSettings.launchAtLogin {
             do {
                 try launchAtLoginController.setEnabled(newSettings.launchAtLogin)
             } catch {
-                registerShortcut()
+                if shortcutChanged {
+                    _ = shortcutConfiguration.save(previousSettings.globalShortcut, persist: { _ in })
+                }
                 return "Launch at Login could not be changed: " + String(describing: error)
             }
         }
@@ -1415,38 +1456,39 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         if previousSettings.localeIdentifier != settings.localeIdentifier {
             transcription = nil
         }
-        registerShortcut()
+        if !shortcutRegistrar.status.isActive {
+            registerShortcut()
+        }
         updateSurface()
         return nil
     }
 
     private func validateShortcut(_ candidate: ToggleShortcut) -> OigoShortcutValidation {
-        let basicValidation = OigoShortcutValidator.validate(candidate, occupied: [])
-        guard basicValidation.isAvailable else {
-            return basicValidation
-        }
-        shortcutRegistrar.unregister()
-        do {
-            try shortcutRegistrar.register(shortcut: candidate, onEvent: { _ in })
-            shortcutRegistrar.unregister()
-            return .available
-        } catch {
-            shortcutRegistrar.unregister()
-            registerShortcut()
-            return .conflict(String(describing: error))
-        }
+        shortcutConfiguration.setCandidate(candidate)
+        return shortcutConfiguration.validate(candidate)
     }
 
     private func saveShortcut(_ candidate: ToggleShortcut) -> OigoShortcutValidation {
-        let validation = validateShortcut(candidate)
+        let validation = shortcutConfiguration.save(candidate) { [weak self] shortcut in
+            guard let self else { return }
+            self.settings = self.settings.with(globalShortcut: shortcut)
+            self.settingsStore.save(self.settings)
+        }
         guard validation.isAvailable else {
+            updateSurface()
             return validation
         }
-        settings = settings.with(globalShortcut: candidate)
-        settingsStore.save(settings)
-        registerShortcut()
         updateSurface()
         return .available
+    }
+
+    private static func shortcutValidationMessage(_ validation: OigoShortcutValidation) -> String {
+        switch validation {
+        case .available:
+            ""
+        case .conflict(let reason), .invalid(let reason):
+            reason
+        }
     }
 
     private func rerunOnboarding() {

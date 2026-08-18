@@ -55,6 +55,14 @@ public final class ShortcutRecorderControl: NSControl {
         needsDisplay = true
     }
 
+    public func restoreCandidate(_ shortcut: ToggleShortcut) {
+        shortcutBeforeRecording = shortcut
+        self.shortcut = shortcut
+        validationError = nil
+        isRecording = false
+        needsDisplay = true
+    }
+
     public override func mouseDown(with event: NSEvent) {
         _ = event
         if let window, !window.makeFirstResponder(self) {
