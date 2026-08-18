@@ -664,14 +664,17 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
         do {
             inputNode.installTap(onBus: 0, bufferSize: 1_024, format: nil) { [weak self] buffer, _ in
-                self?.handle(buffer)
+                self?.handle(buffer, generation: recordingGeneration)
             }
             let observer = NotificationCenter.default.addObserver(
                 forName: Notification.Name("AVAudioEngineConfigurationChangeNotification"),
                 object: engine,
                 queue: nil
             ) { [weak self] _ in
-                self?.handleInterruption("audio input configuration changed")
+                self?.handleInterruption(
+                    "audio input configuration changed",
+                    generation: recordingGeneration
+                )
             }
             lock.lock()
             configurationObserver = observer
@@ -693,7 +696,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                     let reason = notification.name.rawValue.contains("Sleep")
                         ? "system sleep interrupted recording"
                         : "screen lock interrupted recording"
-                    self?.handleInterruption(reason)
+                    self?.handleInterruption(reason, generation: recordingGeneration)
                 }
             }
             lock.lock()
@@ -771,7 +774,10 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         }
         let currentDevice = try? OigoInputDeviceCatalog.resolve(activeSelection, from: devices)
         guard currentDevice?.uid == activeDeviceUID else {
-            handleInterruption("audio input device changed; choose the source again before restarting")
+            handleInterruption(
+                "audio input device changed; choose the source again before restarting",
+                generation: generation
+            )
             return
         }
     }
@@ -790,9 +796,9 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         finish(resources)
     }
 
-    private func handle(_ buffer: AVAudioPCMBuffer) {
+    private func handle(_ buffer: AVAudioPCMBuffer, generation: UInt64) {
         guard AVAudioApplication.shared.recordPermission == .granted else {
-            handleInterruption("microphone permission revoked")
+            handleInterruption("microphone permission revoked", generation: generation)
             return
         }
 
@@ -803,7 +809,10 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         var markFirstBuffer = false
 
         lock.lock()
-        guard recording, !failureReported, let audioFile else {
+        guard recording,
+              recordingFence.accepts(generation),
+              !failureReported,
+              let audioFile else {
             lock.unlock()
             return
         }
@@ -908,8 +917,12 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         return resources
     }
 
-    private func handleInterruption(_ reason: String) {
+    private func handleInterruption(_ reason: String, generation: UInt64? = nil) {
         lock.lock()
+        if let generation, !recordingFence.accepts(generation) {
+            lock.unlock()
+            return
+        }
         let callback = onInterruption
         let shouldNotify = recording && !failureReported
         if shouldNotify {
