@@ -17,7 +17,6 @@ struct OigoIssue82ContractTests {
         }
         let normalizedFilter = filter?.replacingOccurrences(of: "-", with: " ")
         let scenarios: [(String, () throws -> Void)] = [
-            ("harness smoke", testHarnessSmoke),
             ("registrar atomic replacement", testRegistrarAtomicReplacement),
             ("registrar failure and generation", testRegistrarFailureAndGeneration),
             ("intent rapid tap", testIntentRapidTap),
@@ -56,8 +55,4 @@ struct OigoIssue82ContractTests {
         print("GREEN: all issue #82 contract scenarios")
     }
 
-    static func testHarnessSmoke() {
-        _ = ToggleShortcut.default
-        _ = CarbonGlobalShortcutRegistrar.self
-    }
 }
