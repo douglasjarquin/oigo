@@ -165,6 +165,17 @@ public enum OigoInputDeviceCatalog {
         try route(device)
         return device
     }
+
+    public static func resolveAndRouteBeforeInspection(
+        _ selection: OigoInputSelection,
+        from devices: [OigoInputDevice],
+        route: (OigoInputDevice) throws -> Void,
+        inspect: (OigoInputDevice) throws -> Void
+    ) throws -> OigoInputDevice {
+        let device = try resolveAndRoute(selection, from: devices, route: route)
+        try inspect(device)
+        return device
+    }
 }
 
 public struct OigoInputMenuItem: Equatable, Sendable {

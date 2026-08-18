@@ -1,5 +1,6 @@
 import Foundation
 import OigoCore
+import OigoCapture
 
 private struct ContractFailure: Error, CustomStringConvertible {
     let message: String
@@ -18,7 +19,8 @@ private struct OigoIssue76ContractTests {
             ("settings-migration", testSettingsMigration),
             ("menu-and-unavailable", testMenuAndUnavailable),
             ("route-before-format", testRouteBeforeFormat),
-            ("missing-pinned-no-fallback", testMissingPinnedNoFallback)
+            ("missing-pinned-no-fallback", testMissingPinnedNoFallback),
+            ("recording-operation-fence", testRecordingOperationFence)
         ]
 
         let selected = tests.filter { filter == nil || $0.0.contains(filter ?? "") }
@@ -179,7 +181,7 @@ private struct OigoIssue76ContractTests {
             isDefault: false
         )
         var events: [String] = []
-        _ = try OigoInputDeviceCatalog.resolveAndRoute(
+        _ = try OigoInputDeviceCatalog.resolveAndRouteBeforeInspection(
             .pinned(uid: device.uid),
             from: [device],
             route: { routedDevice in
@@ -187,9 +189,11 @@ private struct OigoIssue76ContractTests {
                     throw ContractFailure(message: "pinned route used a transient device ID from another device")
                 }
                 events.append("route")
+            },
+            inspect: { _ in
+                events.append("inspect-format")
             }
         )
-        events.append("inspect-format")
         guard events == ["route", "inspect-format"] else {
             throw ContractFailure(message: "format inspection was not ordered after pinned-device routing")
         }
@@ -220,6 +224,21 @@ private struct OigoIssue76ContractTests {
                   !error.description.contains("Default Mic") else {
                 throw ContractFailure(message: "missing pinned input did not fail closed with a privacy-safe actionable error")
             }
+        }
+    }
+
+    private static func testRecordingOperationFence() throws {
+        var fence = AudioRecordingOperationFence()
+        let firstGeneration = fence.begin()
+        guard fence.accepts(firstGeneration) else {
+            throw ContractFailure(message: "new recording operation did not accept its own callback generation")
+        }
+
+        fence.invalidate()
+        let secondGeneration = fence.begin()
+        guard !fence.accepts(firstGeneration),
+              fence.accepts(secondGeneration) else {
+            throw ContractFailure(message: "stale recording callback generation was not rejected after teardown")
         }
     }
 }

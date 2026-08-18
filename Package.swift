@@ -159,7 +159,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "OigoIssue76ContractTests",
-            dependencies: ["OigoCore"],
+            dependencies: ["OigoCore", "OigoCapture"],
             path: "Tests/OigoIssue76ContractTests"
         ),
         .executableTarget(

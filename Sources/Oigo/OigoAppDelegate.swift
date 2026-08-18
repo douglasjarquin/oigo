@@ -13,6 +13,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = DictationCoordinator()
     private let performanceInstrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
     private let deviceMonitor = SystemAudioDeviceMonitor()
+    private let deviceInventoryMonitor = SystemAudioDeviceMonitor()
     private lazy var recorder = AudioRecorder(deviceMonitor: deviceMonitor)
     private var transcription: TranscriptionService?
     private let insertion = InsertionService()
@@ -58,6 +59,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
         NSApp.setActivationPolicy(.accessory)
+        startInputDeviceInventoryMonitor()
         let support = OigoSystemSupportEvaluator.current()
         guard support.isSupported else {
             showOnboarding(support)
@@ -77,6 +79,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
         shortcutRegistrar.unregister()
+        deviceInventoryMonitor.stop()
         removeWorkspaceInterruptionObservers()
         statusSurface.hide()
         playback.stop()
@@ -1274,7 +1277,17 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func currentInputDevices() -> [OigoInputDevice] {
-        (try? deviceMonitor.currentDevices()) ?? []
+        (try? deviceInventoryMonitor.currentDevices()) ?? []
+    }
+
+    private func startInputDeviceInventoryMonitor() {
+        deviceInventoryMonitor.start { [weak self] devices in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.settingsWindow?.updateInputDevices(devices)
+                self.onboardingWindow?.updateInputDevices(devices)
+            }
+        }
     }
 
     private func validateShortcut(_ candidate: ToggleShortcut) -> OigoShortcutValidation {

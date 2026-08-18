@@ -143,6 +143,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func updateInputDevices(_ devices: [OigoInputDevice]) {
+        selectedInput = selectedInputFromMenu()
+        configureInputMenu(devices: devices, selected: selectedInput)
+    }
+
     func focusTestField() {
         guard currentStep == .testDictation,
               let window else {

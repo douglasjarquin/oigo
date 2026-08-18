@@ -96,6 +96,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         updatePermissionLabels(microphone: states.0, accessibility: states.1)
     }
 
+    func updateInputDevices(_ devices: [OigoInputDevice]) {
+        selectedInput = selectedInputFromMenu()
+        configureInputMenu(devices: devices, selected: selectedInput)
+    }
+
     private func configureWindow() {
         guard let contentView = window?.contentView else {
             return
