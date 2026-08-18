@@ -1204,7 +1204,7 @@ public final class DictationCoordinator {
                 return "history deletion requires confirmation"
             }
         }
-        return String(describing: error)
+        return "operation failed"
     }
 
     private func failureCode(

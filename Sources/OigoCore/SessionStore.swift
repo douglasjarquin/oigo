@@ -400,18 +400,18 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
         switch self {
         case .applicationSupportUnavailable:
             "Oigo application support is unavailable"
-        case .missingSession(let id):
-            "dictation session does not exist: " + id.uuidString
+        case .missingSession:
+            "dictation session is unavailable"
         case .invalidMetadata:
             "dictation session metadata is invalid"
         case .invalidSessionDirectory:
             "dictation session directory is invalid"
         case .transcriptTooLarge:
             "raw transcript is too large to load safely"
-        case .insertionAlreadyAttempted(let id):
-            "dictation session insertion was already attempted: " + id.uuidString
-        case .activeSession(let id):
-            "dictation session is active and cannot be deleted: " + id.uuidString
+        case .insertionAlreadyAttempted:
+            "dictation session insertion was already attempted"
+        case .activeSession:
+            "dictation session is active and cannot be deleted"
         case .rawTextChanged:
             "raw transcript changed while derived text was pending"
         case .deletionConfirmationRequired:

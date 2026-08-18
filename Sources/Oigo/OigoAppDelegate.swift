@@ -460,7 +460,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             shortcutRegistered = true
         } catch {
-            NSLog("Oigo could not register the global toggle shortcut: %@", String(describing: error))
+            NSLog("Oigo could not register the global toggle shortcut: %@", Self.failureReason(for: error))
         }
     }
 
@@ -547,7 +547,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 await self?.performToggle()
             }
         } catch {
-            NSLog("Oigo could not start its coordinator-owned toggle task: %@", String(describing: error))
+            NSLog("Oigo could not start its coordinator-owned toggle task: %@", Self.failureReason(for: error))
         }
     }
 
@@ -861,7 +861,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     insertionText: rawText,
                     cleanText: nil,
                     insertionSource: .raw,
-                    fallbackReason: .persistenceFailure(String(describing: error)),
+                    fallbackReason: .persistenceFailure(Self.failureReason(for: error)),
                     chunkCount: decision.chunkCount
                 )
             }
@@ -975,7 +975,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     throw error
                 }
                 let fallbackReason = TranscriptCleanupFallbackReason
-                    .persistenceFailure(String(describing: error))
+                    .persistenceFailure(Self.failureReason(for: error))
                     .description
                 try Task.checkCancellation()
                 _ = try store.update(
@@ -1322,7 +1322,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             let alert = NSAlert()
             alert.messageText = "Launch at Login could not be changed"
-            alert.informativeText = String(describing: error)
+            alert.informativeText = Self.failureReason(for: error)
             alert.runModal()
         }
     }
@@ -1334,7 +1334,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         do {
             _ = try playback.play(url: session.audioURL)
         } catch {
-            NSLog("Oigo could not play the last recording: %@", String(describing: error))
+            NSLog("Oigo could not play the last recording: %@", Self.failureReason(for: error))
         }
     }
 
@@ -1472,7 +1472,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 try launchAtLoginController.setEnabled(newSettings.launchAtLogin)
             } catch {
                 registerShortcut()
-                return "Launch at Login could not be changed: " + String(describing: error)
+                return "Launch at Login could not be changed: " + Self.failureReason(for: error)
             }
         }
         settings = newSettings
@@ -1501,7 +1501,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             shortcutRegistrar.unregister()
             registerShortcut()
-            return .conflict(String(describing: error))
+            return .conflict(Self.failureReason(for: error))
         }
     }
 
@@ -1540,7 +1540,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             let alert = NSAlert()
             alert.messageText = "Delete All History failed"
-            alert.informativeText = String(describing: error)
+            alert.informativeText = Self.failureReason(for: error)
             alert.runModal()
         }
     }
@@ -1674,7 +1674,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 return "durable session storage is unavailable"
             }
         }
-        return String(describing: error)
+        return "operation failed"
     }
 
     private static func displayStatus(for outcome: InsertionOutcome) -> OigoHUDProcessingState {

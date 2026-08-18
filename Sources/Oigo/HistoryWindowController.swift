@@ -453,9 +453,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         switch loadTranscript(entry, selectedTranscriptSource) {
         case .success(let transcript):
             transcriptView.string = transcript
-        case .failure(let error):
+        case .failure:
             transcriptView.string = "Transcript unavailable."
-            showMessage("Could not load the selected transcript: " + String(describing: error))
+            showMessage("Could not load the selected transcript.")
         }
         setActionButtons(enabled: true, entry: entry)
     }
