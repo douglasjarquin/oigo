@@ -4,9 +4,9 @@ This is a bounded handoff for the native validation work owned by #12.
 
 It records storage-health evidence only and does not claim that the #12 release-validation matrix is complete.
 
-Reviewed implementation SHA for this handoff: `55de6ba328f4d4f78daee8d6b10970acf2ae9311`.
+The final PR body and hosted verification receipt are the authoritative exact-head binding for these rows.
 
-The final PR receipt must bind these rows to one exact final source SHA and the exact `Oigo.app` bundle path below.
+This handoff table intentionally carries no independently stale parent SHA.
 
 | #12 handoff row | Result | Evidence | Limitation or follow-up |
 | --- | --- | --- | --- |
