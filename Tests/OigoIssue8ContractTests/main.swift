@@ -631,7 +631,7 @@ private struct OigoIssue8ContractTests {
             store: store,
             target: snapshot
         )
-        guard result.outcome == .pasted,
+        guard result.outcome == .dispatched,
               pasteboard.value == "clean only",
               try store.readRawText(for: persistedClean) == "raw only" else {
             throw ContractFailure(message: "clean insertion did not use the separate clean transcript")
@@ -1051,6 +1051,6 @@ private final class ContractEventSender: InsertionEventSender {
         revalidate: () -> TargetValidation
     ) -> InsertionEventResult {
         _ = processIdentifier
-        return revalidate() == .safe ? .sent : .failed
+        return revalidate() == .safe ? .dispatched : .failed
     }
 }

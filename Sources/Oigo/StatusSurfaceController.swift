@@ -113,7 +113,7 @@ final class StatusSurfaceController {
         detailLabel.stringValue = detail
         position(anchoredTo: button)
         panel.orderFront(nil)
-        guard [.pasted, .copied, .failed].contains(state) else {
+        guard [.pasteAttempted, .pasted, .copied, .failed].contains(state) else {
             return
         }
         dismissalTask = Task { @MainActor [weak self] in

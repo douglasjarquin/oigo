@@ -150,6 +150,7 @@ public enum DictationFailureCode: String, Codable, CaseIterable, Equatable, Send
 
 public enum InsertionOutcome: String, Codable, CaseIterable, Equatable, Sendable {
     case pasted
+    case dispatched
     case copied
     case secureRejected
     case failed

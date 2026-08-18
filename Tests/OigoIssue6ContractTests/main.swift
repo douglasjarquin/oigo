@@ -140,7 +140,13 @@ private struct OigoIssue6ContractTests {
             currentFocusedElementIdentifier: "field-7",
             currentRole: "AXTextArea",
             currentIsSecureTextField: false,
-            accessibilityTrusted: true
+            accessibilityTrusted: true,
+            currentCapabilities: InsertionTargetCapabilities(
+                supportsValue: true,
+                valueIsSettable: true,
+                supportsSelectedText: false,
+                selectedTextIsSettable: false
+            )
         )
         let changedApplication = TargetValidation.evaluate(
             snapshot: snapshot,
@@ -234,7 +240,7 @@ private struct OigoIssue6ContractTests {
               secureCurrent == .secureTextField,
               inaccessible == .accessibilityUnavailable,
               missingFocus == .missingFocusedElement,
-              nonEditable == .nonEditableRole,
+              nonEditable == .unsupportedTarget,
               secureSnapshotResult == .secureTextField else {
             throw ContractFailure(message: "target validation did not compare live PID, focus, secure, and Accessibility state")
         }
@@ -324,7 +330,7 @@ private struct OigoIssue6ContractTests {
             .applicationChanged,
             .focusedElementChanged,
             .missingFocusedElement,
-            .nonEditableRole
+            .unsupportedTarget
         ]
         let target = InsertionTargetSnapshot(
             frontmostProcessIdentifier: 42,
@@ -378,7 +384,7 @@ private struct OigoIssue6ContractTests {
             pasteboard: pasteboard,
             eventSender: FakeEventSender()
         ).insertRawText(for: session, store: store, target: target)
-        guard result.outcome == .pasted, sawPersistedRawText else {
+        guard result.outcome == .dispatched, sawPersistedRawText else {
             throw ContractFailure(message: "clipboard write did not observe the persisted raw transcript")
         }
     }
@@ -416,10 +422,10 @@ private struct OigoIssue6ContractTests {
             eventSender: eventSender
         ).insertRawText(for: session, store: store, target: target)
         let next = service.insertRawText(for: secondSession, store: secondStore, target: target)
-        guard first.outcome == .pasted,
+        guard first.outcome == .dispatched,
               second.outcome == .failed,
               persistedRetry.outcome == .failed,
-              next.outcome == .pasted,
+              next.outcome == .dispatched,
               pasteboard.writes == ["one shot transcript", "next session transcript"],
               eventSender.sendCalls == 2 else {
             throw ContractFailure(message: "duplicate completion attempted more than one insertion")
@@ -516,7 +522,7 @@ private final class FakeEventSender: InsertionEventSender {
             return .targetUnsafe(validation)
         }
         sendCalls += 1
-        return .sent
+        return .dispatched
     }
 }
 

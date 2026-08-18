@@ -643,11 +643,11 @@ private struct OigoIssue7ContractTests {
         ).insertRawText(for: persistedRecovery, store: store, target: target)
 
         guard first.outcome == .failed,
-              recovered.outcome == .pasted,
+              recovered.outcome == .dispatched,
               automaticReplay.outcome == .failed,
               pasteboard.writes == ["recover this paste", "recover this paste"],
               sender.sendCalls == 1,
-              persistedRecovery.metadata.insertionOutcome == .pasted else {
+              persistedRecovery.metadata.insertionOutcome == .dispatched else {
             throw ContractFailure(message: "Paste Again did not recover the failed insertion without reopening automatic insertion")
         }
     }
@@ -700,7 +700,7 @@ private final class Issue7EventSender: InsertionEventSender {
             return .targetUnsafe(.applicationChanged)
         }
         sendCalls += 1
-        return .sent
+        return .dispatched
     }
 }
 

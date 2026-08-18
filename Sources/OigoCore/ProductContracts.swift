@@ -774,6 +774,7 @@ public enum OigoHUDProcessingState: String, CaseIterable, Sendable {
     case finalizing = "Finalizing"
     case cleaning = "Cleaning"
     case pasting = "Pasting"
+    case pasteAttempted = "Paste attempted"
     case pasted = "Pasted"
     case copied = "Copied"
     case failed = "Failed"

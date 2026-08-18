@@ -9,6 +9,45 @@ import OigoTranscription
 import OigoInsertion
 import OigoHotKey
 
+@MainActor
+private final class DestinationHandoffWaiter {
+    private var observer: NSObjectProtocol?
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var finished = false
+
+    func wait() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            self.continuation = continuation
+            observer = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.finish()
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.finish()
+            }
+        }
+    }
+
+    private func finish() {
+        guard !finished else {
+            return
+        }
+        finished = true
+        if let observer {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        self.observer = nil
+        let continuation = self.continuation
+        self.continuation = nil
+        continuation?.resume()
+    }
+}
+
 @available(macOS 26.0, *)
 @MainActor
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
@@ -67,6 +106,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var targetSnapshot: InsertionTargetSnapshot?
     private var insertionDisplayStatus: OigoHUDProcessingState?
     private var failureDetail: String?
+    private lazy var insertionTargetHandoff = InsertionTargetHandoff(
+        waitForDestination: { [weak self] in
+            await self?.waitForDestinationHandoff()
+        }
+    )
+    private lazy var pasteAgainFlow = InsertionPasteAgainFlow(handoff: insertionTargetHandoff)
     private var onboardingWindow: OnboardingWindowController?
     private var recordingStartedAt: Date?
     private var previewThrottle = OigoHUDPreviewThrottle()
@@ -74,6 +119,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var finishRequestedAfterStart = false
     private var shortcutFeedbackDetail: String?
     private var cleanAgainTask: Task<Void, Never>?
+    private var pasteAgainTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
     private var workspaceInterruptionTask: Task<Void, Never>?
     private var workspaceInterruptionOperationID: UUID?
@@ -124,15 +170,18 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         playback.stop()
         let activeToggleTask = toggleTask
         let activeCleanAgainTask = cleanAgainTask
+        let activePasteAgainTask = pasteAgainTask
         let activeRetryTask = retryTask
         let activeWorkspaceInterruptionTask = workspaceInterruptionTask
         activeToggleTask?.cancel()
         activeCleanAgainTask?.cancel()
+        activePasteAgainTask?.cancel()
         activeRetryTask?.cancel()
         activeWorkspaceInterruptionTask?.cancel()
         if coordinator.hasActiveWork
             || activeToggleTask != nil
             || activeCleanAgainTask != nil
+            || activePasteAgainTask != nil
             || activeRetryTask != nil
             || activeWorkspaceInterruptionTask != nil
             || storageWasChecking {
@@ -153,6 +202,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     await self.finishApplicationTermination(
                         activeToggleTask: activeToggleTask,
                         activeCleanAgainTask: activeCleanAgainTask,
+                        activePasteAgainTask: activePasteAgainTask,
                         activeRetryTask: activeRetryTask,
                         activeWorkspaceInterruptionTask: activeWorkspaceInterruptionTask
                     )
@@ -169,6 +219,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func finishApplicationTermination(
         activeToggleTask: Task<Void, Never>?,
         activeCleanAgainTask: Task<Void, Never>?,
+        activePasteAgainTask: Task<Void, Never>?,
         activeRetryTask: Task<Void, Never>?,
         activeWorkspaceInterruptionTask: Task<Void, Never>?
     ) async {
@@ -190,6 +241,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 registry: lifecycleOperationRegistry
             ) {
                 await activeCleanAgainTask.value
+            }
+        }
+        if let activePasteAgainTask {
+            _ = try? await BoundedOperation.run(
+                operationID: lifecycleOperationID,
+                stage: .shutdown,
+                timeout: TranscriptionTimeoutPolicy.production.budget(for: .shutdown),
+                registry: lifecycleOperationRegistry
+            ) {
+                await activePasteAgainTask.value
             }
         }
         if coordinator.hasActiveTranscription {
@@ -646,9 +707,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 let activeToggleTask = self.toggleTask
                 let activeCleanAgainTask = self.cleanAgainTask
+                let activePasteAgainTask = self.pasteAgainTask
                 let activeRetryTask = self.retryTask
                 activeToggleTask?.cancel()
                 activeCleanAgainTask?.cancel()
+                activePasteAgainTask?.cancel()
                 activeRetryTask?.cancel()
                 await self.coordinator.cancelActiveWork(reason: reason)
                 if let activeToggleTask {
@@ -657,12 +720,15 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 if let activeCleanAgainTask {
                     await activeCleanAgainTask.value
                 }
+                if let activePasteAgainTask {
+                    await activePasteAgainTask.value
+                }
                 if let activeRetryTask {
                     await activeRetryTask.value
                 }
                 self.lastSession = self.coordinator.currentSession ?? self.lastSession
                 self.recordingStartedAt = nil
-                self.targetSnapshot = nil
+                self.clearTargetSnapshot()
                 self.livePreview = ""
                 self.insertionDisplayStatus = nil
             }
@@ -733,6 +799,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             showShortcutFeedback(.ignoredBusy(coordinator.state))
             return
         }
+        guard pasteAgainTask == nil else {
+            shortcutBridge.reset()
+            shortcutFeedbackDetail = "Paste Again is finishing. Try again in a moment."
+            historyWindow?.showMessage(shortcutFeedbackDetail ?? "Paste Again is finishing.")
+            updateSurface()
+            return
+        }
         do {
             toggleTask = try coordinator.startTask { @MainActor [weak self] in
                 guard let self else { return }
@@ -762,6 +835,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             showShortcutFeedback(.ignoredBusy(coordinator.state))
             return
         }
+        guard pasteAgainTask == nil else {
+            shortcutBridge.reset()
+            shortcutFeedbackDetail = "Paste Again is finishing. Try again in a moment."
+            historyWindow?.showMessage(shortcutFeedbackDetail ?? "Paste Again is finishing.")
+            updateSurface()
+            return
+        }
         do {
             toggleTask = try coordinator.startTask { @MainActor [weak self] in
                 guard let self else { return }
@@ -784,14 +864,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             guard self.coordinator.hasActiveTranscription else {
                 self.recordingStartedAt = nil
-                self.targetSnapshot = nil
+                self.clearTargetSnapshot()
                 self.statusSurface.hide()
                 self.updateSurface()
                 return
             }
             _ = try? await self.coordinator.cancelRecordingWithTranscription()
             self.recordingStartedAt = nil
-            self.targetSnapshot = nil
+            self.clearTargetSnapshot()
             self.insertionDisplayStatus = nil
             self.statusSurface.hide()
             self.updateSurface()
@@ -817,16 +897,27 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             switch coordinator.state {
             case .idle, .complete, .failed, .cancelled, .interrupted:
                 insertionDisplayStatus = nil
+                failureDetail = nil
+                shortcutFeedbackDetail = nil
+                let microphoneStateBeforeRequest = microphonePermissionState()
+                targetSnapshot = try await insertion.captureTargetBeforeMicrophonePermission {
+                    try await self.ensureMicrophonePermission()
+                }
+                try Task.checkCancellation()
+                guard microphoneStateBeforeRequest == .granted else {
+                    clearTargetSnapshot()
+                    shortcutBridge.reset()
+                    failureDetail = "microphone_permission_retry_required"
+                    shortcutFeedbackDetail = "Microphone permission granted. Press the shortcut again to start dictation."
+                    historyWindow?.showMessage(shortcutFeedbackDetail ?? "Press the shortcut again to start dictation.")
+                    updateSurface()
+                    return
+                }
                 lastSession = try await DurableSessionDictationBoundary.withPersistedSession(
                     using: storageCapability
                 ) { [self] persistedSession, store in
                     pendingSessionBoundary = persistedSession
                     lastSession = persistedSession
-                    failureDetail = nil
-                    insertionDisplayStatus = nil
-                    try await ensureMicrophonePermission()
-                    try Task.checkCancellation()
-                    targetSnapshot = insertion.captureTarget()
                     recorder.setInputSelection(settings.selectedInput)
                     let format = try recorder.captureFormat()
                     try Task.checkCancellation()
@@ -890,7 +981,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 insertionDisplayStatus = .pasting
                 updateSurface()
-                explainAccessibilityBeforePaste()
                 let result: InsertionResult = {
                     performanceInstrumentation.mark(.insertionStart)
                     defer { performanceInstrumentation.mark(.insertionEnd) }
@@ -915,11 +1005,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 )
                 if let fallbackReason = decision.fallbackReason {
                     historyWindow?.showMessage(
-                        "Clean unavailable. Inserted the raw transcript: " + fallbackReason.description
+                        Self.cleanFallbackMessage(result: result, reason: fallbackReason.description)
                     )
                 }
                 insertionDisplayStatus = Self.displayStatus(for: result.outcome)
-                targetSnapshot = nil
+                clearTargetSnapshot()
                 livePreview = ""
             case .preparing, .finalizing, .cleaning, .inserting:
                 throw DictationTransitionError.illegal(
@@ -939,7 +1029,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             )
             lastSession = coordinator.currentSession ?? lastSession
             recordingStartedAt = nil
-            targetSnapshot = nil
+            clearTargetSnapshot()
             livePreview = ""
             if !coordinator.hasActiveWork {
                 insertionDisplayStatus = nil
@@ -958,7 +1048,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             markStorageUnhealthyIfNeeded(error)
             shortcutBridge.reset()
             lastSession = coordinator.currentSession ?? lastSession
-            targetSnapshot = nil
+            clearTargetSnapshot()
             recordingStartedAt = nil
             insertionDisplayStatus = .failed
             failureDetail = Self.friendlyError("Dictation failed", error)
@@ -1025,7 +1115,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             insertionDisplayStatus = .pasting
             updateSurface()
-            explainAccessibilityBeforePaste()
             let result: InsertionResult = {
                 performanceInstrumentation.mark(.insertionStart)
                 defer { performanceInstrumentation.mark(.insertionEnd) }
@@ -1050,11 +1139,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             )
             if let fallbackReason = decision.fallbackReason {
                 historyWindow?.showMessage(
-                    "Clean unavailable. Inserted the raw transcript: " + fallbackReason.description
+                    Self.cleanFallbackMessage(result: result, reason: fallbackReason.description)
                 )
             }
             insertionDisplayStatus = Self.displayStatus(for: result.outcome)
-            targetSnapshot = nil
+            clearTargetSnapshot()
             livePreview = ""
             if historyWindow != nil {
                 refreshHistory()
@@ -1065,7 +1154,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             shortcutBridge.reset()
             lastSession = coordinator.currentSession ?? lastSession
             recordingStartedAt = nil
-            targetSnapshot = nil
+            clearTargetSnapshot()
             livePreview = ""
             if !coordinator.hasActiveWork {
                 insertionDisplayStatus = nil
@@ -1079,7 +1168,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             markStorageUnhealthyIfNeeded(error)
             shortcutBridge.reset()
             lastSession = coordinator.currentSession ?? lastSession
-            targetSnapshot = nil
+            clearTargetSnapshot()
             recordingStartedAt = nil
             insertionDisplayStatus = .failed
             if let session = coordinator.currentSession,
@@ -1409,106 +1498,106 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func pasteCleanAgain(for entry: SessionHistoryEntry) {
-        guard storageCapability.health.isReady,
-              let store = sessionStore else {
-            return
-        }
-        historyWindow?.window?.orderOut(nil)
-        NSApp.hide(nil)
-        DispatchQueue.main.async { [weak self] in
-            guard let self else {
-                return
-            }
-            guard self.storageCapability.health.isReady else {
-                return
-            }
-            defer {
-                self.historyWindow?.showAndFocus()
-                self.historyWindow?.showCleanTranscript()
-                self.updateSurface()
-            }
-            let target = self.insertion.captureTarget()
-            let result = self.insertion.pasteAgain(
-                for: entry.session,
-                source: .clean,
-                store: store,
-                target: target
-            )
-            do {
-                let updated = try store.update(
-                    entry.session,
-                    state: entry.session.metadata.state,
-                    at: Date(),
-                    insertionOutcome: result.outcome,
-                    insertionFailureReason: result.reason,
-                    insertionTextSource: .clean
-                )
-                self.lastSession = updated
-                self.insertionDisplayStatus = Self.displayStatus(for: result.outcome)
-                switch result.outcome {
-                case .pasted:
-                    self.historyWindow?.showMessage("Clean transcript pasted again.")
-                case .copied, .secureRejected:
-                    self.historyWindow?.showMessage("Clean transcript copied. " + (result.reason ?? "Paste was not sent."))
-                case .failed:
-                    self.historyWindow?.showMessage("Paste Clean Again failed: " + (result.reason ?? "the paste could not be completed"))
-                }
-                self.refreshHistory()
-            } catch {
-                self.markStorageUnhealthyIfNeeded(error)
-                self.historyWindow?.showMessage(Self.friendlyError("Paste Clean Again failed", error))
-            }
-        }
+        beginPasteAgain(for: entry, source: .clean)
     }
 
     private func pasteAgain(for entry: SessionHistoryEntry) {
+        beginPasteAgain(for: entry, source: .raw)
+    }
+
+    private func beginPasteAgain(
+        for entry: SessionHistoryEntry,
+        source: TranscriptInsertionSource
+    ) {
         guard storageCapability.health.isReady,
               let store = sessionStore else {
             return
         }
+        guard pasteAgainTask == nil,
+              toggleTask == nil,
+              !coordinator.hasActiveWork else {
+            historyWindow?.showMessage(
+                "Paste Again is unavailable while dictation or another insertion is active."
+            )
+            return
+        }
         historyWindow?.window?.orderOut(nil)
         NSApp.hide(nil)
-        DispatchQueue.main.async { [weak self] in
+        pasteAgainTask = Task { @MainActor [weak self] in
             guard let self else {
                 return
             }
-            guard self.storageCapability.health.isReady else {
-                return
-            }
             defer {
-                self.historyWindow?.showAndFocus()
+                self.pasteAgainTask = nil
                 self.updateSurface()
             }
-            let target = self.insertion.captureTarget()
-            let result = self.insertion.pasteAgain(
-                for: entry.session,
-                store: store,
-                target: target
-            )
-            do {
-                let updated = try store.update(
-                    entry.session,
-                    state: entry.session.metadata.state,
-                    at: Date(),
-                    insertionOutcome: result.outcome,
-                    insertionFailureReason: result.reason,
-                    insertionTextSource: .raw
-                )
-                self.lastSession = updated
-                self.insertionDisplayStatus = Self.displayStatus(for: result.outcome)
-                switch result.outcome {
-                case .pasted:
-                    self.historyWindow?.showMessage("Pasted again.")
-                case .copied, .secureRejected:
-                    self.historyWindow?.showMessage("Raw transcript copied. " + (result.reason ?? "Paste was not sent."))
-                case .failed:
-                    self.historyWindow?.showMessage("Paste Again failed: " + (result.reason ?? "the paste could not be completed"))
+            guard self.storageCapability.health.isReady else {
+                self.historyWindow?.showMessage(self.storageCapability.health.statusMessage)
+                self.historyWindow?.showAndFocus()
+                if source == .clean {
+                    self.historyWindow?.showCleanTranscript()
                 }
-                self.refreshHistory()
-            } catch {
-                self.markStorageUnhealthyIfNeeded(error)
-                self.historyWindow?.showMessage(Self.friendlyError("Paste Again failed", error))
+                return
             }
+            _ = await self.pasteAgainFlow.run(
+                capture: {
+                    self.insertion.captureTarget()
+                },
+                paste: { target in
+                    self.insertion.pasteAgain(
+                        for: entry.session,
+                        source: source,
+                        store: store,
+                        target: target
+                    )
+                },
+                copyOnly: { selection in
+                    let reasonCode: InsertionReasonCode = switch selection {
+                    case .timedOut:
+                        .targetHandoffTimedOut
+                    case .cancelled:
+                        .targetHandoffCancelled
+                    case .ready:
+                        .targetHandoffCancelled
+                    }
+                    return self.insertion.copyText(
+                        for: entry.session,
+                        source: source,
+                        store: store,
+                        reasonCode: reasonCode
+                    )
+                },
+                recordOutcome: { result in
+                    do {
+                        let updated = try store.update(
+                            entry.session,
+                            state: entry.session.metadata.state,
+                            at: Date(),
+                            insertionOutcome: result.outcome,
+                            insertionFailureReason: result.reason,
+                            insertionTextSource: source
+                        )
+                        self.lastSession = updated
+                        self.insertionDisplayStatus = Self.displayStatus(for: result.outcome)
+                        self.historyWindow?.showMessage(
+                            Self.pasteAgainMessage(source: source, result: result)
+                        )
+                        self.refreshHistory()
+                    } catch {
+                        self.markStorageUnhealthyIfNeeded(error)
+                        self.historyWindow?.showMessage(
+                            Self.friendlyError("Paste Again failed", error)
+                        )
+                    }
+                    self.historyWindow?.showAndFocus()
+                    if source == .clean {
+                        self.historyWindow?.showCleanTranscript()
+                    }
+                },
+                discard: { target in
+                    self.insertion.discardTarget(target)
+                }
+            )
         }
     }
 
@@ -2083,23 +2172,53 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func explainAccessibilityBeforePaste() {
-        guard accessibilityPermissionState() != .granted else {
-            return
+    private func openSystemSettings(_ url: URL) {
+        NSWorkspace.shared.open(url)
+    }
+
+    private func waitForDestinationHandoff() async {
+        await DestinationHandoffWaiter().wait()
+    }
+
+    private func clearTargetSnapshot() {
+        if let targetSnapshot {
+            insertion.discardTarget(targetSnapshot)
         }
-        let presentation = OigoPermissionPresentation.accessibility(.denied)
-        let alert = NSAlert()
-        alert.messageText = presentation.title
-        alert.informativeText = presentation.explanation
-        alert.addButton(withTitle: "Open Accessibility Settings")
-        alert.addButton(withTitle: "Copy Only")
-        if alert.runModal() == .alertFirstButtonReturn {
-            openSystemSettings(presentation.settingsURL)
+        targetSnapshot = nil
+    }
+
+    private static func pasteAgainMessage(
+        source: TranscriptInsertionSource,
+        result: InsertionResult
+    ) -> String {
+        let label = source == .clean ? "Clean transcript" : "Transcript"
+        switch result.outcome {
+        case .pasted:
+            return label + " pasted again."
+        case .dispatched:
+            return label + " paste attempted. Clipboard retained."
+        case .copied, .secureRejected:
+            return label + " copied. " + (result.reason ?? "Paste was not sent.")
+        case .failed:
+            return "Paste Again failed: " + (result.reason ?? "the paste could not be completed")
         }
     }
 
-    private func openSystemSettings(_ url: URL) {
-        NSWorkspace.shared.open(url)
+    private static func cleanFallbackMessage(
+        result: InsertionResult,
+        reason: String
+    ) -> String {
+        let outcomeMessage: String = switch result.outcome {
+        case .pasted:
+            "Raw transcript inserted."
+        case .dispatched:
+            "Raw transcript paste attempted; clipboard retained."
+        case .copied, .secureRejected:
+            "Raw transcript copied."
+        case .failed:
+            "Raw transcript was not inserted."
+        }
+        return "Clean unavailable. " + outcomeMessage + " " + reason
     }
 
     private func microphonePermissionState() -> OigoPermissionState {
@@ -2141,6 +2260,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             "Applying Clean mode when available"
         case .pasting:
             "Sending the completed transcript to the original field"
+        case .pasteAttempted:
+            "Paste attempted; clipboard retained"
         case .pasted:
             "Transcript inserted"
         case .copied:
@@ -2190,6 +2311,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         switch outcome {
         case .pasted:
             .pasted
+        case .dispatched:
+            .pasteAttempted
         case .copied, .secureRejected:
             .copied
         case .failed:

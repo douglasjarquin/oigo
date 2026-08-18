@@ -586,7 +586,7 @@ private final class TestEventSender: InsertionEventSender {
         revalidate: () -> TargetValidation
     ) -> InsertionEventResult {
         sendCount += 1
-        return .sent
+        return .dispatched
     }
 }
 
