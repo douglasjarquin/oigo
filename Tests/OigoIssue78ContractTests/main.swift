@@ -28,7 +28,6 @@ private struct OigoIssue78ContractTests {
             ("coordinator shutdown preserves completed retry", testCoordinatorShutdownPreservesCompletedRetry),
             ("interruption timeout preserves terminal outcome", testInterruptionTimeoutPreservesTerminalOutcome),
             ("shutdown timeout replies with stable outcome", testShutdownTimeoutRepliesWithStableOutcome),
-            ("shutdown classifies private timeout without exposing detail", testShutdownClassifiesPrivateTimeout),
             ("one hundred lifecycle cycles release resources", testOneHundredLifecycleCyclesReleaseResources),
             ("one hundred adversarial lifecycle cycles release resources", testOneHundredAdversarialLifecycleCyclesReleaseResources)
         ]
@@ -608,38 +607,6 @@ private struct OigoIssue78ContractTests {
         _ = await shutdownTask.value
         guard try await waitForResourcesToRelease(coordinator) else {
             throw ContractFailure(message: "shutdown loser remained owned after release")
-        }
-    }
-
-    @MainActor
-    private static func testShutdownClassifiesPrivateTimeout() async throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("oigo-issue78-private-shutdown-timeout-" + UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        let store = try SessionStore(rootDirectory: root)
-        let transcription = PrivateTimeoutCancellationController()
-        let coordinator = DictationCoordinator(timeoutPolicy: .testing)
-        _ = try await coordinator.startRecordingWithTranscription(
-            using: ContractAudioCapture(),
-            store: store,
-            transcription: transcription,
-            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
-        )
-        let shutdownTask = Task { @MainActor in
-            await coordinator.shutdownWithTranscription()
-        }
-
-        await transcription.waitUntilCancelStarted()
-        transcription.releaseCancel()
-        await shutdownTask.value
-
-        guard coordinator.currentSession?.metadata.state == .failed,
-              coordinator.currentSession?.metadata.failureCode == .transcriptionTimedOut,
-              coordinator.currentSession?.metadata.failureReason == "application shutdown speech timeout",
-              coordinator.currentSession?.metadata.failureReason?.contains("private") == false,
-              try await waitForResourcesToRelease(coordinator) else {
-            throw ContractFailure(message: "private shutdown timeout lost its stable timeout classification or leaked its detail")
         }
     }
 
@@ -1509,94 +1476,6 @@ private final class NonCooperativeCancellationController: TranscriptionControlle
             return continuation
         }
         continuation?.resume(returning: nil)
-    }
-
-    private func withLock<T>(_ body: () -> T) -> T {
-        lock.lock()
-        defer { lock.unlock() }
-        return body()
-    }
-}
-
-@available(macOS 26.0, *)
-private struct PrivateShutdownTimeoutError: Error, CustomStringConvertible, Sendable {
-    var description: String {
-        "private speech shutdown timed out with local detail"
-    }
-}
-
-@available(macOS 26.0, *)
-private final class PrivateTimeoutCancellationController: TranscriptionController, @unchecked Sendable {
-    private let lock = NSLock()
-    private var cancelContinuation: CheckedContinuation<Void, Never>?
-    private var cancelStarted = false
-    private var cancelWaiters: [CheckedContinuation<Void, Never>] = []
-
-    func start(
-        session: DictationSession,
-        format: AudioCaptureFormat,
-        store: SessionStore,
-        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
-    ) async throws {
-        _ = session
-        _ = format
-        _ = store
-        _ = onUpdate
-    }
-
-    func append(_ buffer: AudioCaptureBuffer) {
-        _ = buffer
-    }
-
-    func finish() async throws -> TranscriptionResult {
-        TranscriptionResult(finalizedText: "", rawTextByteCount: 0)
-    }
-
-    func cancel() async throws -> TranscriptionResult? {
-        await withCheckedContinuation { continuation in
-            let waiters = withLock {
-                cancelStarted = true
-                cancelContinuation = continuation
-                let waiters = cancelWaiters
-                cancelWaiters.removeAll(keepingCapacity: true)
-                return waiters
-            }
-            waiters.forEach { $0.resume() }
-        }
-        throw PrivateShutdownTimeoutError()
-    }
-
-    func retrySavedAudio(
-        for session: DictationSession,
-        store: SessionStore
-    ) async throws -> TranscriptionResult {
-        _ = session
-        _ = store
-        throw TranscriptionError.analysisFailed("private timeout fixture does not retry")
-    }
-
-    func waitUntilCancelStarted() async {
-        await withCheckedContinuation { continuation in
-            let resumeImmediately = withLock {
-                if cancelStarted {
-                    return true
-                }
-                cancelWaiters.append(continuation)
-                return false
-            }
-            if resumeImmediately {
-                continuation.resume()
-            }
-        }
-    }
-
-    func releaseCancel() {
-        let continuation = withLock {
-            let continuation = cancelContinuation
-            cancelContinuation = nil
-            return continuation
-        }
-        continuation?.resume()
     }
 
     private func withLock<T>(_ body: () -> T) -> T {

@@ -1419,13 +1419,6 @@ public final class DictationCoordinator {
         return "operation failed"
     }
 
-    private static func isTranscriptionTimeout(_ error: Error) -> Bool {
-        if error is BoundedOperationError {
-            return true
-        }
-        return DictationFailureCode.infer(from: String(describing: error)) == .transcriptionTimedOut
-    }
-
     private func failureCode(
         for state: DictationSessionState,
         reason: String?
@@ -1803,7 +1796,8 @@ public final class DictationCoordinator {
                 result = nil
                 terminalState = .failed
                 terminalEvent = .fail
-                if Self.isTranscriptionTimeout(error) {
+                if error is BoundedOperationError
+                    || DictationFailureCode.infer(from: String(describing: error)) == .transcriptionTimedOut {
                     terminalReason = "application shutdown speech timeout"
                     terminalFailureCode = .transcriptionTimedOut
                 } else {
