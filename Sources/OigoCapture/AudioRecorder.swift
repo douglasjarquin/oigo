@@ -125,7 +125,11 @@ public final class SystemAudioDeviceMonitor: AudioDeviceMonitoring, @unchecked S
             throw AudioRecorderError.inputDeviceUnavailable
         }
 
-        let deviceCount = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        let deviceIDByteCount = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard dataSize % deviceIDByteCount == 0 else {
+            throw AudioRecorderError.inputDeviceUnavailable
+        }
+        let deviceCount = Int(dataSize / deviceIDByteCount)
         guard deviceCount > 0 else {
             return []
         }
@@ -572,11 +576,22 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             throw AudioRecorderError.missingApplicationBundle
         }
 
+        lock.lock()
+        let unavailable = recording || starting || finishing
+        lock.unlock()
+        guard !unavailable else {
+            throw AudioRecorderError.alreadyRecording
+        }
+
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
         let preparation = try prepareInput(on: inputNode)
         let inputConfiguration = preparation.configuration
         lock.lock()
+        guard !recording, !starting, !finishing else {
+            lock.unlock()
+            throw AudioRecorderError.alreadyRecording
+        }
         preparedEngine = engine
         preparedInput = PreparedInput(
             selection: preparation.selection,
@@ -636,11 +651,12 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         onInterruption: @escaping @Sendable (String) -> Void,
         onFailure: @escaping @Sendable (String) -> Void
     ) throws {
-        lock.lock()
-        let alreadyRecording = recording || starting || finishing
-        lock.unlock()
-        guard !alreadyRecording else {
-            throw AudioRecorderError.alreadyRecording
+        let recordingGeneration = try claimStart()
+        var startCompleted = false
+        defer {
+            if !startCompleted {
+                cancel()
+            }
         }
 
         guard Bundle.main.bundleIdentifier != nil else {
@@ -684,6 +700,10 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         )
 
         lock.lock()
+        guard starting && recordingFence.accepts(recordingGeneration) else {
+            lock.unlock()
+            throw AudioRecorderError.inputDeviceUnavailable
+        }
         self.engine = engine
         audioFile = file
         audioFileDescriptor = descriptor
@@ -691,9 +711,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         self.onFinish = onFinish
         self.onInterruption = onInterruption
         self.onFailure = onFailure
-        starting = true
         pendingInterruptionReason = nil
-        let recordingGeneration = recordingFence.begin()
         failureReported = false
         firstBufferReported = false
         lock.unlock()
@@ -763,15 +781,36 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                 finish(resources) {
                     callback?(startupInterruption)
                 }
+                startCompleted = true
                 return
             }
             guard startupIsCurrent else {
                 throw AudioRecorderError.inputDeviceUnavailable
             }
+            startCompleted = true
         } catch {
             cancel()
             throw AudioRecorderError.engineStartFailed(String(describing: error))
         }
+    }
+
+    private func claimStart() throws -> UInt64 {
+        let generation: UInt64? = callbackDeliveryGate.performExclusively {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !recording, !starting, !finishing else {
+                return nil
+            }
+            starting = true
+            pendingInterruptionReason = nil
+            failureReported = false
+            firstBufferReported = false
+            return recordingFence.begin()
+        }
+        guard let generation else {
+            throw AudioRecorderError.alreadyRecording
+        }
+        return generation
     }
 
     private func prepareInput(
