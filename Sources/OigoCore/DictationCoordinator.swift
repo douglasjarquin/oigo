@@ -424,7 +424,7 @@ public final class DictationCoordinator {
             return preparedSession
         } catch {
             capture.cancel()
-            let reason = String(describing: error)
+            let reason = Self.failureReason(for: error)
             lastFailureReason = reason
             lastFailureCode = DictationFailureCode.infer(from: reason)
             let failedSession = persistTerminalState(
@@ -452,6 +452,46 @@ public final class DictationCoordinator {
         now: Date = Date(),
         onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in }
     ) async throws -> DictationSession {
+        try await startRecordingWithTranscriptionInternal(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: format,
+            session: nil,
+            now: now,
+            onUpdate: onUpdate
+        )
+    }
+
+    public func startPersistedRecordingWithTranscription(
+        _ session: DictationSession,
+        using capture: AudioCapturing,
+        store: SessionStore,
+        transcription: TranscriptionController,
+        format: AudioCaptureFormat,
+        now: Date = Date(),
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in }
+    ) async throws -> DictationSession {
+        try await startRecordingWithTranscriptionInternal(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: format,
+            session: session,
+            now: now,
+            onUpdate: onUpdate
+        )
+    }
+
+    private func startRecordingWithTranscriptionInternal(
+        using capture: AudioCapturing,
+        store: SessionStore,
+        transcription: TranscriptionController,
+        format: AudioCaptureFormat,
+        session: DictationSession?,
+        now: Date,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+    ) async throws -> DictationSession {
         reapReleasedTranscription()
         guard activeCapture == nil, activeTranscription == nil else {
             throw DictationCoordinatorError.workAlreadyActive
@@ -460,9 +500,14 @@ public final class DictationCoordinator {
             throw DictationTransitionError.illegal(from: state, event: .start)
         }
 
-        let session = try store.createSession(now: now)
+        let persistedSession: DictationSession
+        if let session {
+            persistedSession = session
+        } else {
+            persistedSession = try store.createSession(now: now)
+        }
         diagnostics.mark(.sessionPersisted)
-        var preparedSession = session
+        var preparedSession = persistedSession
         let operationID = UUID()
         do {
             pendingTranscriptionTerminalState = nil
@@ -472,7 +517,7 @@ public final class DictationCoordinator {
             activeOperationID = operationID
             acceptsCallbacks = true
             sessionStore = store
-            currentSession = session
+            currentSession = persistedSession
 
             try await withTaskCancellationHandler(operation: {
                 try await BoundedOperation.run(
@@ -482,7 +527,7 @@ public final class DictationCoordinator {
                     registry: operationRegistry
                 ) {
                     try await transcription.start(
-                        session: session,
+                        session: persistedSession,
                         format: format,
                         store: store,
                         onUpdate: { [weak self] update in
@@ -507,7 +552,7 @@ public final class DictationCoordinator {
             })
             try Task.checkCancellation()
             preparedSession = try store.update(
-                session,
+                persistedSession,
                 state: .recording,
                 at: now
             )
@@ -575,7 +620,7 @@ public final class DictationCoordinator {
                 releaseCapture()
                 throw error
             }
-            let reason = String(describing: error)
+            let reason = Self.failureReason(for: error)
             lastFailureReason = reason
             lastFailureCode = DictationFailureCode.infer(from: reason)
             let failedSession = persistTerminalState(
@@ -654,7 +699,7 @@ public final class DictationCoordinator {
             diagnostics.record("saved audio transcription retried")
             return completedSession
         } catch {
-            let reason = String(describing: error)
+            let reason = Self.failureReason(for: error)
             await requestCancellation(
                 transcription,
                 operationID: operationID,
@@ -748,7 +793,7 @@ public final class DictationCoordinator {
             diagnostics.record("audio capture stopped")
             return completedSession
         } catch {
-            let reason = String(describing: error)
+            let reason = Self.failureReason(for: error)
             lastFailureReason = reason
             lastFailureCode = DictationFailureCode.infer(from: reason)
             capture.cancel()
@@ -868,7 +913,7 @@ public final class DictationCoordinator {
                 releaseCapture()
                 throw error
             }
-            let reason = String(describing: error)
+            let reason = Self.failureReason(for: error)
             lastFailureReason = reason
             lastFailureCode = DictationFailureCode.infer(from: reason)
             capture.cancel()
@@ -1127,9 +1172,8 @@ public final class DictationCoordinator {
                 try await transcription.cancel()
             }
         } catch {
-            let failureReason = String(describing: error)
-            let timedOut = error is BoundedOperationError
-                || DictationFailureCode.infer(from: failureReason) == .transcriptionTimedOut
+            let failureReason = Self.failureReason(for: error)
+            let timedOut = error is any TranscriptionTimeoutEvidence
             let terminalState = timedOut ? state : .failed
             let terminalEvent = timedOut ? event : .fail
             lastFailureReason = failureReason
@@ -1138,7 +1182,11 @@ public final class DictationCoordinator {
                 in: store,
                 state: terminalState,
                 reason: failureReason,
-                failureCode: failureCode(for: terminalState, reason: failureReason),
+                failureCode: failureCode(
+                    for: terminalState,
+                    reason: failureReason,
+                    typedTimeout: timedOut
+                ),
                 rawTextByteCount: nil
             )
             if [.preparing, .recording, .finalizing, .cleaning, .inserting].contains(self.state) {
@@ -1164,7 +1212,7 @@ public final class DictationCoordinator {
             diagnostics.record("audio capture and transcription finished as " + state.rawValue)
             return finishedSession
         } catch {
-            lastFailureReason = String(describing: error)
+            lastFailureReason = Self.failureReason(for: error)
             let failedSession = persistTerminalState(
                 session,
                 in: store,
@@ -1217,7 +1265,7 @@ public final class DictationCoordinator {
             diagnostics.record("audio capture finished as " + state.rawValue)
             return finishedSession
         } catch {
-            lastFailureReason = String(describing: error)
+            lastFailureReason = Self.failureReason(for: error)
             let failedSession = try? store.update(
                 session,
                 state: .failed,
@@ -1295,7 +1343,7 @@ public final class DictationCoordinator {
                 try await transcription.cancel()
             }
         } catch {
-            lastFailureReason = String(describing: error)
+            lastFailureReason = "speech capture failure cancellation timed out"
             lastFailureCode = .transcriptionTimedOut
             let timedOutSession = persistTerminalState(
                 session,
@@ -1330,23 +1378,71 @@ public final class DictationCoordinator {
         diagnostics.record("audio capture and transcription failed: " + reason)
     }
 
+    private static func failureReason(for error: Error) -> String {
+        if let timeout = error as? any TranscriptionTimeoutEvidence {
+            switch timeout.stage {
+            case .startup:
+                return "transcription startup timed out"
+            case .finalization:
+                return "transcription finalization timed out"
+            case .retry:
+                return "transcription retry timed out"
+            case .cancellation:
+                return "transcription cancellation timed out"
+            case .interruption:
+                return "transcription interruption timed out"
+            case .shutdown:
+                return "transcription shutdown timed out"
+            }
+        }
+        if let failure = error as? DurableSessionBootstrapFailure {
+            return "storage failure: " + failure.category.statusDescription
+        }
+        if let error = error as? SessionStoreError {
+            switch error {
+            case .applicationSupportUnavailable,
+                 .stateChanged,
+                 .invalidMetadata,
+                 .invalidSessionDirectory:
+                return "durable session storage is unavailable"
+            case .missingSession:
+                return "saved session is unavailable"
+            case .transcriptTooLarge:
+                return "saved transcript is too large"
+            case .insertionAlreadyAttempted:
+                return "saved session insertion was already attempted"
+            case .activeSession:
+                return "saved session is still active"
+            case .rawTextChanged:
+                return "saved transcript changed before cleanup completed"
+            case .deletionConfirmationRequired:
+                return "history deletion requires confirmation"
+            }
+        }
+        return "operation failed"
+    }
+
     private func failureCode(
         for state: DictationSessionState,
-        reason: String?
+        reason: String?,
+        typedTimeout: Bool = false
     ) -> DictationFailureCode? {
+        if typedTimeout {
+            return .transcriptionTimedOut
+        }
         switch state {
         case .cancelled:
-            reason?.lowercased().contains("timed out") == true
-                ? .transcriptionTimedOut
-                : .cancelled
+            return .cancelled
         case .interrupted:
-            reason?.lowercased().contains("timed out") == true
-                ? .transcriptionTimedOut
-                : .infer(from: reason ?? "recording was interrupted", interruption: true)
+            let inferred = DictationFailureCode.infer(
+                from: reason ?? "recording was interrupted",
+                interruption: true
+            )
+            return inferred == .transcriptionTimedOut ? .audioEngineInterrupted : inferred
         case .failed:
-            .infer(from: reason ?? "capture failed")
+            return .infer(from: reason ?? "capture failed")
         default:
-            nil
+            return nil
         }
     }
 
@@ -1377,7 +1473,7 @@ public final class DictationCoordinator {
                 expectedState: expectedState
             )
         } catch {
-            diagnostics.record("terminal metadata write failed: " + String(describing: error))
+            diagnostics.record("terminal metadata write failed: " + Self.failureReason(for: error))
             do {
                 return try store.update(
                     session,
@@ -1392,7 +1488,7 @@ public final class DictationCoordinator {
                     expectedState: expectedState
                 )
             } catch {
-                diagnostics.record("terminal metadata retry failed: " + String(describing: error))
+                diagnostics.record("terminal metadata retry failed: " + Self.failureReason(for: error))
                 return inMemoryTerminalState(
                     session,
                     state: state,
@@ -1707,12 +1803,11 @@ public final class DictationCoordinator {
                 result = nil
                 terminalState = .failed
                 terminalEvent = .fail
-                if error is BoundedOperationError
-                    || DictationFailureCode.infer(from: String(describing: error)) == .transcriptionTimedOut {
+                if error is any TranscriptionTimeoutEvidence {
                     terminalReason = "application shutdown speech timeout"
                     terminalFailureCode = .transcriptionTimedOut
                 } else {
-                    terminalReason = "application shutdown"
+                    terminalReason = Self.failureReason(for: error)
                     terminalFailureCode = .applicationQuit
                 }
                 lastFailureReason = terminalReason

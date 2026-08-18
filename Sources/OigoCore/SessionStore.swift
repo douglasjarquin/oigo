@@ -87,13 +87,26 @@ public enum DictationFailureCode: String, Codable, CaseIterable, Equatable, Send
         interruption: Bool = false
     ) -> DictationFailureCode {
         let normalized = reason.lowercased()
-        let timeoutReason = normalized.contains("timed out")
-            || normalized.contains("timeout")
-            || normalized.contains("deadline")
-        if normalized.contains("cleanup") && timeoutReason {
+        let cleanupTimeoutReasons: Set<String> = [
+            "automatic cleanup exceeded its deadline",
+            "cleanup timed out",
+            "cleanup timeout"
+        ]
+        let transcriptionTimeoutReasons: Set<String> = [
+            "transcription startup timed out",
+            "transcription finalization timed out",
+            "transcription retry timed out",
+            "transcription cancellation timed out",
+            "transcription interruption timed out",
+            "transcription shutdown timed out",
+            "application shutdown speech timeout"
+        ]
+        let cleanupTimedOut = cleanupTimeoutReasons.contains(normalized)
+        let transcriptionTimedOut = transcriptionTimeoutReasons.contains(normalized)
+        if cleanupTimedOut {
             return .cleanupTimedOut
         }
-        if timeoutReason {
+        if transcriptionTimedOut {
             return .transcriptionTimedOut
         }
         if normalized.contains("shutdown") || normalized.contains("quit") {
@@ -355,6 +368,19 @@ public struct SessionHistoryEntry: Equatable, Identifiable, Sendable {
     }
 }
 
+public struct SessionHistoryEnumeration: Equatable, Sendable {
+    public let entries: [SessionHistoryEntry]
+    public let malformedSessionCount: Int
+
+    public init(
+        entries: [SessionHistoryEntry],
+        malformedSessionCount: Int
+    ) {
+        self.entries = entries
+        self.malformedSessionCount = malformedSessionCount
+    }
+}
+
 public struct SessionMaintenanceResult: Equatable, Sendable {
     public let removedSessionIDs: [UUID]
     public let removedAudioSessionIDs: [UUID]
@@ -379,6 +405,7 @@ public struct RawTextStaging: Equatable, Sendable {
 }
 
 public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendable {
+    case applicationSupportUnavailable
     case missingSession(UUID)
     case stateChanged(UUID, expected: DictationSessionState, actual: DictationSessionState)
     case invalidMetadata(URL)
@@ -391,24 +418,24 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
 
     public var description: String {
         switch self {
-        case .missingSession(let id):
-            "dictation session does not exist: " + id.uuidString
-        case .stateChanged(let id, let expected, let actual):
-            "dictation session state changed: " + id.uuidString
-                + " expected " + expected.rawValue
-                + " but was " + actual.rawValue
-        case .invalidMetadata(let url):
-            "dictation session metadata is invalid: " + url.path
-        case .invalidSessionDirectory(let url):
-            "dictation session directory is invalid: " + url.path
-        case .transcriptTooLarge(let url):
-            "raw transcript is too large to load safely: " + url.path
-        case .insertionAlreadyAttempted(let id):
-            "dictation session insertion was already attempted: " + id.uuidString
-        case .activeSession(let id):
-            "dictation session is active and cannot be deleted: " + id.uuidString
-        case .rawTextChanged(let url):
-            "raw transcript changed while derived text was pending: " + url.path
+        case .applicationSupportUnavailable:
+            "Oigo application support is unavailable"
+        case .missingSession:
+            "dictation session is unavailable"
+        case .stateChanged:
+            "dictation session state changed"
+        case .invalidMetadata:
+            "dictation session metadata is invalid"
+        case .invalidSessionDirectory:
+            "dictation session directory is invalid"
+        case .transcriptTooLarge:
+            "raw transcript is too large to load safely"
+        case .insertionAlreadyAttempted:
+            "dictation session insertion was already attempted"
+        case .activeSession:
+            "dictation session is active and cannot be deleted"
+        case .rawTextChanged:
+            "raw transcript changed while derived text was pending"
         case .deletionConfirmationRequired:
             "Delete All History requires deliberate confirmation"
         }
@@ -419,6 +446,7 @@ public final class SessionStore: @unchecked Sendable {
     public let rootDirectory: URL
 
     private let fileManager: FileManager
+    private let rootDirectoryFD: Int32
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let lock = NSLock()
@@ -449,7 +477,10 @@ public final class SessionStore: @unchecked Sendable {
     ) throws {
         self.fileManager = fileManager
         self.faultInjector = nil
-        self.rootDirectory = rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
+        let requestedRoot = try rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
+        let validatedRoot = try DurableSessionBootstrapper.validatedRootDirectory(at: requestedRoot)
+        self.rootDirectory = validatedRoot
+        self.rootDirectoryFD = try Self.openRootDirectory(at: validatedRoot)
 
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -460,10 +491,7 @@ public final class SessionStore: @unchecked Sendable {
         decoder.dateDecodingStrategy = .iso8601
         self.decoder = decoder
 
-        try fileManager.createDirectory(
-            at: self.rootDirectory,
-            withIntermediateDirectories: true
-        )
+        try verifyWriteCapability()
     }
 
     @_spi(Testing)
@@ -474,7 +502,10 @@ public final class SessionStore: @unchecked Sendable {
     ) throws {
         self.fileManager = fileManager
         self.faultInjector = faultInjector
-        self.rootDirectory = rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
+        let requestedRoot = try rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
+        let validatedRoot = try DurableSessionBootstrapper.validatedRootDirectory(at: requestedRoot)
+        self.rootDirectory = validatedRoot
+        self.rootDirectoryFD = try Self.openRootDirectory(at: validatedRoot)
 
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -485,10 +516,11 @@ public final class SessionStore: @unchecked Sendable {
         decoder.dateDecodingStrategy = .iso8601
         self.decoder = decoder
 
-        try fileManager.createDirectory(
-            at: self.rootDirectory,
-            withIntermediateDirectories: true
-        )
+        try verifyWriteCapability()
+    }
+
+    deinit {
+        _ = Darwin.close(rootDirectoryFD)
     }
 
     @_spi(Testing)
@@ -498,11 +530,13 @@ public final class SessionStore: @unchecked Sendable {
         lock.unlock()
     }
 
-    public static func defaultRootDirectory(fileManager: FileManager = .default) -> URL {
-        let applicationSupport = fileManager.urls(
+    public static func defaultRootDirectory(fileManager: FileManager = .default) throws -> URL {
+        guard let applicationSupport = fileManager.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
-        ).first ?? fileManager.temporaryDirectory
+        ).first else {
+            throw SessionStoreError.applicationSupportUnavailable
+        }
         return applicationSupport
             .appendingPathComponent("Oigo", isDirectory: true)
             .appendingPathComponent("Sessions", isDirectory: true)
@@ -512,10 +546,17 @@ public final class SessionStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
+        try ensureRootPathIdentity()
+
         let id = UUID()
         let directoryName = Self.directoryName(for: now, id: id)
         let directoryURL = rootDirectory.appendingPathComponent(directoryName, isDirectory: true)
-        try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: false)
+        let created = directoryName.withCString { name in
+            Darwin.mkdirat(rootDirectoryFD, name, mode_t(0o700))
+        }
+        guard created == 0 else {
+            throw storageFailure(for: errno)
+        }
 
         let metadata = SessionMetadata(
             id: id,
@@ -527,9 +568,12 @@ public final class SessionStore: @unchecked Sendable {
         let session = DictationSession(metadata: metadata, directoryURL: directoryURL)
         do {
             try writeMetadata(metadata, at: session.metadataURL)
+            try ensureRootPathIdentity()
             return session
         } catch {
-            try? fileManager.removeItem(at: directoryURL)
+            _ = directoryName.withCString { name in
+                Darwin.unlinkat(rootDirectoryFD, name, AT_REMOVEDIR)
+            }
             throw error
         }
     }
@@ -547,6 +591,8 @@ public final class SessionStore: @unchecked Sendable {
     public func listSessions() throws -> [DictationSession] {
         lock.lock()
         defer { lock.unlock() }
+
+        try ensureRootPathIdentity()
 
         let urls = try fileManager.contentsOfDirectory(
             at: rootDirectory,
@@ -571,16 +617,52 @@ public final class SessionStore: @unchecked Sendable {
     public func listHistory(
         limit: Int = SessionRetentionPolicy.default.maxTranscriptSessions
     ) throws -> [SessionHistoryEntry] {
+        try listHistoryReport(limit: limit).entries
+    }
+
+    public func listHistoryReport(
+        limit: Int = SessionRetentionPolicy.default.maxTranscriptSessions
+    ) throws -> SessionHistoryEnumeration {
         guard limit > 0 else {
-            return []
+            return SessionHistoryEnumeration(entries: [], malformedSessionCount: 0)
         }
 
         lock.lock()
         defer { lock.unlock() }
 
+        try ensureRootPathIdentity()
+
+        let urls = try fileManager.contentsOfDirectory(
+            at: rootDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        )
+        var sessions: [DictationSession] = []
+        var malformedSessionCount = 0
+        for url in urls {
+            do {
+                let values = try url.resourceValues(
+                    forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+                )
+                guard values.isSymbolicLink != true else {
+                    malformedSessionCount += 1
+                    continue
+                }
+                guard values.isDirectory == true else {
+                    continue
+                }
+                sessions.append(try readSession(at: url))
+            } catch {
+                malformedSessionCount += 1
+            }
+        }
         let maxDirectories = SessionRetentionPolicy.default.maxDirectoriesToInspect
-        let sessions = try newestSessions(maxCount: maxDirectories)
-        return sessions
+        let boundedSessions = sessions
+            .sorted { lhs, rhs in
+                isNewer(lhs, than: rhs)
+            }
+            .prefix(maxDirectories)
+        let entries = try boundedSessions
             .sorted { lhs, rhs in
                 isNewer(lhs, than: rhs)
             }
@@ -588,15 +670,20 @@ public final class SessionStore: @unchecked Sendable {
             .map { session in
                 let firstLine = session.metadata.firstTranscriptLine
                     ?? (try? readFirstTranscriptLine(at: session.directoryURL))
-                let source: SessionTextSource = fileManager.fileExists(atPath: session.cleanTextURL.path)
-                    ? .processed
-                    : .raw
+                let hasCleanText = try withSessionDirectory(at: session.directoryURL) { directoryFD in
+                    entryExists(named: "clean.txt", in: directoryFD)
+                }
+                let source: SessionTextSource = hasCleanText ? .processed : .raw
                 return SessionHistoryEntry(
                     session: session,
                     firstTranscriptLine: firstLine,
                     textSource: source
                 )
             }
+        return SessionHistoryEnumeration(
+            entries: entries,
+            malformedSessionCount: malformedSessionCount
+        )
     }
 
     @discardableResult
@@ -1264,11 +1351,22 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     public func recoverUnfinishedSessions(at date: Date = Date()) throws -> [DictationSession] {
+        try recoverUnfinishedSessions(at: date, shouldContinue: { true })
+    }
+
+    @_spi(Testing)
+    public func recoverUnfinishedSessions(
+        at date: Date = Date(),
+        shouldContinue: @escaping @Sendable () -> Bool
+    ) throws -> [DictationSession] {
         lock.lock()
         defer { lock.unlock() }
 
         var recovered: [DictationSession] = []
         try forEachTolerantSession { session in
+            guard shouldContinue() else {
+                throw CancellationError()
+            }
             guard session.metadata.state.isUnfinished else {
                 return
             }
@@ -1284,6 +1382,9 @@ public final class SessionStore: @unchecked Sendable {
                 : "recording was interrupted before shutdown"
             metadata.failureCode = .applicationQuit
             try writeMetadata(metadata, at: session.metadataURL)
+            guard shouldContinue() else {
+                throw CancellationError()
+            }
             recovered.append(DictationSession(metadata: metadata, directoryURL: session.directoryURL))
         }
         return recovered
@@ -1297,12 +1398,18 @@ public final class SessionStore: @unchecked Sendable {
             throw SessionStoreError.missingSession(id)
         }
         let session = try readSession(at: directoryURL)
+        let hasAudio = try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            entryExists(named: "audio.caf", in: directoryFD)
+        }
+        let hasRawText = try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            entryExists(named: "raw.txt", in: directoryFD)
+        }
         let isEmptyPreparingPlaceholder = session.metadata.state == .preparing
             && session.metadata.startedAt == nil
             && session.metadata.audioByteCount == nil
             && session.metadata.rawTextByteCount == nil
-            && !fileManager.fileExists(atPath: session.audioURL.path)
-            && !fileManager.fileExists(atPath: session.rawTextURL.path)
+            && !hasAudio
+            && !hasRawText
         guard !session.metadata.state.isUnfinished || isEmptyPreparingPlaceholder else {
             throw SessionStoreError.activeSession(id)
         }
@@ -1351,7 +1458,9 @@ public final class SessionStore: @unchecked Sendable {
                 return
             }
 
-            let hasAudio = fileManager.fileExists(atPath: session.audioURL.path)
+            let hasAudio = try withSessionDirectory(at: session.directoryURL) { directoryFD in
+                entryExists(named: "audio.caf", in: directoryFD)
+            }
             let referenceDate = session.metadata.endedAt ?? session.metadata.updatedAt
             let audioIsRetained = session.metadata.state == .completed
                 && hasAudio
@@ -1359,7 +1468,7 @@ public final class SessionStore: @unchecked Sendable {
 
             if !retainsTranscript {
                 if audioIsRetained {
-                    if sessionHasTranscript(session) {
+                    if try sessionHasTranscript(session) {
                         try removeTranscriptFiles(for: session)
                     }
                 } else {
@@ -1382,7 +1491,7 @@ public final class SessionStore: @unchecked Sendable {
 
         var retainedTranscriptSessions: [DictationSession] = []
         try forEachTolerantSession { session in
-            if sessionHasTranscript(session) {
+            if try sessionHasTranscript(session) {
                 retainedTranscriptSessions.append(session)
                 retainedTranscriptSessions.sort { isNewer($0, than: $1) }
                 if retainedTranscriptSessions.count > policy.maxTranscriptSessions {
@@ -1403,21 +1512,126 @@ public final class SessionStore: @unchecked Sendable {
         )
     }
 
-    private func sessionHasTranscript(_ session: DictationSession) -> Bool {
-        session.metadata.rawTextByteCount != nil
-            || fileManager.fileExists(atPath: session.rawTextURL.path)
+    private func sessionHasTranscript(_ session: DictationSession) throws -> Bool {
+        if session.metadata.rawTextByteCount != nil {
+            return true
+        }
+        return try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            entryExists(named: "raw.txt", in: directoryFD)
+        }
     }
 
     private func removeSessionDirectory(at directoryURL: URL) throws {
-        let tombstone = rootDirectory.appendingPathComponent(
-            ".deleting-" + UUID().uuidString,
-            isDirectory: true
-        )
+        try ensureRootPathIdentity()
+        let rootURL = rootDirectory.standardizedFileURL
+        let directoryURL = directoryURL.standardizedFileURL
+        guard directoryURL.deletingLastPathComponent().path == rootURL.path,
+              !directoryURL.lastPathComponent.isEmpty,
+              directoryURL.lastPathComponent != ".",
+              directoryURL.lastPathComponent != "..",
+              !directoryURL.lastPathComponent.contains("/") else {
+            throw SessionStoreError.invalidSessionDirectory(directoryURL)
+        }
+        let directoryName = directoryURL.lastPathComponent
+        let tombstoneName = ".deleting-" + UUID().uuidString
+        let tombstone = rootDirectory.appendingPathComponent(tombstoneName, isDirectory: true)
         do {
-            try fileManager.moveItem(at: directoryURL, to: tombstone)
-            try fileManager.removeItem(at: tombstone)
+            let renamed = directoryName.withCString { sourceName in
+                tombstoneName.withCString { destinationName in
+                    Darwin.renameat(
+                        rootDirectoryFD,
+                        sourceName,
+                        rootDirectoryFD,
+                        destinationName
+                    )
+                }
+            }
+            guard renamed == 0 else {
+                throw storageFailure(for: errno)
+            }
+            try ensureRootPathIdentity()
+            try removeDirectoryTree(
+                named: tombstoneName,
+                in: rootDirectoryFD,
+                at: tombstone
+            )
+        } catch let failure as DurableSessionBootstrapFailure {
+            throw failure
         } catch {
             throw SessionStoreError.invalidSessionDirectory(tombstone)
+        }
+    }
+
+    private func removeDirectoryTree(
+        named name: String,
+        in parentFD: Int32,
+        at url: URL
+    ) throws {
+        let directoryFlags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
+        let directoryFD = name.withCString { entryName in
+            Darwin.openat(parentFD, entryName, directoryFlags)
+        }
+        guard directoryFD >= 0 else {
+            throw storageFailure(for: errno)
+        }
+        defer { _ = Darwin.close(directoryFD) }
+
+        let listingFD = Darwin.dup(directoryFD)
+        guard listingFD >= 0 else {
+            throw storageFailure(for: errno)
+        }
+        guard let directory = Darwin.fdopendir(listingFD) else {
+            let errorCode = errno
+            _ = Darwin.close(listingFD)
+            throw storageFailure(for: errorCode)
+        }
+        defer { _ = Darwin.closedir(directory) }
+
+        while let entry = Darwin.readdir(directory) {
+            let entryName = withUnsafePointer(to: entry.pointee.d_name) { namePointer in
+                namePointer.withMemoryRebound(
+                    to: CChar.self,
+                    capacity: MemoryLayout.size(ofValue: entry.pointee.d_name)
+                ) { pointer in
+                    String(cString: pointer)
+                }
+            }
+            guard entryName != ".", entryName != ".." else {
+                continue
+            }
+
+            var entryInfo = stat()
+            let statResult = entryName.withCString { childName in
+                Darwin.fstatat(directoryFD, childName, &entryInfo, AT_SYMLINK_NOFOLLOW)
+            }
+            guard statResult == 0 else {
+                guard errno == ENOENT else {
+                    throw storageFailure(for: errno)
+                }
+                continue
+            }
+
+            if (entryInfo.st_mode & S_IFMT) == S_IFDIR {
+                try removeDirectoryTree(
+                    named: entryName,
+                    in: directoryFD,
+                    at: url.appendingPathComponent(entryName, isDirectory: true)
+                )
+            } else {
+                let removed = entryName.withCString { childName in
+                    Darwin.unlinkat(directoryFD, childName, 0)
+                }
+                if removed != 0, errno != ENOENT {
+                    throw storageFailure(for: errno)
+                }
+            }
+        }
+
+        let removed = name.withCString { entryName in
+            Darwin.unlinkat(parentFD, entryName, AT_REMOVEDIR)
+        }
+        guard removed == 0 else {
+            throw storageFailure(for: errno)
         }
     }
 
@@ -1510,6 +1724,7 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     private func sessionDirectory(for id: UUID) throws -> URL? {
+        try ensureRootPathIdentity()
         let suffix = "-" + id.uuidString.lowercased()
         guard let enumerator = fileManager.enumerator(
             at: rootDirectory,
@@ -1551,6 +1766,7 @@ public final class SessionStore: @unchecked Sendable {
     private func forEachTolerantSession(
         _ body: (DictationSession) throws -> Void
     ) throws {
+        try ensureRootPathIdentity()
         guard let enumerator = fileManager.enumerator(
             at: rootDirectory,
             includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
@@ -1942,6 +2158,7 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     private func openSessionDirectory(at directoryURL: URL) throws -> Int32 {
+        try ensureRootPathIdentity()
         let rootURL = rootDirectory.standardizedFileURL
         let directoryURL = directoryURL.standardizedFileURL
         guard directoryURL.deletingLastPathComponent().path == rootURL.path,
@@ -1954,21 +2171,167 @@ public final class SessionStore: @unchecked Sendable {
         let directoryName = directoryURL.lastPathComponent
 
         let flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
-        let rootFD = rootURL.path.withCString { path in
+        let directoryFD = directoryName.withCString { name in
+            Darwin.openat(rootDirectoryFD, name, flags)
+        }
+        guard directoryFD >= 0 else {
+            throw storageFailure(for: errno)
+        }
+        do {
+            try ensureRootPathIdentity()
+        } catch {
+            _ = Darwin.close(directoryFD)
+            throw error
+        }
+        return directoryFD
+    }
+
+    private static func openRootDirectory(at root: URL) throws -> Int32 {
+        let flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
+        let rootFD = root.path.withCString { path in
             Darwin.open(path, flags)
         }
         guard rootFD >= 0 else {
-            throw SessionStoreError.invalidSessionDirectory(directoryURL)
+            throw DurableSessionBootstrapFailure(
+                category: Self.storageFailureCategory(for: errno),
+                isFatal: Self.storageFailureCategory(for: errno) == .rootIdentityViolation
+            )
         }
-        defer { _ = Darwin.close(rootFD) }
+        var info = stat()
+        guard Darwin.fstat(rootFD, &info) == 0,
+              (info.st_mode & S_IFMT) == S_IFDIR else {
+            _ = Darwin.close(rootFD)
+            throw DurableSessionBootstrapFailure(category: .rootIdentityViolation, isFatal: true)
+        }
+        var pathInfo = stat()
+        let pathResult = root.path.withCString { path in
+            lstat(path, &pathInfo)
+        }
+        guard pathResult == 0,
+              (pathInfo.st_mode & S_IFMT) == S_IFDIR,
+              pathInfo.st_dev == info.st_dev,
+              pathInfo.st_ino == info.st_ino else {
+            _ = Darwin.close(rootFD)
+            throw DurableSessionBootstrapFailure(category: .rootIdentityViolation, isFatal: true)
+        }
+        return rootFD
+    }
 
-        let directoryFD = directoryName.withCString { name in
-            Darwin.openat(rootFD, name, flags)
+    private func ensureRootPathIdentity() throws {
+        var descriptorInfo = stat()
+        guard Darwin.fstat(rootDirectoryFD, &descriptorInfo) == 0,
+              (descriptorInfo.st_mode & S_IFMT) == S_IFDIR else {
+            throw DurableSessionBootstrapFailure(
+                category: .rootIdentityViolation,
+                isFatal: true
+            )
         }
-        guard directoryFD >= 0 else {
-            throw SessionStoreError.invalidSessionDirectory(directoryURL)
+
+        var pathInfo = stat()
+        let pathResult = rootDirectory.path.withCString { path in
+            lstat(path, &pathInfo)
         }
-        return directoryFD
+        guard pathResult == 0 else {
+            throw storageFailure(for: errno)
+        }
+        guard (pathInfo.st_mode & S_IFMT) == S_IFDIR,
+              pathInfo.st_dev == descriptorInfo.st_dev,
+              pathInfo.st_ino == descriptorInfo.st_ino else {
+            throw DurableSessionBootstrapFailure(
+                category: .rootIdentityViolation,
+                isFatal: true
+            )
+        }
+    }
+
+    private func verifyWriteCapability() throws {
+        try ensureRootPathIdentity()
+
+        let probeDirectoryName = ".storage-health-" + UUID().uuidString
+        let probeURL = rootDirectory.appendingPathComponent(
+            probeDirectoryName,
+            isDirectory: true
+        )
+        let created = probeDirectoryName.withCString { name in
+            Darwin.mkdirat(rootDirectoryFD, name, mode_t(0o700))
+        }
+        guard created == 0 else {
+            throw storageFailure(for: errno)
+        }
+
+        var probeFD: Int32 = -1
+        let probeFileName = "session.json"
+        defer {
+            if probeFD >= 0 {
+                _ = probeFileName.withCString { name in
+                    Darwin.unlinkat(probeFD, name, 0)
+                }
+                _ = Darwin.close(probeFD)
+            }
+            _ = probeDirectoryName.withCString { name in
+                Darwin.unlinkat(rootDirectoryFD, name, AT_REMOVEDIR)
+            }
+        }
+
+        let flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
+        probeFD = probeDirectoryName.withCString { name in
+            Darwin.openat(rootDirectoryFD, name, flags)
+        }
+        guard probeFD >= 0 else {
+            throw storageFailure(for: errno)
+        }
+        if faultInjector?.consume(.diskWriteFailure) == true {
+            throw DurableSessionBootstrapFailure(
+                category: .insufficientSpaceOrWriteFailure,
+                isFatal: false
+            )
+        }
+
+        try atomicWrite(
+            Data("{}".utf8),
+            named: probeFileName,
+            in: probeFD,
+            at: probeURL.appendingPathComponent(probeFileName)
+        )
+        try removeEntry(
+            named: probeFileName,
+            in: probeFD,
+            at: probeURL.appendingPathComponent(probeFileName)
+        )
+        guard Darwin.fsync(probeFD) == 0 else {
+            throw storageFailure(for: errno)
+        }
+        try ensureRootPathIdentity()
+    }
+
+    private static func storageFailureCategory(for errorCode: Int32) -> DurableSessionFailureCategory {
+        switch errorCode {
+        case EACCES, EPERM:
+            .permissionDenied
+        case ENOENT:
+            .unavailableParent
+        case ENOSPC, EDQUOT:
+            .insufficientSpaceOrWriteFailure
+        case ELOOP, ENOTDIR:
+            .rootIdentityViolation
+        default:
+            .unknownIOFailure
+        }
+    }
+
+    private func storageFailure(for errorCode: Int32) -> DurableSessionBootstrapFailure {
+        switch errorCode {
+        case EACCES, EPERM:
+            DurableSessionBootstrapFailure(category: .permissionDenied, isFatal: false)
+        case ENOENT:
+            DurableSessionBootstrapFailure(category: .unavailableParent, isFatal: false)
+        case ENOSPC, EDQUOT:
+            DurableSessionBootstrapFailure(category: .insufficientSpaceOrWriteFailure, isFatal: false)
+        case ELOOP, ENOTDIR:
+            DurableSessionBootstrapFailure(category: .rootIdentityViolation, isFatal: true)
+        default:
+            DurableSessionBootstrapFailure(category: .unknownIOFailure, isFatal: false)
+        }
     }
 
     private func fileByteCount(
@@ -2166,7 +2529,7 @@ public final class SessionStore: @unchecked Sendable {
             Darwin.openat(directoryFD, temporaryName, flags, mode_t(0o600))
         }
         guard temporaryFD >= 0 else {
-            throw SessionStoreError.invalidSessionDirectory(url)
+            throw storageFailure(for: errno)
         }
         var prepared = false
         defer {
@@ -2177,7 +2540,7 @@ public final class SessionStore: @unchecked Sendable {
         }
         try writeData(data, to: temporaryFD, at: url)
         guard Darwin.fsync(temporaryFD) == 0 else {
-            throw SessionStoreError.invalidSessionDirectory(url)
+            throw storageFailure(for: errno)
         }
         prepared = true
         return temporaryName
@@ -2195,7 +2558,7 @@ public final class SessionStore: @unchecked Sendable {
             }
         }
         guard renamed == 0 else {
-            throw SessionStoreError.invalidSessionDirectory(url)
+            throw storageFailure(for: errno)
         }
         _ = Darwin.fsync(directoryFD)
     }
@@ -2252,10 +2615,10 @@ public final class SessionStore: @unchecked Sendable {
                     if errno == EINTR {
                         continue
                     }
-                    throw SessionStoreError.invalidSessionDirectory(url)
+                    throw storageFailure(for: errno)
                 }
                 guard count > 0 else {
-                    throw SessionStoreError.invalidSessionDirectory(url)
+                    throw storageFailure(for: EIO)
                 }
                 offset += count
             }

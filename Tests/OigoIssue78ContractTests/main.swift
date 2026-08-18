@@ -28,6 +28,11 @@ private struct OigoIssue78ContractTests {
             ("coordinator shutdown preserves completed retry", testCoordinatorShutdownPreservesCompletedRetry),
             ("interruption timeout preserves terminal outcome", testInterruptionTimeoutPreservesTerminalOutcome),
             ("shutdown timeout replies with stable outcome", testShutdownTimeoutRepliesWithStableOutcome),
+            ("shutdown classifies typed timeout without detail", testShutdownClassifiesTypedTimeout),
+            ("shutdown ignores untyped timeout prose", testShutdownIgnoresUntypedTimeoutProse),
+            ("failure codes ignore untrusted timeout prose", testFailureCodesIgnoreUntrustedTimeoutProse),
+            ("interruption ignores untyped timeout prose", testInterruptionIgnoresUntypedTimeoutProse),
+            ("interruption ignores caller timeout prose", testInterruptionIgnoresCallerTimeoutProse),
             ("one hundred lifecycle cycles release resources", testOneHundredLifecycleCyclesReleaseResources),
             ("one hundred adversarial lifecycle cycles release resources", testOneHundredAdversarialLifecycleCyclesReleaseResources)
         ]
@@ -607,6 +612,123 @@ private struct OigoIssue78ContractTests {
         _ = await shutdownTask.value
         guard try await waitForResourcesToRelease(coordinator) else {
             throw ContractFailure(message: "shutdown loser remained owned after release")
+        }
+    }
+
+    @MainActor
+    private static func testShutdownClassifiesTypedTimeout() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue78-typed-shutdown-timeout-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let coordinator = DictationCoordinator(timeoutPolicy: .testing)
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: ContractAudioCapture(),
+            store: store,
+            transcription: TypedTimeoutCancellationController(),
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+
+        await coordinator.shutdownWithTranscription()
+
+        guard coordinator.currentSession?.metadata.state == .failed,
+              coordinator.currentSession?.metadata.failureCode == .transcriptionTimedOut,
+              coordinator.currentSession?.metadata.failureReason == "application shutdown speech timeout",
+              try await waitForResourcesToRelease(coordinator) else {
+            throw ContractFailure(message: "typed shutdown timeout lost its stable classification or retained private detail")
+        }
+    }
+
+    @MainActor
+    private static func testShutdownIgnoresUntypedTimeoutProse() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue78-untyped-shutdown-timeout-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let coordinator = DictationCoordinator(timeoutPolicy: .testing)
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: ContractAudioCapture(),
+            store: store,
+            transcription: TypedTimeoutCancellationController(
+                cancellationError: OrdinaryTimeoutProseError()
+            ),
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+
+        await coordinator.shutdownWithTranscription()
+
+        guard coordinator.currentSession?.metadata.state == .failed,
+              coordinator.currentSession?.metadata.failureCode == .applicationQuit,
+              coordinator.currentSession?.metadata.failureReason == "operation failed",
+              try await waitForResourcesToRelease(coordinator) else {
+            throw ContractFailure(message: "untyped timeout prose was promoted to a typed timeout outcome")
+        }
+    }
+
+    private static func testFailureCodesIgnoreUntrustedTimeoutProse() throws {
+        guard DictationFailureCode.infer(from: "ordinary controller timeout text") == .unknownFailure,
+              DictationFailureCode.infer(from: "a deadline was mentioned in a transcript") == .unknownFailure,
+              DictationFailureCode.infer(from: "transcription shutdown timed out") == .transcriptionTimedOut else {
+            throw ContractFailure(message: "untrusted timeout prose changed the failure code")
+        }
+    }
+
+    @MainActor
+    private static func testInterruptionIgnoresUntypedTimeoutProse() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue78-untyped-interruption-timeout-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let coordinator = DictationCoordinator(timeoutPolicy: .testing)
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: ContractAudioCapture(),
+            store: store,
+            transcription: TypedTimeoutCancellationController(
+                cancellationError: OrdinaryTimeoutProseError()
+            ),
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+
+        do {
+            _ = try await coordinator.interruptRecordingWithTranscription(reason: "sleep")
+            throw ContractFailure(message: "untyped interruption timeout prose did not throw")
+        } catch is ContractFailure {
+            throw ContractFailure(message: "untyped interruption timeout prose did not throw")
+        } catch {
+        }
+
+        guard coordinator.currentSession?.metadata.state == .failed,
+              coordinator.currentSession?.metadata.failureCode == .unknownFailure,
+              coordinator.currentSession?.metadata.failureReason == "operation failed",
+              try await waitForResourcesToRelease(coordinator) else {
+            throw ContractFailure(message: "untyped interruption timeout prose changed the terminal failure code")
+        }
+    }
+
+    @MainActor
+    private static func testInterruptionIgnoresCallerTimeoutProse() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue78-caller-timeout-prose-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let coordinator = DictationCoordinator(timeoutPolicy: .testing)
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: ContractAudioCapture(),
+            store: store,
+            transcription: ImmediateTranscriptionController(),
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+
+        let interrupted = try await coordinator.interruptRecordingWithTranscription(
+            reason: "transcription shutdown timed out"
+        )
+        guard interrupted.metadata.state == .interrupted,
+              interrupted.metadata.failureCode == .audioEngineInterrupted else {
+            throw ContractFailure(message: "caller timeout prose changed an ordinary interruption outcome")
         }
     }
 
@@ -1482,6 +1604,60 @@ private final class NonCooperativeCancellationController: TranscriptionControlle
         lock.lock()
         defer { lock.unlock() }
         return body()
+    }
+}
+
+@available(macOS 26.0, *)
+private struct PrivateShutdownTimeoutError: Error, TranscriptionTimeoutEvidence, Sendable {
+    let stage: TranscriptionStage = .shutdown
+}
+
+@available(macOS 26.0, *)
+private struct OrdinaryTimeoutProseError: Error, CustomStringConvertible, Sendable {
+    var description: String {
+        "ordinary controller timeout text"
+    }
+}
+
+@available(macOS 26.0, *)
+private final class TypedTimeoutCancellationController: TranscriptionController, @unchecked Sendable {
+    private let cancellationError: any Error
+
+    init(cancellationError: any Error = PrivateShutdownTimeoutError()) {
+        self.cancellationError = cancellationError
+    }
+
+    func start(
+        session: DictationSession,
+        format: AudioCaptureFormat,
+        store: SessionStore,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+    ) async throws {
+        _ = session
+        _ = format
+        _ = store
+        _ = onUpdate
+    }
+
+    func append(_ buffer: AudioCaptureBuffer) {
+        _ = buffer
+    }
+
+    func finish() async throws -> TranscriptionResult {
+        TranscriptionResult(finalizedText: "", rawTextByteCount: 0)
+    }
+
+    func cancel() async throws -> TranscriptionResult? {
+        throw cancellationError
+    }
+
+    func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult {
+        _ = session
+        _ = store
+        throw TranscriptionError.analysisFailed("typed timeout fixture does not retry")
     }
 }
 

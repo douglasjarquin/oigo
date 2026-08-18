@@ -20,6 +20,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let saveShortcut: (ToggleShortcut) -> OigoShortcutValidation
     private let requestAccessibility: () -> OigoPermissionState
     private let openAccessibilitySettings: () -> Void
+    private let retryStorage: () -> Void
+    private let openDataLocation: () -> Void
     private let startTest: () -> Void
     private let stopTest: () -> Void
     private let cancelTest: () -> Void
@@ -35,6 +37,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var testOutcome: OigoOnboardingTestOutcome = .pending
     private var testRunning = false
     private var completed = false
+    private var storageHealth: DurableSessionHealth
     private var committedShortcut: ToggleShortcut
     private var inputMenuSelections: [OigoInputSelection] = []
     private var selectedInput: OigoInputSelection
@@ -43,6 +46,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let titleLabel = NSTextField(labelWithString: "")
     private let bodyLabel = NSTextField(wrappingLabelWithString: "")
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
+    private let storageStatusLabel = NSTextField(wrappingLabelWithString: "")
     private let inputPopup = NSPopUpButton()
     private let inputLabel = NSTextField(labelWithString: "Microphone input")
     private let inputRow = NSStackView()
@@ -54,6 +58,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let backButton = NSButton(title: "Back", target: nil, action: nil)
     private let nextButton = NSButton(title: "Continue", target: nil, action: nil)
     private let historyButton = NSButton(title: "Open History", target: nil, action: nil)
+    private let retryStorageButton = NSButton(title: "Retry Storage", target: nil, action: nil)
+    private let openDataLocationButton = NSButton(title: "Open Data Location", target: nil, action: nil)
 
     init(
         support: OigoSystemSupportResult,
@@ -63,6 +69,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         selectedInput: OigoInputSelection,
         microphoneState: OigoPermissionState,
         accessibilityState: OigoPermissionState,
+        storageHealth: DurableSessionHealth,
         loadSupportedLanguages: @escaping () async -> [String],
         checkSpeechAssets: @escaping (String) async -> SpeechAssetState,
         saveLanguage: @escaping (String) -> Void,
@@ -76,6 +83,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         saveShortcut: @escaping (ToggleShortcut) -> OigoShortcutValidation,
         requestAccessibility: @escaping () -> OigoPermissionState,
         openAccessibilitySettings: @escaping () -> Void,
+        retryStorage: @escaping () -> Void,
+        openDataLocation: @escaping () -> Void,
         startTest: @escaping () -> Void,
         stopTest: @escaping () -> Void,
         cancelTest: @escaping () -> Void,
@@ -99,6 +108,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.saveShortcut = saveShortcut
         self.requestAccessibility = requestAccessibility
         self.openAccessibilitySettings = openAccessibilitySettings
+        self.retryStorage = retryStorage
+        self.openDataLocation = openDataLocation
         self.startTest = startTest
         self.stopTest = stopTest
         self.cancelTest = cancelTest
@@ -107,6 +118,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.onClose = onClose
         self.microphoneState = microphoneState
         self.accessibilityState = accessibilityState
+        self.storageHealth = storageHealth
         committedShortcut = globalShortcut
         shortcutRecorder = ShortcutRecorderControl(shortcut: globalShortcut)
 
@@ -200,6 +212,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         shortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
         historyButton.target = self
         historyButton.action = #selector(openHistoryAction)
+        retryStorageButton.target = self
+        retryStorageButton.action = #selector(retryStorageAction)
+        openDataLocationButton.target = self
+        openDataLocationButton.action = #selector(openDataLocationAction)
         actionButton.target = self
         actionButton.action = #selector(performAction)
         skipButton.target = self
@@ -224,6 +240,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             shortcutRecorder,
             testField,
             statusLabel,
+            storageStatusLabel,
+            retryStorageButton,
+            openDataLocationButton,
             historyButton,
             actionButton,
             skipButton,
@@ -245,6 +264,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -24),
             bodyLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            storageStatusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             inputRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             languagePopup.widthAnchor.constraint(equalToConstant: 280),
             shortcutRecorder.widthAnchor.constraint(equalToConstant: 280),
@@ -268,8 +288,13 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         inputRow.isHidden = currentStep != .microphone
         testField.isHidden = !isSupported || currentStep != .testDictation
         historyButton.isHidden = currentStep != .recovery
+        storageStatusLabel.isHidden = storageHealth.isReady
+        retryStorageButton.isHidden = storageHealth.isReady
+        openDataLocationButton.isHidden = storageHealth.isReady
         skipButton.isHidden = currentStep != .testDictation
         statusLabel.stringValue = status(for: currentStep)
+        storageStatusLabel.stringValue = storageHealth.statusMessage
+        storageStatusLabel.textColor = storageHealth.isReady ? .secondaryLabelColor : .systemOrange
         actionButton.isHidden = !isSupported || ![.language, .microphone, .insertion, .testDictation].contains(currentStep)
         backButton.isHidden = !isSupported || currentStep == .system
         nextButton.isHidden = !isSupported
@@ -304,11 +329,16 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             nextButton.isEnabled = languageReady
         }
         if currentStep == .testDictation {
-            nextButton.isEnabled = testOutcome.allowsContinue
+            nextButton.isEnabled = storageHealth.isReady && testOutcome.allowsContinue
         }
         if currentStep == .recovery {
-            nextButton.isEnabled = registrationStatus().isActive
+            nextButton.isEnabled = storageHealth.isReady && registrationStatus().isActive
         }
+    }
+
+    func setStorageHealth(_ health: DurableSessionHealth) {
+        storageHealth = health
+        render()
     }
 
     private func body(for step: OigoOnboardingStep) -> String {
@@ -458,6 +488,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
                 renderButtons()
             }
         case .testDictation:
+            guard storageHealth.isReady else {
+                statusLabel.stringValue = "Storage unavailable. Retry storage before starting a test dictation."
+                return
+            }
             testRunning.toggle()
             if testRunning { startTest() } else { stopTest() }
             actionButton.title = testRunning ? "Stop test dictation" : "Start test dictation"
@@ -497,6 +531,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
            let selectedLanguage = languagePopup.selectedItem?.title {
             saveLanguage(selectedLanguage)
         }
+        if currentStep == .recovery, !storageHealth.isReady {
+            statusLabel.stringValue = "Storage unavailable. Retry storage before finishing setup."
+            return
+        }
         if currentStep == .microphone {
             selectedInput = selectedInputFromMenu()
             saveInputSelection(selectedInput)
@@ -522,6 +560,14 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func openHistoryAction() {
         openHistory()
+    }
+
+    @objc private func retryStorageAction() {
+        retryStorage()
+    }
+
+    @objc private func openDataLocationAction() {
+        openDataLocation()
     }
 
     private func nextStep(after step: OigoOnboardingStep) -> OigoOnboardingStep? {
