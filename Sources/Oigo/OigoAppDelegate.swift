@@ -12,14 +12,15 @@ import OigoInsertion
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = DictationCoordinator()
     private let performanceInstrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
-    private let recorder = AudioRecorder()
+    private lazy var recorder = AudioRecorder()
     private var transcription: TranscriptionService?
-    private let insertion = InsertionService()
+    private lazy var insertion = InsertionService()
     private let playback = AudioPlayback()
     private let shortcutRegistrar = CarbonGlobalShortcutRegistrar()
     private let statusSurface = StatusSurfaceController()
     private let settingsStore = OigoSettingsStore()
     private let onboardingStore = OigoOnboardingStore()
+    private let storageCapability: DurableSessionCapability
     private let launchAtLoginController = OigoLaunchAtLoginController(client: SystemLaunchAtLoginClient())
     private let transcriptCleanupMetrics = TranscriptCleanupMetrics()
     private lazy var transcriptCleanup: TranscriptCleanupCoordinator = {
@@ -41,6 +42,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var modeMenuItem: NSMenuItem?
     private var instantModeItem: NSMenuItem?
     private var cleanModeItem: NSMenuItem?
+    private var storageStatusItem: NSMenuItem?
+    private var retryStorageItem: NSMenuItem?
     private var launchAtLoginItem: NSMenuItem?
     private var settings = OigoSettingsStore().load()
     private var targetSnapshot: InsertionTargetSnapshot?
@@ -53,6 +56,17 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var retryTask: Task<Void, Never>?
     private var workspaceInterruptionTask: Task<Void, Never>?
     private var workspaceObservers: [NSObjectProtocol] = []
+    private var shortcutRegistered = false
+
+    init(
+        storageBootstrapper: any DurableSessionBootstrapping = DurableSessionBootstrapper()
+    ) {
+        storageCapability = DurableSessionCapability(bootstrapper: storageBootstrapper)
+        super.init()
+        storageCapability.onChange = { [weak self] in
+            self?.storageCapabilityDidChange()
+        }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
@@ -63,10 +77,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         installWorkspaceInterruptionObservers()
-        prepareSessionStore()
         configureStatusItem()
+        storageCapability.start()
         if onboardingStore.load().isComplete {
-            registerShortcut()
+            updateSurface()
         } else {
             showOnboarding(support)
         }
@@ -75,7 +89,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
-        shortcutRegistrar.unregister()
+        unregisterShortcut()
+        storageCapability.shutdown()
         removeWorkspaceInterruptionObservers()
         statusSurface.hide()
         playback.stop()
@@ -139,6 +154,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             supportedLocales: supportedLocales,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
+            storageHealth: storageCapability.health,
             save: { [weak self] settings in
                 self?.applySettings(settings) ?? "Oigo is no longer available."
             },
@@ -163,6 +179,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             openDataFolder: { [weak self] in
                 self?.openDataFolder()
             },
+            retryStorage: { [weak self] in
+                self?.retryStorageAction()
+            },
             deleteAllHistory: { [weak self] in
                 self?.deleteAllHistory()
             }
@@ -182,6 +201,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             globalShortcut: settings.globalShortcut,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
+            storageHealth: storageCapability.health,
             loadSupportedLanguages: { [weak self] in
                 guard let self else { return [] }
                 let service = self.transcriptionService()
@@ -233,6 +253,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             openAccessibilitySettings: { [weak self] in
                 self?.openSystemSettings(OigoPermissionPresentation.accessibility(.denied).settingsURL)
             },
+            retryStorage: { [weak self] in
+                self?.retryStorageAction()
+            },
+            openDataLocation: { [weak self] in
+                self?.openDataFolder()
+            },
             startTest: { [weak self] in
                 self?.onboardingWindow?.focusTestField()
                 self?.handleToggle(allowBeforeSetup: true)
@@ -248,6 +274,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             onComplete: { [weak self] in
                 guard let self else { return }
+                guard self.storageCapability.health.isReady else {
+                    self.updateSurface()
+                    return
+                }
                 self.onboardingStore.markCompleted()
                 self.onboardingWindow = nil
                 self.registerShortcut()
@@ -322,6 +352,22 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         toggle.target = self
         menu.addItem(toggle)
 
+        let storageStatus = NSMenuItem(
+            title: DurableSessionHealth.checking.statusMessage,
+            action: nil,
+            keyEquivalent: ""
+        )
+        storageStatus.isEnabled = false
+        menu.addItem(storageStatus)
+
+        let retryStorage = NSMenuItem(
+            title: "Retry Storage",
+            action: #selector(retryStorageAction),
+            keyEquivalent: ""
+        )
+        retryStorage.target = self
+        menu.addItem(retryStorage)
+
         let mode = NSMenuItem(
             title: "Mode",
             action: nil,
@@ -385,18 +431,28 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         modeMenuItem = mode
         instantModeItem = instant
         cleanModeItem = clean
+        storageStatusItem = storageStatus
+        retryStorageItem = retryStorage
         launchAtLoginItem = launchAtLogin
     }
 
     private func registerShortcut() {
-        shortcutRegistrar.unregister()
+        guard storageCapability.health.isReady, !shortcutRegistered else {
+            return
+        }
         do {
             try shortcutRegistrar.register(shortcut: settings.globalShortcut) { [weak self] in
                 self?.handleToggle()
             }
+            shortcutRegistered = true
         } catch {
             NSLog("Oigo could not register the global toggle shortcut: %@", String(describing: error))
         }
+    }
+
+    private func unregisterShortcut() {
+        shortcutRegistrar.unregister()
+        shortcutRegistered = false
     }
 
     private func installWorkspaceInterruptionObservers() {
@@ -463,6 +519,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             showOnboarding(OigoSystemSupportEvaluator.current())
             return
         }
+        guard storageCapability.health.isReady else {
+            updateSurface()
+            return
+        }
         if let toggleTask {
             toggleTask.cancel()
             return
@@ -519,9 +579,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         do {
             switch coordinator.state {
             case .idle, .complete, .failed, .cancelled, .interrupted:
-                guard let sessionStore else {
-                    throw SessionStoreError.invalidSessionDirectory(
-                        SessionStore.defaultRootDirectory()
+                guard storageCapability.health.isReady,
+                      let sessionStore else {
+                    throw DurableSessionAccessError.storageUnavailable(
+                        storageCapability.health.failureCategory
                     )
                 }
                 insertionDisplayStatus = nil
@@ -629,6 +690,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             if coordinator.hasActiveWork {
                 await coordinator.cancelActiveWork(reason: String(describing: error))
+            }
+            if Self.isStorageFailure(error) {
+                storageCapability.markUnhealthy(.metadataRecoveryFailure)
             }
             lastSession = coordinator.currentSession ?? lastSession
             targetSnapshot = nil
@@ -1122,6 +1186,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func updateSurface() {
         let isRecording = coordinator.state == .recording
         let setupComplete = onboardingStore.load().isComplete
+        let storageReady = storageCapability.health.isReady
         let canToggle = [
             .idle,
             .recording,
@@ -1130,11 +1195,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             .cancelled,
             .interrupted
         ].contains(coordinator.state)
-        toggleItem?.title = isRecording ? "Stop Dictation" : "Start Dictation"
-        toggleItem?.isEnabled = setupComplete && canToggle
+        toggleItem?.title = storageReady
+            ? (isRecording ? "Stop Dictation" : "Start Dictation")
+            : "Storage unavailable"
+        toggleItem?.action = storageReady ? #selector(toggleDictation) : #selector(retryStorageAction)
+        toggleItem?.isEnabled = setupComplete && (storageReady ? canToggle : true)
         instantModeItem?.state = settings.defaultMode == .instant ? .on : .off
         cleanModeItem?.state = settings.defaultMode == .clean ? .on : .off
-        modeMenuItem?.isEnabled = setupComplete && !isRecording
+        modeMenuItem?.isEnabled = setupComplete && storageReady && !isRecording
+        storageStatusItem?.title = storageCapability.health.statusMessage
+        retryStorageItem?.isEnabled = !storageReady
         launchAtLoginItem?.state = launchAtLoginController.isEnabled ? .on : .off
         statusItem?.button?.title = "Oigo"
 
@@ -1200,14 +1270,47 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.activateFileViewerSelecting([session.directoryURL])
     }
 
-    private func prepareSessionStore() {
-        do {
-            let store = try SessionStore()
-            sessionStore = store
-            _ = try store.recoverUnfinishedSessions()
-            lastSession = try store.listHistory(limit: 1).first?.session
-        } catch {
-            NSLog("Oigo could not prepare durable sessions: %@", String(describing: error))
+    @objc private func retryStorageAction() {
+        _ = storageCapability.retry()
+        updateSurface()
+    }
+
+    private func storageCapabilityDidChange() {
+        sessionStore = storageCapability.store
+        if storageCapability.health.isReady {
+            lastSession = storageCapability.history.first?.session
+            historyWindow?.reload(entries: storageCapability.history)
+            if onboardingStore.load().isComplete {
+                registerShortcut()
+            }
+        } else {
+            unregisterShortcut()
+            historyWindow?.showMessage(storageCapability.health.statusMessage)
+        }
+        settingsWindow?.setStorageHealth(storageCapability.health)
+        onboardingWindow?.setStorageHealth(storageCapability.health)
+        updateSurface()
+    }
+
+    private static func isStorageFailure(_ error: Error) -> Bool {
+        if error is DurableSessionAccessError {
+            return false
+        }
+        guard let error = error as? SessionStoreError else {
+            return false
+        }
+        switch error {
+        case .applicationSupportUnavailable,
+             .invalidMetadata,
+             .invalidSessionDirectory:
+            return true
+        case .missingSession,
+             .transcriptTooLarge,
+             .insertionAlreadyAttempted,
+             .activeSession,
+             .rawTextChanged,
+             .deletionConfirmationRequired:
+            return false
         }
     }
 
@@ -1295,8 +1398,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         showOnboarding(OigoSystemSupportEvaluator.current())
     }
 
-    private func openDataFolder() {
-        NSWorkspace.shared.open(SessionStore.defaultRootDirectory())
+    @objc private func openDataFolder() {
+        guard let root = try? SessionStore.defaultRootDirectory() else {
+            return
+        }
+        NSWorkspace.shared.open(root)
     }
 
     private func deleteAllHistory() {

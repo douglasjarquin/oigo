@@ -349,6 +349,19 @@ public struct SessionHistoryEntry: Equatable, Identifiable, Sendable {
     }
 }
 
+public struct SessionHistoryEnumeration: Equatable, Sendable {
+    public let entries: [SessionHistoryEntry]
+    public let malformedSessionCount: Int
+
+    public init(
+        entries: [SessionHistoryEntry],
+        malformedSessionCount: Int
+    ) {
+        self.entries = entries
+        self.malformedSessionCount = malformedSessionCount
+    }
+}
+
 public struct SessionMaintenanceResult: Equatable, Sendable {
     public let removedSessionIDs: [UUID]
     public let removedAudioSessionIDs: [UUID]
@@ -373,6 +386,7 @@ public struct RawTextStaging: Equatable, Sendable {
 }
 
 public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendable {
+    case applicationSupportUnavailable
     case missingSession(UUID)
     case invalidMetadata(URL)
     case invalidSessionDirectory(URL)
@@ -384,6 +398,8 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
 
     public var description: String {
         switch self {
+        case .applicationSupportUnavailable:
+            "Oigo application support is unavailable"
         case .missingSession(let id):
             "dictation session does not exist: " + id.uuidString
         case .invalidMetadata(let url):
@@ -438,7 +454,7 @@ public final class SessionStore: @unchecked Sendable {
     ) throws {
         self.fileManager = fileManager
         self.faultInjector = nil
-        self.rootDirectory = rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
+        self.rootDirectory = try rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
 
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -463,7 +479,7 @@ public final class SessionStore: @unchecked Sendable {
     ) throws {
         self.fileManager = fileManager
         self.faultInjector = faultInjector
-        self.rootDirectory = rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
+        self.rootDirectory = try rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
 
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -487,11 +503,13 @@ public final class SessionStore: @unchecked Sendable {
         lock.unlock()
     }
 
-    public static func defaultRootDirectory(fileManager: FileManager = .default) -> URL {
-        let applicationSupport = fileManager.urls(
+    public static func defaultRootDirectory(fileManager: FileManager = .default) throws -> URL {
+        guard let applicationSupport = fileManager.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
-        ).first ?? fileManager.temporaryDirectory
+        ).first else {
+            throw SessionStoreError.applicationSupportUnavailable
+        }
         return applicationSupport
             .appendingPathComponent("Oigo", isDirectory: true)
             .appendingPathComponent("Sessions", isDirectory: true)
@@ -560,16 +578,50 @@ public final class SessionStore: @unchecked Sendable {
     public func listHistory(
         limit: Int = SessionRetentionPolicy.default.maxTranscriptSessions
     ) throws -> [SessionHistoryEntry] {
+        try listHistoryReport(limit: limit).entries
+    }
+
+    public func listHistoryReport(
+        limit: Int = SessionRetentionPolicy.default.maxTranscriptSessions
+    ) throws -> SessionHistoryEnumeration {
         guard limit > 0 else {
-            return []
+            return SessionHistoryEnumeration(entries: [], malformedSessionCount: 0)
         }
 
         lock.lock()
         defer { lock.unlock() }
 
+        let urls = try fileManager.contentsOfDirectory(
+            at: rootDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        )
+        var sessions: [DictationSession] = []
+        var malformedSessionCount = 0
+        for url in urls {
+            do {
+                let values = try url.resourceValues(
+                    forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+                )
+                guard values.isDirectory == true else {
+                    continue
+                }
+                guard values.isSymbolicLink != true else {
+                    malformedSessionCount += 1
+                    continue
+                }
+                sessions.append(try readSession(at: url))
+            } catch {
+                malformedSessionCount += 1
+            }
+        }
         let maxDirectories = SessionRetentionPolicy.default.maxDirectoriesToInspect
-        let sessions = try newestSessions(maxCount: maxDirectories)
-        return sessions
+        let boundedSessions = sessions
+            .sorted { lhs, rhs in
+                isNewer(lhs, than: rhs)
+            }
+            .prefix(maxDirectories)
+        let entries = boundedSessions
             .sorted { lhs, rhs in
                 isNewer(lhs, than: rhs)
             }
@@ -586,6 +638,10 @@ public final class SessionStore: @unchecked Sendable {
                     textSource: source
                 )
             }
+        return SessionHistoryEnumeration(
+            entries: entries,
+            malformedSessionCount: malformedSessionCount
+        )
     }
 
     @discardableResult

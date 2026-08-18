@@ -43,3 +43,5 @@ jobs:
         run: swift run oigo-issue10-contract-tests
       - name: Issue eleven performance and lifecycle contract harness
         run: swift run oigo-issue11-performance-check
+      - name: Issue eighty-six durable storage health contract harness
+        run: swift run oigo-issue86-contract-tests

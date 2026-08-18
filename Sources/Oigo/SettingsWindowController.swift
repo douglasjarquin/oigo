@@ -13,6 +13,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Launch Oigo at login", target: nil, action: nil)
     private let microphoneStatus = NSTextField(labelWithString: "")
     private let accessibilityStatus = NSTextField(labelWithString: "")
+    private let storageStatus = NSTextField(labelWithString: "")
+    private var retryStorageButton: NSButton?
     private let messageLabel = NSTextField(labelWithString: "")
     private let save: (OigoSettings) -> String?
     private let refreshPermissions: () -> (OigoPermissionState, OigoPermissionState)
@@ -21,6 +23,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let rerunOnboarding: () -> Void
     private let openHistory: () -> Void
     private let openDataFolder: () -> Void
+    private let retryStorage: () -> Void
     private let deleteAllHistory: () -> Void
 
     init(
@@ -28,6 +31,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         supportedLocales: [String],
         microphoneState: OigoPermissionState,
         accessibilityState: OigoPermissionState,
+        storageHealth: DurableSessionHealth,
         save: @escaping (OigoSettings) -> String?,
         refreshPermissions: @escaping () -> (OigoPermissionState, OigoPermissionState),
         openMicrophoneSettings: @escaping () -> Void,
@@ -35,6 +39,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         rerunOnboarding: @escaping () -> Void,
         openHistory: @escaping () -> Void,
         openDataFolder: @escaping () -> Void,
+        retryStorage: @escaping () -> Void,
         deleteAllHistory: @escaping () -> Void
     ) {
         self.save = save
@@ -44,6 +49,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.rerunOnboarding = rerunOnboarding
         self.openHistory = openHistory
         self.openDataFolder = openDataFolder
+        self.retryStorage = retryStorage
         self.deleteAllHistory = deleteAllHistory
 
         let window = NSWindow(
@@ -77,6 +83,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         launchAtLoginCheckbox.state = settings.launchAtLogin ? .on : .off
         updatePermissionLabels(microphone: microphoneState, accessibility: accessibilityState)
         configureWindow()
+        setStorageHealth(storageHealth)
     }
 
     @available(*, unavailable)
@@ -114,6 +121,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let refreshButton = NSButton(title: "Refresh permission states", target: self, action: #selector(refreshPermissionStates))
         let microphoneSettingsButton = NSButton(title: "Open Microphone Settings", target: self, action: #selector(openMicrophoneSettingsAction))
         let accessibilitySettingsButton = NSButton(title: "Open Accessibility Settings", target: self, action: #selector(openAccessibilitySettingsAction))
+        let retryStorageButton = NSButton(title: "Retry Storage", target: self, action: #selector(retryStorageAction))
+        self.retryStorageButton = retryStorageButton
         let rerunButton = NSButton(title: "Re-run onboarding and permission checks", target: self, action: #selector(rerunOnboardingAction))
         let historyButton = NSButton(title: "Open History", target: self, action: #selector(openHistoryAction))
         let dataButton = NSButton(title: "Open Oigo data folder", target: self, action: #selector(openDataFolderAction))
@@ -124,6 +133,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         microphoneStatus.font = .systemFont(ofSize: 12)
         accessibilityStatus.font = .systemFont(ofSize: 12)
+        storageStatus.font = .systemFont(ofSize: 12)
         messageLabel.font = .systemFont(ofSize: 12)
         messageLabel.textColor = .secondaryLabelColor
         messageLabel.maximumNumberOfLines = 2
@@ -149,7 +159,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         permissionStack.alignment = .leading
         permissionStack.spacing = 6
 
-        let actionStack = NSStackView(views: [rerunButton, historyButton, dataButton, deleteButton])
+        let storageStack = NSStackView(views: [storageStatus, retryStorageButton, dataButton])
+        storageStack.orientation = .vertical
+        storageStack.alignment = .leading
+        storageStack.spacing = 6
+
+        let actionStack = NSStackView(views: [rerunButton, historyButton, storageStack, deleteButton])
         actionStack.orientation = .vertical
         actionStack.alignment = .leading
         actionStack.spacing = 8
@@ -210,6 +225,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         accessibilityStatus.stringValue = "Accessibility: " + accessibility.rawValue.capitalized + " (Copy and History remain available)"
     }
 
+    func setStorageHealth(_ health: DurableSessionHealth) {
+        storageStatus.stringValue = health.statusMessage
+        let canRetry = !health.isReady
+        storageStatus.textColor = canRetry ? .systemOrange : .secondaryLabelColor
+        retryStorageButton?.isEnabled = canRetry && health != .checking
+    }
+
     @objc private func refreshPermissionStates() {
         let states = refreshPermissions()
         updatePermissionLabels(microphone: states.0, accessibility: states.1)
@@ -236,6 +258,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func openDataFolderAction() {
         openDataFolder()
+    }
+
+    @objc private func retryStorageAction() {
+        retryStorage()
     }
 
     @objc private func deleteAllHistoryAction() {
