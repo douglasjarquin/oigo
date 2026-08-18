@@ -392,7 +392,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func registerShortcut() {
         shortcutRegistrar.unregister()
         do {
-            try shortcutRegistrar.register(shortcut: settings.globalShortcut) { [weak self] in
+            try shortcutRegistrar.register(shortcut: settings.globalShortcut) { [weak self] event in
+                guard event.edge == .pressed else {
+                    return
+                }
                 self?.handleToggle()
             }
         } catch {
@@ -1269,7 +1272,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         shortcutRegistrar.unregister()
         do {
-            try shortcutRegistrar.register(shortcut: candidate) { }
+            try shortcutRegistrar.register(shortcut: candidate, onEvent: { _ in })
             shortcutRegistrar.unregister()
             return .available
         } catch {

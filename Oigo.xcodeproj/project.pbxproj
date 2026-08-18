@@ -53,6 +53,7 @@
         A00000010000000000000032 /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000009 /* Carbon.framework */; };
         A00000010000000000000033 /* libOigoCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000B /* libOigoCore.a */; };
         A00000010000000000000034 /* libOigoHotKey.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000028 /* libOigoHotKey.a */; };
+        A00000010000000000000035 /* GlobalShortcutRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000029 /* GlobalShortcutRegistration.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -155,6 +156,7 @@
         B00000010000000000000026 /* ProductContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductContracts.swift; sourceTree = "<group>"; };
         B00000010000000000000027 /* PerformanceContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceContracts.swift; sourceTree = "<group>"; };
         B00000010000000000000028 /* libOigoHotKey.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoHotKey.a; sourceTree = BUILT_PRODUCTS_DIR; };
+        B00000010000000000000029 /* GlobalShortcutRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutRegistration.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -250,7 +252,6 @@
                 B00000010000000000000001 /* main.swift */,
                 B00000010000000000000002 /* OigoAppDelegate.swift */,
                 B00000010000000000000003 /* StatusSurfaceController.swift */,
-                B00000010000000000000004 /* GlobalHotKeyRegistrar.swift */,
                 B00000010000000000000005 /* SettingsWindowController.swift */,
                 B00000010000000000000020 /* HistoryWindowController.swift */,
                 B00000010000000000000024 /* LaunchAtLoginService.swift */,
@@ -263,6 +264,7 @@
             isa = PBXGroup;
             children = (
                 B00000010000000000000004 /* GlobalHotKeyRegistrar.swift */,
+                B00000010000000000000029 /* GlobalShortcutRegistration.swift */,
             );
             path = Sources/OigoHotKey;
             sourceTree = "<group>";
@@ -531,6 +533,7 @@
             buildActionMask = 2147483647;
             files = (
                 A00000010000000000000004 /* GlobalHotKeyRegistrar.swift in Sources */,
+                A00000010000000000000035 /* GlobalShortcutRegistration.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
