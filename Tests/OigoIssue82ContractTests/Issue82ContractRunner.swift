@@ -12,6 +12,14 @@ private struct ContractFailure: Error, CustomStringConvertible {
     }
 }
 
+private enum SettingsWriteFailure: Error, CustomStringConvertible {
+    case diskFull
+
+    var description: String {
+        "disk full"
+    }
+}
+
 @main
 @available(macOS 13.0, *)
 @MainActor
@@ -32,13 +40,15 @@ private struct OigoIssue82ContractTests {
             ("intent rapid tap", testIntentRapidTap),
             ("intent duplicates and processing", testIntentDuplicatesAndProcessing),
             ("shortcut contract default and migration", testShortcutContractDefaultAndMigration),
+            ("canonical default public conflict matrix", testCanonicalDefaultPublicConflictMatrix),
             ("shortcut keycode zero", testShortcutKeyCodeZero),
             ("recorder keycode zero", testRecorderKeyCodeZero),
             ("recorder rejection", testRecorderRejection),
             ("app bridge release during startup", testAppBridgeReleaseDuringStartup),
             ("app bridge processing feedback", testAppBridgeProcessingFeedback),
             ("configuration atomic save", testConfigurationAtomicSave),
-            ("configuration failure restoration", testConfigurationFailureRestoration)
+            ("configuration failure restoration", testConfigurationFailureRestoration),
+            ("settings store persistence failure restoration", testSettingsStorePersistenceFailureRestoration)
         ]
         let selected = scenarios.filter { normalizedFilter == nil || $0.0.contains(normalizedFilter ?? "") }
         guard !selected.isEmpty else {
@@ -239,6 +249,22 @@ private struct OigoIssue82ContractTests {
             occupied: []
         ).isAvailable else {
             throw ContractFailure(message: "modifier-free shortcut was accepted")
+        }
+    }
+
+    private static func testCanonicalDefaultPublicConflictMatrix() throws {
+        let documentedStandardShortcuts = [
+            ToggleShortcut(keyCode: 49, modifiers: ToggleShortcutModifiers.command),
+            ToggleShortcut(keyCode: 49, modifiers: ToggleShortcutModifiers.option | ToggleShortcutModifiers.command),
+            ToggleShortcut(keyCode: 49, modifiers: ToggleShortcutModifiers.control),
+            ToggleShortcut(keyCode: 49, modifiers: ToggleShortcutModifiers.control | ToggleShortcutModifiers.option),
+            ToggleShortcut(keyCode: 49, modifiers: ToggleShortcutModifiers.control | ToggleShortcutModifiers.command),
+            ToggleShortcut(keyCode: 20, modifiers: ToggleShortcutModifiers.shift | ToggleShortcutModifiers.command),
+            ToggleShortcut(keyCode: 21, modifiers: ToggleShortcutModifiers.shift | ToggleShortcutModifiers.command),
+            ToggleShortcut(keyCode: 23, modifiers: ToggleShortcutModifiers.shift | ToggleShortcutModifiers.command)
+        ]
+        guard !documentedStandardShortcuts.contains(ToggleShortcut.default) else {
+            throw ContractFailure(message: "canonical default collides with a documented standard macOS shortcut")
         }
     }
 
@@ -468,7 +494,11 @@ private struct OigoIssue82ContractTests {
         }
 
         var persisted = oldShortcut
-        guard transaction.save(newShortcut, persist: { persisted = $0 }).isAvailable,
+        guard transaction.save(
+            newShortcut,
+            persist: { persisted = $0 },
+            restore: { persisted = oldShortcut }
+        ).isAvailable,
               persisted == newShortcut,
               transaction.committedShortcut == newShortcut,
               transaction.candidateShortcut == newShortcut,
@@ -501,7 +531,11 @@ private struct OigoIssue82ContractTests {
             onEvent: { _ in }
         )
         var persisted = oldShortcut
-        guard transaction.save(newShortcut, persist: { persisted = $0 }).isConflict,
+        guard transaction.save(
+            newShortcut,
+            persist: { persisted = $0 },
+            restore: { persisted = oldShortcut }
+        ).isConflict,
               registrar.status == .active(oldShortcut, generation: 1),
               persisted == oldShortcut,
               registrar.calls == ["register:12/256"] else {
@@ -509,9 +543,13 @@ private struct OigoIssue82ContractTests {
         }
 
         registrar.failFor = nil
-        let persistenceFailure = transaction.save(newShortcut, persist: { _ in
-            throw ContractFailure(message: "simulated persistence failure")
-        })
+        let persistenceFailure = transaction.save(
+            newShortcut,
+            persist: { _ in
+                throw ContractFailure(message: "simulated persistence failure")
+            },
+            restore: { persisted = oldShortcut }
+        )
         guard persistenceFailure.isConflict,
               registrar.status == .active(oldShortcut, generation: 3),
               transaction.committedShortcut == oldShortcut,
@@ -529,6 +567,46 @@ private struct OigoIssue82ContractTests {
         transaction.cancel()
         guard transaction.candidateShortcut == oldShortcut else {
             throw ContractFailure(message: "close or cancel did not discard only the uncommitted candidate")
+        }
+    }
+
+    private static func testSettingsStorePersistenceFailureRestoration() throws {
+        let suiteName = "oigo-issue82-settings-failure-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let oldSettings = OigoSettings.default
+        let newShortcut = ToggleShortcut(keyCode: 0, modifiers: ToggleShortcutModifiers.command)
+        let workingStore = OigoSettingsStore(defaults: defaults)
+        try workingStore.save(oldSettings)
+
+        let failingStore = OigoSettingsStore(defaults: defaults, writeData: { data in
+            defaults.set(data, forKey: "oigo.settings.v1")
+            throw SettingsWriteFailure.diskFull
+        })
+        let registrar = RecordingConfigurationRegistrationClient(active: oldSettings.globalShortcut)
+        let transaction = ShortcutConfigurationTransaction(
+            committedShortcut: oldSettings.globalShortcut,
+            registrar: registrar,
+            onEvent: { _ in }
+        )
+
+        let result = transaction.save(
+            newShortcut,
+            persist: { shortcut in
+                try failingStore.save(oldSettings.with(globalShortcut: shortcut))
+            },
+            restore: {
+                try workingStore.save(oldSettings)
+            }
+        )
+        let persistedAfterFailure = OigoSettingsStore(defaults: defaults).load()
+        guard result.isConflict,
+              transaction.lastError?.contains("disk full") == true,
+              registrar.status == .active(oldSettings.globalShortcut, generation: 3),
+              transaction.committedShortcut == oldSettings.globalShortcut,
+              persistedAfterFailure == oldSettings else {
+            throw ContractFailure(message: "production settings persistence failure did not restore live and durable shortcut state")
         }
     }
 

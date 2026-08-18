@@ -226,7 +226,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private func updateShortcutStatus() {
         switch registrationStatus() {
         case .active(let shortcut, _):
-            shortcutStatus.stringValue = "Registration active: " + shortcut.displayName
+            let suffix = registrationError().map { ". Last error: " + $0 } ?? ""
+            shortcutStatus.stringValue = "Registration active: " + shortcut.displayName + suffix
         case .inactive(let message):
             shortcutStatus.stringValue = "Registration inactive: " + (registrationError() ?? message)
         }

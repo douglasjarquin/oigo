@@ -97,13 +97,43 @@ public struct OigoSettings: Codable, Equatable, Sendable {
     }
 }
 
+public enum OigoSettingsStoreError: Error, Equatable, LocalizedError, Sendable {
+    case encodingFailed(String)
+    case writeFailed(String)
+    case writeRejected
+    case storeUnavailable
+
+    public var errorDescription: String? {
+        switch self {
+        case .encodingFailed(let reason):
+            "Settings could not be encoded: \(reason)"
+        case .writeFailed(let reason):
+            "Settings could not be persisted: \(reason)"
+        case .writeRejected:
+            "Settings storage rejected the new value"
+        case .storeUnavailable:
+            "Settings storage is no longer available"
+        }
+    }
+}
+
 public final class OigoSettingsStore {
     private static let key = "oigo.settings.v1"
     private static let legacyShortcutDefault = ToggleShortcut(keyCode: 49, modifiers: 0x900)
     private let defaults: UserDefaults
+    private let writeData: (Data) throws -> Void
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(
+        defaults: UserDefaults = .standard,
+        writeData: ((Data) throws -> Void)? = nil
+    ) {
         self.defaults = defaults
+        self.writeData = writeData ?? { [defaults] data in
+            defaults.set(data, forKey: Self.key)
+            guard defaults.data(forKey: Self.key) == data else {
+                throw OigoSettingsStoreError.writeRejected
+            }
+        }
     }
 
     public func load() -> OigoSettings {
@@ -111,7 +141,7 @@ public final class OigoSettingsStore {
            let settings = try? JSONDecoder().decode(OigoSettings.self, from: data) {
             let migrated = migrate(settings)
             if migrated != settings {
-                save(migrated)
+                try? save(migrated)
             }
             return migrated
         }
@@ -128,7 +158,7 @@ public final class OigoSettingsStore {
             settings.defaultMode = mode
         }
         if loadedLegacyShortcut {
-            save(settings)
+            try? save(settings)
         }
         return settings
     }
@@ -141,11 +171,20 @@ public final class OigoSettingsStore {
         shortcut == Self.legacyShortcutDefault ? .default : shortcut
     }
 
-    public func save(_ settings: OigoSettings) {
-        guard let data = try? JSONEncoder().encode(settings) else {
-            return
+    public func save(_ settings: OigoSettings) throws {
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(settings)
+        } catch {
+            throw OigoSettingsStoreError.encodingFailed(String(describing: error))
         }
-        defaults.set(data, forKey: Self.key)
+        do {
+            try writeData(data)
+        } catch let error as OigoSettingsStoreError {
+            throw error
+        } catch {
+            throw OigoSettingsStoreError.writeFailed(String(describing: error))
+        }
     }
 }
 

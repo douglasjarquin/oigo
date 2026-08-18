@@ -313,7 +313,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         case .shortcut:
             switch registrationStatus() {
             case .active(let shortcut, _):
-                return "Registered: " + shortcut.displayName + ". Candidate: " + shortcutRecorder.displayValue
+                let suffix = registrationError().map { ". Last error: " + $0 } ?? ""
+                return "Registered: " + shortcut.displayName + suffix + ". Candidate: " + shortcutRecorder.displayValue
             case .inactive(let message):
                 return "Global shortcut inactive: " + (registrationError() ?? message)
             }

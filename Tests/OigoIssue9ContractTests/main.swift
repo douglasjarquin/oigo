@@ -80,7 +80,7 @@ private struct OigoIssue9ContractTests {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let settings = OigoSettingsStore(defaults: defaults)
         let before = settings.load()
-        settings.save(before.with(showVolatilePreview: false))
+        try settings.save(before.with(showVolatilePreview: false))
         let reloaded = OigoSettingsStore(defaults: defaults).load()
         guard reloaded.showVolatilePreview == false,
               reloaded.globalShortcut == before.globalShortcut else {
@@ -198,7 +198,7 @@ private struct OigoIssue9ContractTests {
             keepSuccessfulAudioIndefinitely: true,
             launchAtLogin: true
         )
-        store.save(updated)
+        try store.save(updated)
         guard OigoSettingsStore(defaults: defaults).load() == updated else {
             throw ContractFailure(message: "minimal settings did not round-trip")
         }

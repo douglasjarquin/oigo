@@ -158,7 +158,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             registrationStatus: { [weak self] in
                 self?.shortcutRegistrar.status ?? .inactive("Global shortcut is not registered")
             },
-            registrationError: { [weak self] in self?.shortcutRegistrar.lastError },
+            registrationError: { [weak self] in
+                self?.shortcutConfiguration.lastError ?? self?.shortcutRegistrar.lastError
+            },
             save: { [weak self] settings in
                 self?.applySettings(settings) ?? "Oigo is no longer available."
             },
@@ -227,9 +229,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             saveLanguage: { [weak self] identifier in
                 guard let self else { return }
-                self.settings = self.settings.with(localeIdentifier: identifier)
-                self.settingsStore.save(self.settings)
-                self.transcription = nil
+                let updatedSettings = self.settings.with(localeIdentifier: identifier)
+                do {
+                    try self.settingsStore.save(updatedSettings)
+                    self.settings = updatedSettings
+                    self.transcription = nil
+                } catch {
+                    self.showSettingsPersistenceFailure(error)
+                }
             },
             saveStep: { [weak self] step in
                 self?.onboardingStore.save(OigoOnboardingState(step: step))
@@ -244,7 +251,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             registrationStatus: { [weak self] in
                 self?.shortcutRegistrar.status ?? .inactive("Global shortcut is not registered")
             },
-            registrationError: { [weak self] in self?.shortcutRegistrar.lastError },
+            registrationError: { [weak self] in
+                self?.shortcutConfiguration.lastError ?? self?.shortcutRegistrar.lastError
+            },
             validateShortcut: { [weak self] candidate in
                 self?.validateShortcut(candidate) ?? .invalid("Oigo is no longer available")
             },
@@ -433,6 +442,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             try shortcutRegistrar.register(shortcut: settings.globalShortcut) { [weak self] event in
                 self?.handleGlobalShortcut(event)
             }
+            shortcutConfiguration.clearError()
             shortcutBridge.reset()
         } catch {
             NSLog("Oigo could not register the global shortcut: %@", String(describing: error))
@@ -1326,7 +1336,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.button?.title = "Oigo"
         switch shortcutRegistrar.status {
         case .active(let shortcut, _):
-            if let error = shortcutRegistrar.lastError {
+            if let error = shortcutConfiguration.lastError {
                 shortcutStatusItem?.title = "Global Shortcut Active - Open Settings…"
                 statusItem?.button?.toolTip = "Global shortcut active: \(shortcut.displayName). Last registration error: \(error)"
             } else {
@@ -1335,7 +1345,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     ?? "Global shortcut active: " + shortcut.displayName
             }
         case .inactive(let message):
-            let error = shortcutRegistrar.lastError ?? message
+            let error = shortcutConfiguration.lastError ?? message
             shortcutStatusItem?.title = "Global Shortcut Inactive - Open Settings…"
             statusItem?.button?.toolTip = "Global Shortcut Inactive: " + error
         }
@@ -1358,29 +1368,52 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func selectInstantMode() {
-        settings = settings.with(defaultMode: .instant)
-        settingsStore.save(settings)
-        updateSurface()
+        let updatedSettings = settings.with(defaultMode: .instant)
+        do {
+            try settingsStore.save(updatedSettings)
+            settings = updatedSettings
+            updateSurface()
+        } catch {
+            showSettingsPersistenceFailure(error)
+        }
     }
 
     @objc private func selectCleanMode() {
-        settings = settings.with(defaultMode: .clean)
-        settingsStore.save(settings)
-        updateSurface()
+        let updatedSettings = settings.with(defaultMode: .clean)
+        do {
+            try settingsStore.save(updatedSettings)
+            settings = updatedSettings
+            updateSurface()
+        } catch {
+            showSettingsPersistenceFailure(error)
+        }
     }
 
     @objc private func toggleLaunchAtLogin() {
         let enabled = !launchAtLoginController.isEnabled
+        let previousSettings = settings
+        let updatedSettings = settings.with(launchAtLogin: enabled)
         do {
             try launchAtLoginController.setEnabled(enabled)
-            settings = settings.with(launchAtLogin: enabled)
-            settingsStore.save(settings)
+            do {
+                try settingsStore.save(updatedSettings)
+            } catch {
+                var message = error.localizedDescription
+                do {
+                    try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
+                } catch let restoreError {
+                    message += "; Launch at Login could not be restored: \(restoreError)"
+                }
+                showSettingsPersistenceFailure(message: message)
+                return
+            }
+            settings = updatedSettings
             updateSurface()
         } catch {
-            let alert = NSAlert()
-            alert.messageText = "Launch at Login could not be changed"
-            alert.informativeText = String(describing: error)
-            alert.runModal()
+            showSettingsPersistenceFailure(
+                title: "Launch at Login could not be changed",
+                message: String(describing: error)
+            )
         }
     }
 
@@ -1450,8 +1483,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             let shortcutValidation = shortcutConfiguration.save(
                 newSettings.globalShortcut,
                 persist: { [weak self] shortcut in
-                    guard let self else { return }
-                    self.settingsStore.save(newSettings.with(globalShortcut: shortcut))
+                    guard let self else { throw OigoSettingsStoreError.storeUnavailable }
+                    try self.settingsStore.save(newSettings.with(globalShortcut: shortcut))
+                },
+                restore: { [weak self] in
+                    guard let self else { throw OigoSettingsStoreError.storeUnavailable }
+                    try self.settingsStore.save(previousSettings)
                 }
             )
             guard shortcutValidation.isAvailable else {
@@ -1469,12 +1506,26 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 updateSurface()
                 return shortcutError
             }
+        } else {
+            do {
+                try settingsStore.save(newSettings)
+            } catch {
+                var message = "Settings could not be saved: \(error)"
+                guard launchAtLoginChanged else {
+                    updateSurface()
+                    return message
+                }
+                do {
+                    try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
+                } catch let restoreError {
+                    message += "; Launch at Login could not be restored: \(restoreError)"
+                }
+                updateSurface()
+                return message
+            }
         }
 
         settings = newSettings
-        if !shortcutChanged {
-            settingsStore.save(settings)
-        }
         if previousSettings.localeIdentifier != settings.localeIdentifier {
             transcription = nil
         }
@@ -1491,15 +1542,23 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func saveShortcut(_ candidate: ToggleShortcut) -> OigoShortcutValidation {
-        let validation = shortcutConfiguration.save(candidate) { [weak self] shortcut in
-            guard let self else { return }
-            self.settings = self.settings.with(globalShortcut: shortcut)
-            self.settingsStore.save(self.settings)
-        }
+        let previousSettings = settings
+        let validation = shortcutConfiguration.save(
+            candidate,
+            persist: { [weak self] shortcut in
+                guard let self else { throw OigoSettingsStoreError.storeUnavailable }
+                try self.settingsStore.save(previousSettings.with(globalShortcut: shortcut))
+            },
+            restore: { [weak self] in
+                guard let self else { throw OigoSettingsStoreError.storeUnavailable }
+                try self.settingsStore.save(previousSettings)
+            }
+        )
         guard validation.isAvailable else {
             updateSurface()
             return validation
         }
+        settings = previousSettings.with(globalShortcut: candidate)
         updateSurface()
         return .available
     }
@@ -1511,6 +1570,22 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .conflict(let reason), .invalid(let reason):
             reason
         }
+    }
+
+    private func showSettingsPersistenceFailure(_ error: Error) {
+        showSettingsPersistenceFailure(message: error.localizedDescription)
+    }
+
+    private func showSettingsPersistenceFailure(message: String) {
+        showSettingsPersistenceFailure(title: "Settings could not be saved", message: message)
+    }
+
+    private func showSettingsPersistenceFailure(title: String, message: String) {
+        NSLog("Oigo settings persistence failed: %@", message)
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.runModal()
     }
 
     private func rerunOnboarding() {

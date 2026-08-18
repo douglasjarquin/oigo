@@ -16,6 +16,7 @@ public protocol GlobalShortcutRegistrationClient: AnyObject {
 public final class ShortcutConfigurationTransaction {
     private let registrar: any GlobalShortcutRegistrationClient
     private let onEvent: @MainActor (GlobalShortcutEvent) -> Void
+    private var configurationError: String?
 
     public private(set) var committedShortcut: ToggleShortcut
     public private(set) var candidateShortcut: ToggleShortcut
@@ -25,7 +26,7 @@ public final class ShortcutConfigurationTransaction {
     }
 
     public var lastError: String? {
-        registrar.lastError
+        configurationError ?? registrar.lastError
     }
 
     public init(
@@ -46,22 +47,28 @@ public final class ShortcutConfigurationTransaction {
     public func validate(_ candidate: ToggleShortcut) -> OigoShortcutValidation {
         let basicValidation = OigoShortcutValidator.validate(candidate, occupied: [])
         guard basicValidation.isAvailable else {
+            configurationError = Self.message(for: basicValidation)
             return basicValidation
         }
         do {
             try registrar.probe(shortcut: candidate)
+            configurationError = nil
             return .available
         } catch {
-            return .conflict(String(describing: error))
+            let validation = OigoShortcutValidation.conflict(String(describing: error))
+            configurationError = Self.message(for: validation)
+            return validation
         }
     }
 
     public func save(
         _ candidate: ToggleShortcut,
-        persist: (ToggleShortcut) throws -> Void
+        persist: (ToggleShortcut) throws -> Void,
+        restore: () throws -> Void
     ) -> OigoShortcutValidation {
         let basicValidation = OigoShortcutValidator.validate(candidate, occupied: [])
         guard basicValidation.isAvailable else {
+            configurationError = Self.message(for: basicValidation)
             return basicValidation
         }
 
@@ -69,29 +76,51 @@ public final class ShortcutConfigurationTransaction {
         do {
             try registrar.register(shortcut: candidate, onEvent: onEvent)
         } catch {
-            return .conflict(String(describing: error))
+            let validation = OigoShortcutValidation.conflict(String(describing: error))
+            configurationError = Self.message(for: validation)
+            return validation
         }
 
         do {
             try persist(candidate)
         } catch {
+            var failure = "Shortcut save failed: \(error)"
+            do {
+                try restore()
+            } catch let restorePersistenceError {
+                failure += ". Previous settings could not be restored: \(restorePersistenceError)"
+            }
             do {
                 try registrar.register(shortcut: previous, onEvent: onEvent)
             } catch let restoreError {
-                return .conflict(
-                    "Shortcut save failed: \(error). Previous registration could not be restored: \(restoreError)"
-                )
+                failure += ". Previous registration could not be restored: \(restoreError)"
             }
-            return .conflict("Shortcut save failed: \(error)")
+            let validation = OigoShortcutValidation.conflict(failure)
+            configurationError = Self.message(for: validation)
+            return validation
         }
 
         committedShortcut = candidate
         candidateShortcut = candidate
+        configurationError = nil
         return .available
     }
 
     public func cancel() {
         candidateShortcut = committedShortcut
+    }
+
+    public func clearError() {
+        configurationError = nil
+    }
+
+    private static func message(for validation: OigoShortcutValidation) -> String? {
+        switch validation {
+        case .available:
+            nil
+        case .conflict(let reason), .invalid(let reason):
+            reason
+        }
     }
 }
 
