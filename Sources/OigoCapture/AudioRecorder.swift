@@ -520,6 +520,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private var recording = false
     private var starting = false
     private var finishing = false
+    private var pendingInterruptionReason: String?
     private var failureReported = false
     private var firstBufferReported = false
     private var selectedInput: OigoInputSelection = .systemDefault
@@ -659,6 +660,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         self.onInterruption = onInterruption
         self.onFailure = onFailure
         starting = true
+        pendingInterruptionReason = nil
         let recordingGeneration = recordingFence.begin()
         failureReported = false
         firstBufferReported = false
@@ -709,12 +711,20 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             engine.prepare()
             try engine.start()
             lock.lock()
-            let startupIsCurrent = starting && recordingFence.accepts(recordingGeneration)
+            let startupInterruption = pendingInterruptionReason
+            pendingInterruptionReason = nil
+            let startupIsCurrent = starting
+                && recordingFence.accepts(recordingGeneration)
+                && startupInterruption == nil
             if startupIsCurrent {
                 starting = false
                 recording = true
             }
             lock.unlock()
+            if let startupInterruption {
+                cancel()
+                throw AudioRecorderError.engineStartFailed(startupInterruption)
+            }
             guard startupIsCurrent else {
                 throw AudioRecorderError.inputDeviceUnavailable
             }
@@ -778,8 +788,9 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         let activeSelection = self.activeSelection
         let activeDeviceUID = self.activeDeviceUID
         let recording = self.recording
+        let starting = self.starting
         lock.unlock()
-        guard recording,
+        guard recording || starting,
               let activeSelection,
               let activeDeviceUID else {
             return
@@ -915,6 +926,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         recording = false
         starting = false
         finishing = true
+        pendingInterruptionReason = nil
         recordingFence.invalidate()
         firstBufferReported = false
         activeSelection = nil
@@ -950,9 +962,14 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
     private func handleInterruption(_ reason: String, generation: UInt64? = nil) {
         lock.lock()
-        guard recording,
+        guard recording || starting,
               !failureReported,
               generation.map(recordingFence.accepts) ?? true else {
+            lock.unlock()
+            return
+        }
+        if starting {
+            pendingInterruptionReason = pendingInterruptionReason ?? reason
             lock.unlock()
             return
         }
