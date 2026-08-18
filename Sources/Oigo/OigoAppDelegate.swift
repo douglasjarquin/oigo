@@ -1533,6 +1533,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             guard self.storageCapability.health.isReady else {
                 self.historyWindow?.showMessage(self.storageCapability.health.statusMessage)
+                self.historyWindow?.showAndFocus()
+                if source == .clean {
+                    self.historyWindow?.showCleanTranscript()
+                }
                 return
             }
             _ = await self.pasteAgainFlow.run(
