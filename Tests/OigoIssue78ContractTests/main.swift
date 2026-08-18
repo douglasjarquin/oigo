@@ -25,6 +25,7 @@ private struct OigoIssue78ContractTests {
             ("retry commit rejects terminal state", testRetryCommitRejectsTerminalState),
             ("shutdown terminalization rejects completed retry", testShutdownTerminalizationRejectsCompletedRetry),
             ("late retry commit cannot override timeout", testLateRetryCommitCannotOverrideTimeout),
+            ("coordinator shutdown preserves completed retry", testCoordinatorShutdownPreservesCompletedRetry),
             ("interruption timeout preserves terminal outcome", testInterruptionTimeoutPreservesTerminalOutcome),
             ("shutdown timeout replies with stable outcome", testShutdownTimeoutRepliesWithStableOutcome),
             ("one hundred lifecycle cycles release resources", testOneHundredLifecycleCyclesReleaseResources),
@@ -516,6 +517,52 @@ private struct OigoIssue78ContractTests {
         guard winner.metadata.state == .completed,
               try store.readRawText(for: winner) == "late replacement" else {
             throw ContractFailure(message: "shutdown terminalization changed the winning retry outcome")
+        }
+    }
+
+    @MainActor
+    private static func testCoordinatorShutdownPreservesCompletedRetry() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue78-coordinator-shutdown-retry-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let created = try store.createSession()
+        let failed = try store.update(
+            created,
+            state: .failed,
+            failureReason: "live transcription failed",
+            failureCode: .transcriptionFailed
+        )
+        let canonical = try store.persistRawText("prior canonical", for: failed)
+        let transcription = ShutdownRaceRetryController()
+        let coordinator = DictationCoordinator(timeoutPolicy: .testing)
+        let retryTask = Task { @MainActor in
+            _ = try? await coordinator.retryRecordingWithTranscription(
+                for: canonical,
+                using: transcription,
+                store: store
+            )
+        }
+
+        await transcription.waitUntilRetryStarted()
+        let shutdownTask = Task { @MainActor in
+            await coordinator.shutdownWithTranscription()
+        }
+        await transcription.waitUntilCancelStarted()
+        transcription.releaseRetry()
+        await transcription.waitUntilRetryCommitted()
+        transcription.releaseCancel()
+        await shutdownTask.value
+        _ = await retryTask.value
+
+        guard try await waitForResourcesToRelease(coordinator) else {
+            throw ContractFailure(message: "coordinator shutdown race retained retry work")
+        }
+        let winner = try store.load(id: canonical.id)
+        guard winner.metadata.state == .completed,
+              try store.readRawText(for: winner) == "late replacement" else {
+            throw ContractFailure(message: "coordinator shutdown overwrote a completed retry")
         }
     }
 
@@ -1187,6 +1234,168 @@ private final class LateRetryCommitController: TranscriptionController, @uncheck
             finalizedText: "late replacement",
             rawTextByteCount: Int64(Data("late replacement".utf8).count)
         ))
+    }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+}
+
+@available(macOS 26.0, *)
+private final class ShutdownRaceRetryController: TranscriptionController, @unchecked Sendable {
+    private let lock = NSLock()
+    private var retryContinuation: CheckedContinuation<TranscriptionResult, Error>?
+    private var cancelContinuation: CheckedContinuation<TranscriptionResult?, Error>?
+    private var retryStarted = false
+    private var cancelStarted = false
+    private var retryWaiters: [CheckedContinuation<Void, Never>] = []
+    private var cancelWaiters: [CheckedContinuation<Void, Never>] = []
+    private var committed = false
+    private var commitWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func start(
+        session: DictationSession,
+        format: AudioCaptureFormat,
+        store: SessionStore,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+    ) async throws {
+        _ = session
+        _ = format
+        _ = store
+        _ = onUpdate
+    }
+
+    func append(_ buffer: AudioCaptureBuffer) {
+        _ = buffer
+    }
+
+    func finish() async throws -> TranscriptionResult {
+        TranscriptionResult(finalizedText: "", rawTextByteCount: 0)
+    }
+
+    func cancel() async throws -> TranscriptionResult? {
+        try await withCheckedThrowingContinuation { continuation in
+            let waiters = withLock {
+                cancelStarted = true
+                cancelContinuation = continuation
+                let waiters = cancelWaiters
+                cancelWaiters.removeAll(keepingCapacity: true)
+                return waiters
+            }
+            waiters.forEach { $0.resume() }
+        }
+    }
+
+    func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult {
+        let staging = try store.beginRawTextStaging(for: session)
+        try store.appendRawText("late replacement", to: staging, for: session)
+        var stagingCommitted = false
+        defer {
+            if !stagingCommitted {
+                try? store.discardRawTextStaging(staging, for: session)
+            }
+        }
+
+        _ = try await withCheckedThrowingContinuation { continuation in
+            let waiters = withLock {
+                retryStarted = true
+                retryContinuation = continuation
+                let waiters = retryWaiters
+                retryWaiters.removeAll(keepingCapacity: true)
+                return waiters
+            }
+            waiters.forEach { $0.resume() }
+        }
+        let persistedSession = try store.commitRawTextStaging(
+            staging,
+            for: session,
+            expectedState: .retrying,
+            resultingState: .completed
+        )
+        stagingCommitted = true
+        let waiters = withLock {
+            committed = true
+            let waiters = commitWaiters
+            commitWaiters.removeAll(keepingCapacity: true)
+            return waiters
+        }
+        waiters.forEach { $0.resume() }
+        let rawText = try store.readRawText(for: persistedSession)
+        return TranscriptionResult(
+            finalizedText: rawText,
+            rawTextByteCount: Int64(Data(rawText.utf8).count)
+        )
+    }
+
+    func waitUntilRetryStarted() async {
+        await withCheckedContinuation { continuation in
+            let resumeImmediately = withLock {
+                if retryStarted {
+                    return true
+                }
+                retryWaiters.append(continuation)
+                return false
+            }
+            if resumeImmediately {
+                continuation.resume()
+            }
+        }
+    }
+
+    func waitUntilCancelStarted() async {
+        await withCheckedContinuation { continuation in
+            let resumeImmediately = withLock {
+                if cancelStarted {
+                    return true
+                }
+                cancelWaiters.append(continuation)
+                return false
+            }
+            if resumeImmediately {
+                continuation.resume()
+            }
+        }
+    }
+
+    func waitUntilRetryCommitted() async {
+        await withCheckedContinuation { continuation in
+            let resumeImmediately = withLock {
+                if committed {
+                    return true
+                }
+                commitWaiters.append(continuation)
+                return false
+            }
+            if resumeImmediately {
+                continuation.resume()
+            }
+        }
+    }
+
+    func releaseRetry() {
+        let continuation = withLock {
+            let continuation = retryContinuation
+            retryContinuation = nil
+            return continuation
+        }
+        continuation?.resume(returning: TranscriptionResult(
+            finalizedText: "late replacement",
+            rawTextByteCount: Int64(Data("late replacement".utf8).count)
+        ))
+    }
+
+    func releaseCancel() {
+        let continuation = withLock {
+            let continuation = cancelContinuation
+            cancelContinuation = nil
+            return continuation
+        }
+        continuation?.resume(returning: nil)
     }
 
     private func withLock<T>(_ body: () -> T) -> T {

@@ -1717,16 +1717,27 @@ public final class DictationCoordinator {
                 }
                 lastFailureReason = terminalReason
             }
-            let interruptedSession = persistTerminalState(
+            let terminalSession = persistTerminalState(
                 session,
                 in: store,
                 state: terminalState,
                 reason: terminalReason,
                 failureCode: terminalFailureCode,
-                rawTextByteCount: result?.rawTextByteCount
+                rawTextByteCount: result?.rawTextByteCount,
+                expectedState: session.metadata.state
             )
-            _ = try? apply(terminalEvent)
-            currentSession = interruptedSession
+            if session.metadata.state == .retrying,
+               let reconciledSession = try? store.load(id: session.id),
+               reconciledSession.metadata.state == .completed {
+                _ = try? apply(.retryCompleted)
+                currentSession = reconciledSession
+                lastFailureReason = nil
+                lastFailureCode = nil
+                diagnostics.record("saved audio transcription completed during shutdown")
+            } else {
+                _ = try? apply(terminalEvent)
+                currentSession = terminalSession
+            }
             releaseCapture()
         }
         let task = activeTask
