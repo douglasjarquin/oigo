@@ -140,7 +140,13 @@ private struct OigoIssue6ContractTests {
             currentFocusedElementIdentifier: "field-7",
             currentRole: "AXTextArea",
             currentIsSecureTextField: false,
-            accessibilityTrusted: true
+            accessibilityTrusted: true,
+            currentCapabilities: InsertionTargetCapabilities(
+                supportsValue: true,
+                valueIsSettable: true,
+                supportsSelectedText: false,
+                selectedTextIsSettable: false
+            )
         )
         let changedApplication = TargetValidation.evaluate(
             snapshot: snapshot,
@@ -234,7 +240,7 @@ private struct OigoIssue6ContractTests {
               secureCurrent == .secureTextField,
               inaccessible == .accessibilityUnavailable,
               missingFocus == .missingFocusedElement,
-              nonEditable == .nonEditableRole,
+              nonEditable == .unsupportedTarget,
               secureSnapshotResult == .secureTextField else {
             throw ContractFailure(message: "target validation did not compare live PID, focus, secure, and Accessibility state")
         }
@@ -324,7 +330,7 @@ private struct OigoIssue6ContractTests {
             .applicationChanged,
             .focusedElementChanged,
             .missingFocusedElement,
-            .nonEditableRole
+            .unsupportedTarget
         ]
         let target = InsertionTargetSnapshot(
             frontmostProcessIdentifier: 42,

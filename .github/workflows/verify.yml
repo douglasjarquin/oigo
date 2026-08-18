@@ -47,6 +47,8 @@ jobs:
         run: swift run oigo-issue86-contract-tests
       - name: Issue seventy-six input selection contract harness
         run: swift run oigo-issue76-contract-tests
+      - name: Issue seventy-seven insertion contract harness
+        run: swift run oigo-issue77-contract-tests
       - name: Issue seventy-eight transcription lifecycle contract harness
         run: swift run oigo-issue78-contract-tests
       - name: Issue eighty-two global hotkey contract harness

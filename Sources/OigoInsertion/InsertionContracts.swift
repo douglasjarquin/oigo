@@ -15,15 +15,30 @@ public struct InsertionTargetIdentity: Equatable, Sendable {
         subrole: String? = nil,
         ancestry: [String] = []
     ) {
-        self.accessibilityIdentifier = accessibilityIdentifier
-        self.windowIdentifier = windowIdentifier
-        self.role = role
-        self.subrole = subrole
+        self.accessibilityIdentifier = accessibilityIdentifier?.isEmpty == false
+            ? accessibilityIdentifier
+            : nil
+        self.windowIdentifier = windowIdentifier?.isEmpty == false
+            ? windowIdentifier
+            : nil
+        self.role = role?.isEmpty == false ? role : nil
+        self.subrole = subrole?.isEmpty == false ? subrole : nil
         self.ancestry = ancestry
     }
 
     public var hasCorroboratingEvidence: Bool {
-        accessibilityIdentifier != nil || windowIdentifier != nil || !ancestry.isEmpty
+        accessibilityIdentifier != nil
+            || windowIdentifier != nil
+            || ancestry.contains {
+                let components = $0.split(
+                    separator: ":",
+                    maxSplits: 1,
+                    omittingEmptySubsequences: false
+                )
+                return components.count == 2
+                    && !components[0].isEmpty
+                    && !components[1].isEmpty
+            }
     }
 
     public func corroborates(with other: InsertionTargetIdentity) -> Bool {
@@ -55,13 +70,12 @@ public struct InsertionTargetIdentity: Equatable, Sendable {
         if accessibilityIdentifier != nil, other.accessibilityIdentifier != nil {
             return true
         }
-        if windowIdentifier != nil,
-           other.windowIdentifier != nil,
-           !ancestry.isEmpty,
-           !other.ancestry.isEmpty {
+        if windowIdentifier != nil, other.windowIdentifier != nil {
             return true
         }
-        return !ancestry.isEmpty
+        return hasCorroboratingEvidence
+            && other.hasCorroboratingEvidence
+            && !ancestry.isEmpty
             && !other.ancestry.isEmpty
             && (role != nil || subrole != nil)
             && (other.role != nil || other.subrole != nil)
@@ -125,6 +139,40 @@ public struct InsertionTargetSnapshot: Equatable, Sendable {
         self.capabilities = capabilities
         self.captureToken = captureToken
     }
+
+    public var canBeSelectedForPaste: Bool {
+        frontmostProcessIdentifier > 0
+            && (identity?.hasCorroboratingEvidence == true
+                || (focusedElementIdentifier != nil
+                    && focusedElementIdentifier?.isEmpty == false
+                    && focusedElementIdentifier?.hasPrefix("ax-") == false))
+    }
+
+    public func matches(_ other: InsertionTargetSnapshot) -> Bool {
+        guard frontmostProcessIdentifier == other.frontmostProcessIdentifier,
+              bundleIdentifier == other.bundleIdentifier,
+              isSecureTextField == other.isSecureTextField else {
+            return false
+        }
+        if let identity, let otherIdentity = other.identity {
+            return identity == otherIdentity || identity.corroborates(with: otherIdentity)
+        }
+        if identity != nil || other.identity != nil {
+            return false
+        }
+        if let role, let otherRole = other.role, role != otherRole {
+            return false
+        }
+        guard let focusedElementIdentifier,
+              let otherFocusedElementIdentifier = other.focusedElementIdentifier,
+              !focusedElementIdentifier.isEmpty,
+              !otherFocusedElementIdentifier.isEmpty,
+              !focusedElementIdentifier.hasPrefix("ax-"),
+              !otherFocusedElementIdentifier.hasPrefix("ax-") else {
+            return false
+        }
+        return focusedElementIdentifier == otherFocusedElementIdentifier
+    }
 }
 
 public enum TargetValidation: Equatable, Sendable {
@@ -134,7 +182,6 @@ public enum TargetValidation: Equatable, Sendable {
     case focusedElementChanged
     case secureTextField
     case missingFocusedElement
-    case nonEditableRole
     case unsupportedTarget
     case readOnlyTarget
     case disabledTarget
@@ -171,13 +218,17 @@ public enum TargetValidation: Equatable, Sendable {
             return .secureTextField
         }
 
-        if let expectedIdentity = snapshot.identity ?? currentIdentity {
+        if let expectedIdentity = snapshot.identity {
             guard let currentIdentity else {
                 return .ambiguousTarget
             }
             if identityMatch == false,
                !expectedIdentity.corroborates(with: currentIdentity) {
                 return .focusedElementChanged
+            }
+            if identityMatch != true,
+               !expectedIdentity.hasCorroboratingEvidence {
+                return .ambiguousTarget
             }
             guard expectedIdentity == currentIdentity
                     || expectedIdentity.corroborates(with: currentIdentity) else {
@@ -190,7 +241,9 @@ public enum TargetValidation: Equatable, Sendable {
             guard let currentFocusedElementIdentifier else {
                 return .missingFocusedElement
             }
-            guard !expectedIdentifier.hasPrefix("ax-"),
+            guard !expectedIdentifier.isEmpty,
+                  !currentFocusedElementIdentifier.isEmpty,
+                  !expectedIdentifier.hasPrefix("ax-"),
                   currentFocusedElementIdentifier == expectedIdentifier else {
                 return expectedIdentifier.hasPrefix("ax-")
                     ? .ambiguousTarget
@@ -204,31 +257,20 @@ public enum TargetValidation: Equatable, Sendable {
             return .focusedElementChanged
         }
 
-        if let capabilities = currentCapabilities ?? snapshot.capabilities {
-            guard capabilities.isEnabled != false else {
-                return .disabledTarget
-            }
-            guard capabilities.supportsValue || capabilities.supportsSelectedText else {
-                return .unsupportedTarget
-            }
-            guard capabilities.isEditable else {
-                return .readOnlyTarget
-            }
-            return .safe
+        guard let capabilities = currentCapabilities ?? snapshot.capabilities else {
+            return .unsupportedTarget
         }
-
-        guard Self.legacyEditableRoles.contains(currentRole ?? "") else {
-            return .nonEditableRole
+        guard capabilities.isEnabled != false else {
+            return .disabledTarget
+        }
+        guard capabilities.supportsValue || capabilities.supportsSelectedText else {
+            return .unsupportedTarget
+        }
+        guard capabilities.isEditable else {
+            return .readOnlyTarget
         }
         return .safe
     }
-
-    private static let legacyEditableRoles: Set<String> = [
-        "AXTextField",
-        "AXTextArea",
-        "AXComboBox",
-        "AXSearchField"
-    ]
 }
 
 public enum InsertionEventResult: Equatable, Sendable {
@@ -264,7 +306,7 @@ public protocol InsertionEventSender: AnyObject {
     ) -> InsertionEventResult
 }
 
-public enum InsertionReasonCode: String, CaseIterable, Equatable, Sendable {
+public enum InsertionReasonCode: String, Codable, CaseIterable, Equatable, Sendable {
     case insertionAlreadyAttempted = "insertion_already_attempted"
     case transcriptReadFailed = "transcript_read_failed"
     case transcriptEmpty = "transcript_empty"
@@ -274,13 +316,14 @@ public enum InsertionReasonCode: String, CaseIterable, Equatable, Sendable {
     case focusedElementChanged = "focused_element_changed"
     case missingFocusedElement = "missing_focused_element"
     case secureField = "secure_field"
-    case nonEditableRole = "non_editable_role"
     case unsupportedTarget = "unsupported_target"
     case readOnlyTarget = "read_only_target"
     case disabledTarget = "disabled_target"
     case ambiguousTarget = "ambiguous_target"
     case eventDispatchFailed = "event_dispatch_failed"
     case targetChangedDuringDispatch = "target_changed_during_dispatch"
+    case targetHandoffTimedOut = "target_handoff_timed_out"
+    case targetHandoffCancelled = "target_handoff_cancelled"
 }
 
 public struct InsertionResult: Equatable, Sendable {

@@ -14,13 +14,17 @@ private struct ContractFailure: Error, CustomStringConvertible {
 @MainActor
 private struct OigoIssue77ContractTests {
     static func main() async {
-        let tests: [(String, () throws -> Void)] = [
-            ("target alternate editable role", testAlternateEditableRole),
-            ("target read-only conventional role", testReadOnlyConventionalRole),
-            ("target stable identity corroboration", testStableIdentityCorroboration),
-            ("target hash collision fails closed", testHashCollisionFailsClosed),
-            ("target secure field veto", testSecureFieldVeto),
-            ("insertion dispatch is not verification", testDispatchIsNotVerification)
+        let tests: [(String, () async throws -> Void)] = [
+            ("target-contract alternate editable role", testAlternateEditableRole),
+            ("target-contract read-only conventional role", testReadOnlyConventionalRole),
+            ("target-contract stable identity corroboration", testStableIdentityCorroboration),
+            ("target-contract hash collision fails closed", testHashCollisionFailsClosed),
+            ("target-contract secure field veto", testSecureFieldVeto),
+            ("insertion-contract capture precedes microphone permission", testCapturePrecedesMicrophonePermission),
+            ("insertion-contract dispatch is not verification", testDispatchIsNotVerification),
+            ("insertion-contract verified acknowledgement", testVerifiedAcknowledgement),
+            ("history-paste-again", testHistoryPasteAgain),
+            ("history-paste-again timeout", testHistoryPasteAgainTimeout)
         ]
         let filter = CommandLine.arguments.dropFirst()
             .drop(while: { $0 != "--filter" })
@@ -35,7 +39,7 @@ private struct OigoIssue77ContractTests {
         var failures = 0
         for (name, test) in selected {
             do {
-                try test()
+                try await test()
                 print("GREEN: issue #77 " + name)
             } catch {
                 failures += 1
@@ -231,14 +235,26 @@ private struct OigoIssue77ContractTests {
         }
     }
 
+    private static func testCapturePrecedesMicrophonePermission() async throws {
+        let trace = EventTrace()
+        let environment = FakeTargetEnvironment(validation: .safe, trace: trace)
+        let service = InsertionService(
+            targetEnvironment: environment,
+            pasteboard: FakePasteboard(),
+            eventSender: FakeEventSender()
+        )
+        let target = try await service.captureTargetBeforeMicrophonePermission {
+            trace.events.append("permission")
+        }
+        guard trace.events == ["capture", "permission"],
+              target.frontmostProcessIdentifier == 42 else {
+            throw ContractFailure(message: "microphone permission was requested before target capture")
+        }
+    }
+
     private static func testDispatchIsNotVerification() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("oigo-issue77-red-" + UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let store = try SessionStore(rootDirectory: root)
-        var session = try store.createSession()
-        session = try store.persistRawText("transcript", for: session)
-        session = try store.update(session, state: .completed)
+        let (store, session) = try persistedSession(rawText: "transcript")
+        defer { try? FileManager.default.removeItem(at: store.rootDirectory) }
         let target = InsertionTargetSnapshot(
             frontmostProcessIdentifier: 42,
             bundleIdentifier: "com.example.editor",
@@ -249,24 +265,153 @@ private struct OigoIssue77ContractTests {
         let result = InsertionService(
             targetEnvironment: FakeTargetEnvironment(validation: .safe),
             pasteboard: FakePasteboard(),
-            eventSender: FakeEventSender()
+            eventSender: FakeEventSender(result: .dispatched)
         ).insertRawText(for: session, store: store, target: target)
         guard result.outcome != .pasted else {
             throw ContractFailure(message: "event dispatch was falsely reported as verified paste")
         }
+    }
+
+    private static func testVerifiedAcknowledgement() throws {
+        let (store, session) = try persistedSession(rawText: "verified transcript")
+        defer { try? FileManager.default.removeItem(at: store.rootDirectory) }
+        let target = InsertionTargetSnapshot(
+            frontmostProcessIdentifier: 42,
+            bundleIdentifier: "com.example.editor",
+            focusedElementIdentifier: "field",
+            role: "AXTextArea",
+            isSecureTextField: false
+        )
+        let result = InsertionService(
+            targetEnvironment: FakeTargetEnvironment(validation: .safe),
+            pasteboard: FakePasteboard(),
+            eventSender: FakeEventSender(result: .verified)
+        ).insertRawText(for: session, store: store, target: target)
+        guard result.outcome == .pasted else {
+            throw ContractFailure(message: "an explicit acknowledgement did not produce the verified outcome")
+        }
+    }
+
+    private static func testHistoryPasteAgain() async throws {
+        let trace = EventTrace()
+        var captures = [
+            historyTarget(identifier: "field-a"),
+            historyTarget(identifier: "field-b"),
+            historyTarget(identifier: "field-b")
+        ]
+        let handoff = InsertionTargetHandoff(
+            maxAttempts: 4,
+            waitForDestination: {
+                trace.events.append("wait")
+            }
+        )
+        let flow = InsertionPasteAgainFlow(handoff: handoff)
+        let result = await flow.run(
+            capture: {
+                trace.events.append("capture")
+                return captures.removeFirst()
+            },
+            paste: { _ in
+                trace.events.append("dispatch")
+                return InsertionResult(outcome: .dispatched)
+            },
+            copyOnly: { _ in
+                trace.events.append("copy")
+                return InsertionResult(outcome: .copied)
+            },
+            recordOutcome: { _ in
+                trace.events.append("record")
+            }
+        )
+        trace.events.append("restore")
+        guard result.outcome == .dispatched,
+              trace.events == [
+                  "wait", "capture", "wait", "capture", "wait", "capture",
+                  "dispatch", "record", "restore"
+              ] else {
+            throw ContractFailure(message: "History Paste Again did not wait for a stable target and restore focus after recording")
+        }
+    }
+
+    private static func testHistoryPasteAgainTimeout() async throws {
+        let trace = EventTrace()
+        let handoff = InsertionTargetHandoff(
+            maxAttempts: 2,
+            waitForDestination: {
+                trace.events.append("wait")
+            }
+        )
+        let flow = InsertionPasteAgainFlow(handoff: handoff)
+        let result = await flow.run(
+            capture: {
+                trace.events.append("capture")
+                return InsertionTargetSnapshot(
+                    frontmostProcessIdentifier: 0,
+                    bundleIdentifier: nil,
+                    focusedElementIdentifier: nil,
+                    role: nil,
+                    isSecureTextField: false
+                )
+            },
+            paste: { _ in
+                trace.events.append("dispatch")
+                return InsertionResult(outcome: .dispatched)
+            },
+            copyOnly: { selection in
+                guard selection == .timedOut else {
+                    return InsertionResult(outcome: .failed)
+                }
+                trace.events.append("copy")
+                return InsertionResult(
+                    outcome: .copied,
+                    reasonCode: .targetHandoffTimedOut
+                )
+            },
+            recordOutcome: { _ in
+                trace.events.append("record")
+            }
+        )
+        guard result.outcome == .copied,
+              result.reasonCode == .targetHandoffTimedOut,
+              trace.events == ["wait", "capture", "wait", "capture", "copy", "record"] else {
+            throw ContractFailure(message: "Paste Again timeout did not preserve clipboard-only safety")
+        }
+    }
+
+    private static func historyTarget(identifier: String) -> InsertionTargetSnapshot {
+        InsertionTargetSnapshot(
+            frontmostProcessIdentifier: 42,
+            bundleIdentifier: "com.example.editor",
+            focusedElementIdentifier: identifier,
+            role: "AXTextArea",
+            isSecureTextField: false
+        )
+    }
+
+    private static func persistedSession(rawText: String) throws -> (SessionStore, DictationSession) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue77-" + UUID().uuidString, isDirectory: true)
+        let store = try SessionStore(rootDirectory: root)
+        var session = try store.createSession()
+        session = try store.persistRawText(rawText, for: session)
+        session = try store.update(session, state: .completed)
+        return (store, session)
     }
 }
 
 @MainActor
 private final class FakeTargetEnvironment: InsertionTargetEnvironment {
     let validation: TargetValidation
+    let trace: EventTrace?
 
-    init(validation: TargetValidation) {
+    init(validation: TargetValidation, trace: EventTrace? = nil) {
         self.validation = validation
+        self.trace = trace
     }
 
     func capture() -> InsertionTargetSnapshot {
-        InsertionTargetSnapshot(
+        trace?.events.append("capture")
+        return InsertionTargetSnapshot(
             frontmostProcessIdentifier: 42,
             bundleIdentifier: "com.example.editor",
             focusedElementIdentifier: "field",
@@ -282,6 +427,11 @@ private final class FakeTargetEnvironment: InsertionTargetEnvironment {
 }
 
 @MainActor
+private final class EventTrace {
+    var events: [String] = []
+}
+
+@MainActor
 private final class FakePasteboard: InsertionPasteboard {
     func write(_ rawText: String) -> Bool {
         _ = rawText
@@ -291,12 +441,20 @@ private final class FakePasteboard: InsertionPasteboard {
 
 @MainActor
 private final class FakeEventSender: InsertionEventSender {
+    let result: InsertionEventResult
+
+    init(result: InsertionEventResult = .dispatched) {
+        self.result = result
+    }
+
     func sendPaste(
         to processIdentifier: Int32,
         revalidate: () -> TargetValidation
     ) -> InsertionEventResult {
         _ = processIdentifier
-        _ = revalidate()
-        return .dispatched
+        guard revalidate() == .safe else {
+            return .failed
+        }
+        return result
     }
 }

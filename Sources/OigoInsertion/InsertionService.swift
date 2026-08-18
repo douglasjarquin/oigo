@@ -39,6 +39,23 @@ public final class InsertionService {
         targetEnvironment.capture()
     }
 
+    public func discardTarget(_ target: InsertionTargetSnapshot) {
+        targetEnvironment.discard(target)
+    }
+
+    public func captureTargetBeforeMicrophonePermission(
+        requestPermission: @escaping @MainActor () async throws -> Void
+    ) async throws -> InsertionTargetSnapshot {
+        let target = captureTarget()
+        do {
+            try await requestPermission()
+        } catch {
+            targetEnvironment.discard(target)
+            throw error
+        }
+        return target
+    }
+
     public func insertRawText(
         for session: DictationSession,
         store: SessionStore,
@@ -61,9 +78,10 @@ public final class InsertionService {
         guard attemptedSessionID != session.id else {
             return InsertionResult(
                 outcome: .failed,
-                reason: "insertion was already attempted for this session"
+                reasonCode: .insertionAlreadyAttempted
             )
         }
+        defer { targetEnvironment.discard(target) }
 
         let text: String
         do {
@@ -123,6 +141,7 @@ public final class InsertionService {
         store: SessionStore,
         target: InsertionTargetSnapshot
     ) -> InsertionResult {
+        defer { targetEnvironment.discard(target) }
         let text: String
         do {
             text = try readText(source: source, for: session, store: store)
@@ -147,6 +166,36 @@ public final class InsertionService {
         return performPaste(target: target)
     }
 
+    public func copyText(
+        for session: DictationSession,
+        source: TranscriptInsertionSource,
+        store: SessionStore,
+        reasonCode: InsertionReasonCode
+    ) -> InsertionResult {
+        let text: String
+        do {
+            text = try readText(source: source, for: session, store: store)
+        } catch {
+            return InsertionResult(
+                outcome: .failed,
+                reasonCode: .transcriptReadFailed
+            )
+        }
+        guard !text.isEmpty else {
+            return InsertionResult(
+                outcome: .failed,
+                reasonCode: .transcriptEmpty
+            )
+        }
+        guard pasteboard.write(text) else {
+            return InsertionResult(
+                outcome: .failed,
+                reasonCode: .clipboardWriteFailed
+            )
+        }
+        return InsertionResult(outcome: .copied, reasonCode: reasonCode)
+    }
+
     private func readText(
         source: TranscriptInsertionSource,
         for session: DictationSession,
@@ -163,7 +212,6 @@ public final class InsertionService {
     private func performPaste(
         target: InsertionTargetSnapshot
     ) -> InsertionResult {
-        defer { targetEnvironment.discard(target) }
         if faultInjector?.consume(.targetLoss) == true {
             return Self.copyOnlyResult(for: .applicationChanged)
         }
@@ -197,8 +245,6 @@ public final class InsertionService {
             return Self.copyOnlyResult(for: .focusedElementChanged)
         case .missingFocusedElement:
             return Self.copyOnlyResult(for: .missingFocusedElement)
-        case .nonEditableRole:
-            return Self.copyOnlyResult(for: .nonEditableRole)
         case .unsupportedTarget:
             return Self.copyOnlyResult(for: .unsupportedTarget)
         case .readOnlyTarget:
@@ -236,11 +282,6 @@ public final class InsertionService {
             return InsertionResult(
                 outcome: .copied,
                 reasonCode: .missingFocusedElement
-            )
-        case .nonEditableRole:
-            return InsertionResult(
-                outcome: .copied,
-                reasonCode: .nonEditableRole
             )
         case .unsupportedTarget:
             return InsertionResult(
@@ -287,6 +328,7 @@ public final class AccessibilityTargetEnvironment: InsertionTargetEnvironment {
         let processIdentifier = application?.processIdentifier ?? 0
         let bundleIdentifier = application?.bundleIdentifier
         guard processIdentifier > 0 else {
+            capturedTarget = nil
             return InsertionTargetSnapshot(
                 frontmostProcessIdentifier: processIdentifier,
                 bundleIdentifier: bundleIdentifier,
