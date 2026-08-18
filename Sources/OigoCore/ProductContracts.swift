@@ -318,37 +318,120 @@ public struct OigoSettings: Codable, Equatable, Sendable {
     }
 }
 
+public enum OigoSettingsStoreError: Error, Equatable, LocalizedError, Sendable {
+    case encodingFailed(String)
+    case writeFailed(String)
+    case writeRejected
+    case storeUnavailable
+
+    public var errorDescription: String? {
+        switch self {
+        case .encodingFailed(let reason):
+            "Settings could not be encoded: \(reason)"
+        case .writeFailed(let reason):
+            "Settings could not be persisted: \(reason)"
+        case .writeRejected:
+            "Settings storage rejected the new value"
+        case .storeUnavailable:
+            "Settings storage is no longer available"
+        }
+    }
+}
+
 public final class OigoSettingsStore {
     private static let key = "oigo.settings.v1"
+    private static let legacyShortcutDefault = ToggleShortcut(keyCode: 49, modifiers: 0x900)
     private let defaults: UserDefaults
+    private let writeData: (Data) throws -> Void
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(
+        defaults: UserDefaults = .standard,
+        writeData: ((Data) throws -> Void)? = nil
+    ) {
         self.defaults = defaults
+        self.writeData = writeData ?? { [defaults] data in
+            defaults.set(data, forKey: Self.key)
+            guard defaults.data(forKey: Self.key) == data else {
+                throw OigoSettingsStoreError.writeRejected
+            }
+        }
     }
 
     public func load() -> OigoSettings {
         if let data = defaults.data(forKey: Self.key),
            let settings = try? JSONDecoder().decode(OigoSettings.self, from: data) {
-            return settings
+            let migrated = migrate(settings)
+            if migrated != settings {
+                try? save(migrated)
+            }
+            return migrated
         }
 
         var settings = OigoSettings.default
+        var loadedLegacyShortcut = false
         if let data = defaults.data(forKey: "globalToggleShortcut"),
            let shortcut = try? JSONDecoder().decode(ToggleShortcut.self, from: data) {
-            settings.globalShortcut = shortcut
+            settings.globalShortcut = migrate(shortcut)
+            loadedLegacyShortcut = true
         }
         if let rawMode = defaults.string(forKey: "transcriptCleanupMode"),
            let mode = OigoProcessingMode(rawValue: rawMode) {
             settings.defaultMode = mode
         }
+        if loadedLegacyShortcut {
+            try? save(settings)
+        }
         return settings
     }
 
-    public func save(_ settings: OigoSettings) {
-        guard let data = try? JSONEncoder().encode(settings) else {
-            return
+    private func migrate(_ settings: OigoSettings) -> OigoSettings {
+        settings.with(globalShortcut: migrate(settings.globalShortcut))
+    }
+
+    private func migrate(_ shortcut: ToggleShortcut) -> ToggleShortcut {
+        shortcut == Self.legacyShortcutDefault ? .default : shortcut
+    }
+
+    public func save(_ settings: OigoSettings) throws {
+        let data: Data
+        let previousData = defaults.data(forKey: Self.key)
+        do {
+            data = try JSONEncoder().encode(settings)
+        } catch {
+            throw OigoSettingsStoreError.encodingFailed(String(describing: error))
         }
-        defaults.set(data, forKey: Self.key)
+        do {
+            try writeData(data)
+        } catch let error as OigoSettingsStoreError {
+            do {
+                try restore(previousData)
+            } catch let restoreError {
+                throw OigoSettingsStoreError.writeFailed(
+                    "\(error.localizedDescription); settings rollback failed: \(restoreError.localizedDescription)"
+                )
+            }
+            throw error
+        } catch {
+            do {
+                try restore(previousData)
+            } catch let restoreError {
+                throw OigoSettingsStoreError.writeFailed(
+                    "\(error); settings rollback failed: \(restoreError.localizedDescription)"
+                )
+            }
+            throw OigoSettingsStoreError.writeFailed(String(describing: error))
+        }
+    }
+
+    private func restore(_ data: Data?) throws {
+        if let data {
+            defaults.set(data, forKey: Self.key)
+        } else {
+            defaults.removeObject(forKey: Self.key)
+        }
+        guard defaults.data(forKey: Self.key) == data else {
+            throw OigoSettingsStoreError.writeRejected
+        }
     }
 }
 
@@ -617,16 +700,24 @@ public enum OigoShortcutValidation: Equatable, Sendable {
     }
 }
 
+public enum ToggleShortcutModifiers {
+    public static let command: UInt32 = 0x100
+    public static let shift: UInt32 = 0x200
+    public static let option: UInt32 = 0x800
+    public static let control: UInt32 = 0x1000
+    public static let supportedMask: UInt32 = command | shift | option | control
+}
+
 public enum OigoShortcutValidator {
     public static func validate(
         _ shortcut: ToggleShortcut,
         occupied: [ToggleShortcut]
     ) -> OigoShortcutValidation {
-        guard shortcut.keyCode > 0 else {
-            return .invalid("Choose a keyboard key for the global shortcut")
+        guard shortcut.modifiers & ToggleShortcutModifiers.supportedMask != 0 else {
+            return .invalid("Choose at least one supported modifier for the global shortcut")
         }
-        guard shortcut.modifiers != 0 else {
-            return .invalid("Choose at least one modifier for the global shortcut")
+        guard shortcut.modifiers & ~ToggleShortcutModifiers.supportedMask == 0 else {
+            return .invalid("Choose only supported modifiers for the global shortcut")
         }
         guard !occupied.contains(shortcut) else {
             return .conflict("That shortcut is already registered by another application")

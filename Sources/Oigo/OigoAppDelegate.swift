@@ -6,6 +6,7 @@ import OigoCore
 import OigoCapture
 import OigoTranscription
 import OigoInsertion
+import OigoHotKey
 
 @available(macOS 26.0, *)
 @MainActor
@@ -19,6 +20,17 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let insertion = InsertionService()
     private let playback = AudioPlayback()
     private let shortcutRegistrar = CarbonGlobalShortcutRegistrar()
+    private lazy var shortcutBridge = GlobalShortcutOperationBridge(
+        state: { [weak self] in self?.coordinator.state ?? .failed },
+        start: { [weak self] in self?.startKeyboardDictation() },
+        stop: { [weak self] in self?.requestKeyboardStop() },
+        feedback: { [weak self] result in self?.showShortcutFeedback(result) }
+    )
+    private lazy var shortcutConfiguration = ShortcutConfigurationTransaction(
+        committedShortcut: settings.globalShortcut,
+        registrar: shortcutRegistrar,
+        onEvent: { [weak self] event in self?.handleGlobalShortcut(event) }
+    )
     private let statusSurface = StatusSurfaceController()
     private let settingsStore = OigoSettingsStore()
     private let onboardingStore = OigoOnboardingStore()
@@ -40,6 +52,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var historyWindow: HistoryWindowController?
     private var statusItem: NSStatusItem?
     private var toggleItem: NSMenuItem?
+    private var shortcutStatusItem: NSMenuItem?
     private var modeMenuItem: NSMenuItem?
     private var instantModeItem: NSMenuItem?
     private var cleanModeItem: NSMenuItem?
@@ -52,6 +65,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var recordingStartedAt: Date?
     private var previewThrottle = OigoHUDPreviewThrottle()
     private var toggleTask: Task<Void, Never>?
+    private var finishRequestedAfterStart = false
+    private var shortcutFeedbackDetail: String?
     private var cleanAgainTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
     private var workspaceInterruptionTask: Task<Void, Never>?
@@ -83,6 +98,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
         shortcutRegistrar.unregister()
+        shortcutBridge.reset()
         deviceInventoryMonitor.stop()
         removeWorkspaceInterruptionObservers()
         statusSurface.hide()
@@ -183,7 +199,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleDictation() {
-        handleToggle()
+        handleMouseToggle()
     }
 
     @objc private func openSettings() {
@@ -206,6 +222,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             supportedLocales: supportedLocales,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
+            registrationStatus: { [weak self] in
+                self?.shortcutRegistrar.status ?? .inactive("Global shortcut is not registered")
+            },
+            registrationError: { [weak self] in
+                self?.shortcutConfiguration.lastError ?? self?.shortcutRegistrar.lastError
+            },
             save: { [weak self] settings in
                 self?.applySettings(settings) ?? "Oigo is no longer available."
             },
@@ -276,18 +298,28 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             saveLanguage: { [weak self] identifier in
                 guard let self else { return }
-                self.settings = self.settings.with(localeIdentifier: identifier)
-                self.settingsStore.save(self.settings)
-                self.transcription = nil
+                let updatedSettings = self.settings.with(localeIdentifier: identifier)
+                do {
+                    try self.settingsStore.save(updatedSettings)
+                    self.settings = updatedSettings
+                    self.transcription = nil
+                } catch {
+                    self.showSettingsPersistenceFailure(error)
+                }
             },
             saveStep: { [weak self] step in
                 self?.onboardingStore.save(OigoOnboardingState(step: step))
             },
             saveInputSelection: { [weak self] selection in
                 guard let self else { return }
-                self.settings = self.settings.with(selectedInput: selection)
-                self.settingsStore.save(self.settings)
-                self.recorder.setInputSelection(selection)
+                let updatedSettings = self.settings.with(selectedInput: selection)
+                do {
+                    try self.settingsStore.save(updatedSettings)
+                    self.settings = updatedSettings
+                    self.recorder.setInputSelection(selection)
+                } catch {
+                    self.showSettingsPersistenceFailure(error)
+                }
             },
             requestMicrophone: {
                 _ = await AudioRecorder.requestMicrophonePermission()
@@ -295,6 +327,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             openMicrophoneSettings: { [weak self] in
                 self?.openSystemSettings(OigoPermissionPresentation.microphone(.denied).settingsURL)
+            },
+            registrationStatus: { [weak self] in
+                self?.shortcutRegistrar.status ?? .inactive("Global shortcut is not registered")
+            },
+            registrationError: { [weak self] in
+                self?.shortcutConfiguration.lastError ?? self?.shortcutRegistrar.lastError
             },
             validateShortcut: { [weak self] candidate in
                 self?.validateShortcut(candidate) ?? .invalid("Oigo is no longer available")
@@ -310,7 +348,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             startTest: { [weak self] in
                 self?.onboardingWindow?.focusTestField()
-                self?.handleToggle(allowBeforeSetup: true)
+                self?.handleMouseToggle(allowBeforeSetup: true)
             },
             stopTest: { [weak self] in
                 self?.finishTestDictation()
@@ -323,6 +361,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             onComplete: { [weak self] in
                 guard let self else { return }
+                guard self.shortcutRegistrar.status.isActive else {
+                    self.onboardingWindow?.showRegistrationFailure(
+                        self.shortcutRegistrar.lastError ?? self.shortcutRegistrar.status.message
+                    )
+                    self.updateSurface()
+                    return
+                }
                 self.onboardingStore.markCompleted()
                 self.onboardingWindow = nil
                 self.registerShortcut()
@@ -397,6 +442,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         toggle.target = self
         menu.addItem(toggle)
 
+        let shortcutStatus = NSMenuItem(
+            title: "Global Shortcut Inactive - Open Settings…",
+            action: #selector(openSettings),
+            keyEquivalent: ""
+        )
+        shortcutStatus.target = self
+        menu.addItem(shortcutStatus)
+
         let mode = NSMenuItem(
             title: "Mode",
             action: nil,
@@ -457,6 +510,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         item.menu = menu
         statusItem = item
         toggleItem = toggle
+        shortcutStatusItem = shortcutStatus
         modeMenuItem = mode
         instantModeItem = instant
         cleanModeItem = clean
@@ -464,13 +518,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func registerShortcut() {
-        shortcutRegistrar.unregister()
         do {
-            try shortcutRegistrar.register(shortcut: settings.globalShortcut) { [weak self] in
-                self?.handleToggle()
+            try shortcutRegistrar.register(shortcut: settings.globalShortcut) { [weak self] event in
+                self?.handleGlobalShortcut(event)
             }
+            shortcutConfiguration.clearError()
+            shortcutBridge.reset()
         } catch {
-            NSLog("Oigo could not register the global toggle shortcut: %@", String(describing: error))
+            NSLog("Oigo could not register the global shortcut: %@", String(describing: error))
+            shortcutBridge.reset()
+            updateSurface()
         }
     }
 
@@ -542,29 +599,99 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             guard self.workspaceInterruptionOperationID == operationID else {
                 return
             }
+            self.shortcutBridge.reset()
             self.updateSurface()
             self.workspaceInterruptionTask = nil
             self.workspaceInterruptionOperationID = nil
         }
     }
 
-    private func handleToggle(allowBeforeSetup: Bool = false) {
+    private func handleMouseToggle(allowBeforeSetup: Bool = false) {
         performanceInstrumentation.mark(.shortcutReceived)
         guard allowBeforeSetup || onboardingStore.load().isComplete else {
             showOnboarding(OigoSystemSupportEvaluator.current())
             return
         }
-        if let toggleTask {
-            toggleTask.cancel()
+
+        switch coordinator.state {
+        case .idle, .complete, .failed, .cancelled, .interrupted:
+            startDictation()
+        case .recording:
+            finishDictation()
+        case .preparing, .finalizing, .cleaning, .inserting:
+            showShortcutFeedback(.ignoredProcessing(coordinator.state))
+        }
+    }
+
+    private func handleGlobalShortcut(_ event: GlobalShortcutEvent) {
+        performanceInstrumentation.mark(.shortcutReceived)
+        let edge: GlobalShortcutIntentEdge = switch event.edge {
+        case .pressed:
+            .pressed
+        case .released:
+            .released
+        }
+        _ = shortcutBridge.receive(edge)
+    }
+
+    private func startKeyboardDictation() {
+        guard onboardingStore.load().isComplete else {
+            shortcutBridge.reset()
+            return
+        }
+        startDictation()
+    }
+
+    private func requestKeyboardStop() {
+        if toggleTask != nil {
+            finishRequestedAfterStart = true
+            return
+        }
+        finishDictation()
+    }
+
+    private func startDictation() {
+        guard toggleTask == nil else {
+            showShortcutFeedback(.ignoredBusy(coordinator.state))
             return
         }
         do {
             toggleTask = try coordinator.startTask { @MainActor [weak self] in
-                defer { self?.toggleTask = nil }
-                await self?.performToggle()
+                guard let self else { return }
+                defer {
+                    let shouldFinish = self.finishRequestedAfterStart
+                    self.finishRequestedAfterStart = false
+                    self.toggleTask = nil
+                    if shouldFinish {
+                        self.scheduleFinishAfterCurrentTask()
+                    }
+                }
+                await self.performStartDictation()
+                if self.coordinator.state == .recording {
+                    _ = self.shortcutBridge.observeState()
+                } else {
+                    self.shortcutBridge.reset()
+                }
             }
         } catch {
-            NSLog("Oigo could not start its coordinator-owned toggle task: %@", String(describing: error))
+            shortcutBridge.reset()
+            NSLog("Oigo could not start its coordinator-owned dictation task: %@", String(describing: error))
+        }
+    }
+
+    private func finishDictation() {
+        guard toggleTask == nil else {
+            showShortcutFeedback(.ignoredBusy(coordinator.state))
+            return
+        }
+        do {
+            toggleTask = try coordinator.startTask { @MainActor [weak self] in
+                guard let self else { return }
+                defer { self.toggleTask = nil }
+                await self.performFinishDictation()
+            }
+        } catch {
+            NSLog("Oigo could not start its coordinator-owned finish task: %@", String(describing: error))
         }
     }
 
@@ -602,114 +729,44 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             guard self.coordinator.state == .recording else {
                 return
             }
-            await self.performToggle()
+            self.finishDictation()
         }
     }
 
-    private func performToggle() async {
+    private func performStartDictation() async {
         do {
-            switch coordinator.state {
-            case .idle, .complete, .failed, .cancelled, .interrupted:
-                guard let sessionStore else {
-                    throw SessionStoreError.invalidSessionDirectory(
-                        SessionStore.defaultRootDirectory()
-                    )
-                }
-                failureDetail = nil
-                insertionDisplayStatus = nil
-                try await ensureMicrophonePermission()
-                try Task.checkCancellation()
-                targetSnapshot = insertion.captureTarget()
-                recorder.setInputSelection(settings.selectedInput)
-                let format = try recorder.captureFormat()
-                try Task.checkCancellation()
-                let service = transcriptionService()
-                recordingStartedAt = Date()
-                previewThrottle = OigoHUDPreviewThrottle()
-                lastSession = try await coordinator.startRecordingWithTranscription(
-                    using: recorder,
-                    store: sessionStore,
-                    transcription: service,
-                    format: format,
-                    onUpdate: { [weak self] update in
-                        Task { @MainActor [weak self] in
-                            self?.applyTranscriptionUpdate(update)
-                        }
+            guard let sessionStore else {
+                throw SessionStoreError.invalidSessionDirectory(
+                    SessionStore.defaultRootDirectory()
+                )
+            }
+            failureDetail = nil
+            insertionDisplayStatus = nil
+            shortcutFeedbackDetail = nil
+            try await ensureMicrophonePermission()
+            try Task.checkCancellation()
+            targetSnapshot = insertion.captureTarget()
+            recorder.setInputSelection(settings.selectedInput)
+            let format = try recorder.captureFormat()
+            try Task.checkCancellation()
+            let service = transcriptionService()
+            recordingStartedAt = Date()
+            previewThrottle = OigoHUDPreviewThrottle()
+            lastSession = try await coordinator.startRecordingWithTranscription(
+                using: recorder,
+                store: sessionStore,
+                transcription: service,
+                format: format,
+                onUpdate: { [weak self] update in
+                    Task { @MainActor [weak self] in
+                        self?.applyTranscriptionUpdate(update)
                     }
-                )
-            case .recording:
-                let terminalMode = transcriptCleanupMode(for: settings.defaultMode)
-                insertionDisplayStatus = .finalizing
-                updateSurface()
-                _ = try await coordinator.stopRecordingWithTranscription()
-                recordingStartedAt = nil
-                guard let snapshot = targetSnapshot,
-                      let store = sessionStore else {
-                    throw DictationCoordinatorError.recordingNotActive
                 }
-                let insertionSession = try coordinator.beginInsertion(
-                    using: store,
-                    requiresCleanup: settings.defaultMode == .clean
-                )
-                if terminalMode == .clean {
-                    insertionDisplayStatus = .cleaning
-                }
-                updateSurface()
-                let decision = try await resolveCleanup(
-                    for: insertionSession,
-                    store: store,
-                    mode: terminalMode
-                )
-                try Task.checkCancellation()
-                if terminalMode == .clean {
-                    _ = try coordinator.finishCleanup()
-                }
-                try Task.checkCancellation()
-                insertionDisplayStatus = .pasting
-                updateSurface()
-                explainAccessibilityBeforePaste()
-                let result: InsertionResult = {
-                    performanceInstrumentation.mark(.insertionStart)
-                    defer { performanceInstrumentation.mark(.insertionEnd) }
-                    return insertion.insertText(
-                        for: insertionSession,
-                        source: decision.insertionSource,
-                        store: store,
-                        target: snapshot
-                    )
-                }()
-                lastSession = try coordinator.finishInsertion(
-                    outcome: result.outcome,
-                    reason: result.reason,
-                    insertionSource: decision.insertionSource,
-                    cleanupFallbackReason: decision.fallbackReason?.description
-                )
-                let rawText = (try? store.readRawText(for: insertionSession)) ?? ""
-                onboardingWindow?.setTestResult(
-                    transcript: rawText,
-                    mode: settings.defaultMode,
-                    copied: result.outcome.clipboardOutputAvailable
-                )
-                if let fallbackReason = decision.fallbackReason {
-                    historyWindow?.showMessage(
-                        "Clean unavailable. Inserted the raw transcript: " + fallbackReason.description
-                    )
-                }
-                insertionDisplayStatus = Self.displayStatus(for: result.outcome)
-                targetSnapshot = nil
-                livePreview = ""
-            case .preparing, .finalizing, .cleaning, .inserting:
-                throw DictationTransitionError.illegal(
-                    from: coordinator.state,
-                    event: .start
-                )
-            }
-            if historyWindow != nil {
-                refreshHistory()
-            }
+            )
             updateSurface()
         } catch is CancellationError {
             await coordinator.cancelActiveWork()
+            shortcutBridge.reset()
             lastSession = coordinator.currentSession ?? lastSession
             recordingStartedAt = nil
             targetSnapshot = nil
@@ -719,11 +776,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             failureDetail = nil
             updateSurface()
-            return
         } catch {
             if coordinator.hasActiveWork {
                 await coordinator.cancelActiveWork(reason: String(describing: error))
             }
+            shortcutBridge.reset()
             lastSession = coordinator.currentSession ?? lastSession
             targetSnapshot = nil
             recordingStartedAt = nil
@@ -739,8 +796,153 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 mode: settings.defaultMode,
                 copied: false
             )
-            NSLog("Oigo rejected the toggle command: %@", String(describing: error))
+            NSLog("Oigo rejected the dictation start command: %@", String(describing: error))
             updateSurface()
+        }
+    }
+
+    private func performFinishDictation() async {
+        do {
+            guard coordinator.state == .recording else {
+                throw DictationTransitionError.illegal(
+                    from: coordinator.state,
+                    event: .stop
+                )
+            }
+            let terminalMode = transcriptCleanupMode(for: settings.defaultMode)
+            insertionDisplayStatus = .finalizing
+            shortcutFeedbackDetail = nil
+            updateSurface()
+            _ = try await coordinator.stopRecordingWithTranscription()
+            recordingStartedAt = nil
+            guard let snapshot = targetSnapshot,
+                  let store = sessionStore else {
+                throw DictationCoordinatorError.recordingNotActive
+            }
+            let insertionSession = try coordinator.beginInsertion(
+                using: store,
+                requiresCleanup: settings.defaultMode == .clean
+            )
+            if terminalMode == .clean {
+                insertionDisplayStatus = .cleaning
+            }
+            updateSurface()
+            let decision = try await resolveCleanup(
+                for: insertionSession,
+                store: store,
+                mode: terminalMode
+            )
+            try Task.checkCancellation()
+            if terminalMode == .clean {
+                _ = try coordinator.finishCleanup()
+            }
+            try Task.checkCancellation()
+            insertionDisplayStatus = .pasting
+            updateSurface()
+            explainAccessibilityBeforePaste()
+            let result: InsertionResult = {
+                performanceInstrumentation.mark(.insertionStart)
+                defer { performanceInstrumentation.mark(.insertionEnd) }
+                return insertion.insertText(
+                    for: insertionSession,
+                    source: decision.insertionSource,
+                    store: store,
+                    target: snapshot
+                )
+            }()
+            lastSession = try coordinator.finishInsertion(
+                outcome: result.outcome,
+                reason: result.reason,
+                insertionSource: decision.insertionSource,
+                cleanupFallbackReason: decision.fallbackReason?.description
+            )
+            let rawText = (try? store.readRawText(for: insertionSession)) ?? ""
+            onboardingWindow?.setTestResult(
+                transcript: rawText,
+                mode: settings.defaultMode,
+                copied: result.outcome.clipboardOutputAvailable
+            )
+            if let fallbackReason = decision.fallbackReason {
+                historyWindow?.showMessage(
+                    "Clean unavailable. Inserted the raw transcript: " + fallbackReason.description
+                )
+            }
+            insertionDisplayStatus = Self.displayStatus(for: result.outcome)
+            targetSnapshot = nil
+            livePreview = ""
+            if historyWindow != nil {
+                refreshHistory()
+            }
+            updateSurface()
+        } catch is CancellationError {
+            await coordinator.cancelActiveWork()
+            shortcutBridge.reset()
+            lastSession = coordinator.currentSession ?? lastSession
+            recordingStartedAt = nil
+            targetSnapshot = nil
+            livePreview = ""
+            if !coordinator.hasActiveWork {
+                insertionDisplayStatus = nil
+            }
+            updateSurface()
+        } catch {
+            if coordinator.hasActiveWork {
+                await coordinator.cancelActiveWork(reason: String(describing: error))
+            }
+            shortcutBridge.reset()
+            lastSession = coordinator.currentSession ?? lastSession
+            targetSnapshot = nil
+            recordingStartedAt = nil
+            insertionDisplayStatus = .failed
+            if let session = coordinator.currentSession,
+               [.failed, .interrupted].contains(session.metadata.state) {
+                lastSession = session
+            }
+            historyWindow?.showMessage(Self.friendlyError("Dictation failed", error))
+            onboardingWindow?.setTestResult(
+                transcript: "",
+                mode: settings.defaultMode,
+                copied: false
+            )
+            NSLog("Oigo rejected the dictation finish command: %@", String(describing: error))
+            updateSurface()
+        }
+    }
+
+    private func scheduleFinishAfterCurrentTask() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            while self.coordinator.activeTaskCount != 0 {
+                await Task.yield()
+            }
+            self.finishDictation()
+        }
+    }
+
+    private func showShortcutFeedback(_ result: GlobalShortcutIntentResult) {
+        switch result {
+        case .ignoredProcessing(let state):
+            let displayState: OigoHUDProcessingState?
+            switch state {
+            case .finalizing:
+                displayState = .finalizing
+            case .cleaning:
+                displayState = .cleaning
+            case .inserting:
+                displayState = .pasting
+            default:
+                displayState = nil
+            }
+            guard let displayState else { return }
+            insertionDisplayStatus = displayState
+            shortcutFeedbackDetail = "Shortcut ignored while \(state.rawValue.capitalized) is running"
+            updateSurface()
+        case .ignoredRecordingNotOwned:
+            statusItem?.button?.toolTip = "Shortcut ignored: recording was started from the menu"
+        case .ignoredBusy(let state):
+            statusItem?.button?.toolTip = "Shortcut ignored while \(state.rawValue.capitalized) is running"
+        default:
+            break
         }
     }
 
@@ -1232,6 +1434,21 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         modeMenuItem?.isEnabled = setupComplete && !isRecording
         launchAtLoginItem?.state = launchAtLoginController.isEnabled ? .on : .off
         statusItem?.button?.title = "Oigo"
+        switch shortcutRegistrar.status {
+        case .active(let shortcut, _):
+            if let error = shortcutConfiguration.lastError {
+                shortcutStatusItem?.title = "Global Shortcut Active - Open Settings…"
+                statusItem?.button?.toolTip = "Global shortcut active: \(shortcut.displayName). Last registration error: \(error)"
+            } else {
+                shortcutStatusItem?.title = "Global Shortcut: " + shortcut.displayName
+                statusItem?.button?.toolTip = shortcutFeedbackDetail
+                    ?? "Global shortcut active: " + shortcut.displayName
+            }
+        case .inactive(let message):
+            let error = shortcutConfiguration.lastError ?? message
+            shortcutStatusItem?.title = "Global Shortcut Inactive - Open Settings…"
+            statusItem?.button?.toolTip = "Global Shortcut Inactive: " + error
+        }
 
         if isRecording {
             statusSurface.showRecording(
@@ -1242,7 +1459,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         } else if let insertionDisplayStatus {
             statusSurface.showProcessing(
                 insertionDisplayStatus,
-                detail: failureDetail ?? Self.hudDetail(for: insertionDisplayStatus),
+                detail: shortcutFeedbackDetail
+                    ?? failureDetail
+                    ?? Self.hudDetail(for: insertionDisplayStatus),
                 anchoredTo: statusItem?.button
             )
         } else {
@@ -1251,29 +1470,52 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func selectInstantMode() {
-        settings = settings.with(defaultMode: .instant)
-        settingsStore.save(settings)
-        updateSurface()
+        let updatedSettings = settings.with(defaultMode: .instant)
+        do {
+            try settingsStore.save(updatedSettings)
+            settings = updatedSettings
+            updateSurface()
+        } catch {
+            showSettingsPersistenceFailure(error)
+        }
     }
 
     @objc private func selectCleanMode() {
-        settings = settings.with(defaultMode: .clean)
-        settingsStore.save(settings)
-        updateSurface()
+        let updatedSettings = settings.with(defaultMode: .clean)
+        do {
+            try settingsStore.save(updatedSettings)
+            settings = updatedSettings
+            updateSurface()
+        } catch {
+            showSettingsPersistenceFailure(error)
+        }
     }
 
     @objc private func toggleLaunchAtLogin() {
         let enabled = !launchAtLoginController.isEnabled
+        let previousSettings = settings
+        let updatedSettings = settings.with(launchAtLogin: enabled)
         do {
             try launchAtLoginController.setEnabled(enabled)
-            settings = settings.with(launchAtLogin: enabled)
-            settingsStore.save(settings)
+            do {
+                try settingsStore.save(updatedSettings)
+            } catch {
+                var message = error.localizedDescription
+                do {
+                    try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
+                } catch let restoreError {
+                    message += "; Launch at Login could not be restored: \(restoreError)"
+                }
+                showSettingsPersistenceFailure(message: message)
+                return
+            }
+            settings = updatedSettings
             updateSurface()
         } catch {
-            let alert = NSAlert()
-            alert.messageText = "Launch at Login could not be changed"
-            alert.informativeText = String(describing: error)
-            alert.runModal()
+            showSettingsPersistenceFailure(
+                title: "Launch at Login could not be changed",
+                message: String(describing: error)
+            )
         }
     }
 
@@ -1327,32 +1569,72 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applySettings(_ newSettings: OigoSettings) -> String? {
-        let shortcutValidation = validateShortcut(newSettings.globalShortcut)
-        if !shortcutValidation.isAvailable {
-            switch shortcutValidation {
-            case .conflict(let reason), .invalid(let reason):
-                return reason
-            case .available:
-                return nil
-            }
-        }
-
         let previousSettings = settings
-        if previousSettings.launchAtLogin != newSettings.launchAtLogin {
+        let shortcutChanged = previousSettings.globalShortcut != newSettings.globalShortcut
+        let launchAtLoginChanged = previousSettings.launchAtLogin != newSettings.launchAtLogin
+
+        if launchAtLoginChanged {
             do {
                 try launchAtLoginController.setEnabled(newSettings.launchAtLogin)
             } catch {
-                registerShortcut()
                 return "Launch at Login could not be changed: " + String(describing: error)
             }
         }
+
+        if shortcutChanged {
+            let shortcutValidation = shortcutConfiguration.save(
+                newSettings.globalShortcut,
+                persist: { [weak self] shortcut in
+                    guard let self else { throw OigoSettingsStoreError.storeUnavailable }
+                    try self.settingsStore.save(newSettings.with(globalShortcut: shortcut))
+                },
+                restore: { [weak self] in
+                    guard let self else { throw OigoSettingsStoreError.storeUnavailable }
+                    try self.settingsStore.save(previousSettings)
+                }
+            )
+            guard shortcutValidation.isAvailable else {
+                let shortcutError = Self.shortcutValidationMessage(shortcutValidation)
+                guard launchAtLoginChanged else {
+                    updateSurface()
+                    return shortcutError
+                }
+                do {
+                    try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
+                } catch {
+                    updateSurface()
+                    return shortcutError + "; Launch at Login could not be restored: " + String(describing: error)
+                }
+                updateSurface()
+                return shortcutError
+            }
+        } else {
+            do {
+                try settingsStore.save(newSettings)
+            } catch {
+                var message = "Settings could not be saved: \(error)"
+                guard launchAtLoginChanged else {
+                    updateSurface()
+                    return message
+                }
+                do {
+                    try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
+                } catch let restoreError {
+                    message += "; Launch at Login could not be restored: \(restoreError)"
+                }
+                updateSurface()
+                return message
+            }
+        }
+
         settings = newSettings
-        settingsStore.save(settings)
         recorder.setInputSelection(settings.selectedInput)
         if previousSettings.localeIdentifier != settings.localeIdentifier {
             transcription = nil
         }
-        registerShortcut()
+        if !shortcutRegistrar.status.isActive {
+            registerShortcut()
+        }
         updateSurface()
         return nil
     }
@@ -1372,32 +1654,55 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func validateShortcut(_ candidate: ToggleShortcut) -> OigoShortcutValidation {
-        let basicValidation = OigoShortcutValidator.validate(candidate, occupied: [])
-        guard basicValidation.isAvailable else {
-            return basicValidation
-        }
-        shortcutRegistrar.unregister()
-        do {
-            try shortcutRegistrar.register(shortcut: candidate) { }
-            shortcutRegistrar.unregister()
-            return .available
-        } catch {
-            shortcutRegistrar.unregister()
-            registerShortcut()
-            return .conflict(String(describing: error))
-        }
+        shortcutConfiguration.setCandidate(candidate)
+        return shortcutConfiguration.validate(candidate)
     }
 
     private func saveShortcut(_ candidate: ToggleShortcut) -> OigoShortcutValidation {
-        let validation = validateShortcut(candidate)
+        let previousSettings = settings
+        let validation = shortcutConfiguration.save(
+            candidate,
+            persist: { [weak self] shortcut in
+                guard let self else { throw OigoSettingsStoreError.storeUnavailable }
+                try self.settingsStore.save(previousSettings.with(globalShortcut: shortcut))
+            },
+            restore: { [weak self] in
+                guard let self else { throw OigoSettingsStoreError.storeUnavailable }
+                try self.settingsStore.save(previousSettings)
+            }
+        )
         guard validation.isAvailable else {
+            updateSurface()
             return validation
         }
-        settings = settings.with(globalShortcut: candidate)
-        settingsStore.save(settings)
-        registerShortcut()
+        settings = previousSettings.with(globalShortcut: candidate)
         updateSurface()
         return .available
+    }
+
+    private static func shortcutValidationMessage(_ validation: OigoShortcutValidation) -> String {
+        switch validation {
+        case .available:
+            ""
+        case .conflict(let reason), .invalid(let reason):
+            reason
+        }
+    }
+
+    private func showSettingsPersistenceFailure(_ error: Error) {
+        showSettingsPersistenceFailure(message: error.localizedDescription)
+    }
+
+    private func showSettingsPersistenceFailure(message: String) {
+        showSettingsPersistenceFailure(title: "Settings could not be saved", message: message)
+    }
+
+    private func showSettingsPersistenceFailure(title: String, message: String) {
+        NSLog("Oigo settings persistence failed: %@", message)
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.runModal()
     }
 
     private func rerunOnboarding() {
