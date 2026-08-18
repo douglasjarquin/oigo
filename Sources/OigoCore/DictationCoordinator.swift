@@ -1174,7 +1174,6 @@ public final class DictationCoordinator {
         } catch {
             let failureReason = Self.failureReason(for: error)
             let timedOut = error is any TranscriptionTimeoutEvidence
-                || DictationFailureCode.infer(from: failureReason) == .transcriptionTimedOut
             let terminalState = timedOut ? state : .failed
             let terminalEvent = timedOut ? event : .fail
             lastFailureReason = failureReason
