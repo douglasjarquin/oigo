@@ -1449,7 +1449,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         if shortcutChanged {
             let shortcutValidation = shortcutConfiguration.save(
                 newSettings.globalShortcut,
-                persist: { _ in }
+                persist: { [weak self] shortcut in
+                    guard let self else { return }
+                    self.settingsStore.save(newSettings.with(globalShortcut: shortcut))
+                }
             )
             guard shortcutValidation.isAvailable else {
                 let shortcutError = Self.shortcutValidationMessage(shortcutValidation)
@@ -1469,7 +1472,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         settings = newSettings
-        settingsStore.save(settings)
+        if !shortcutChanged {
+            settingsStore.save(settings)
+        }
         if previousSettings.localeIdentifier != settings.localeIdentifier {
             transcription = nil
         }
