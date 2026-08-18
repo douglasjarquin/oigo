@@ -63,6 +63,7 @@
         A00000010000000000000042 /* AudioRecordingOperationFence.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000036 /* AudioRecordingOperationFence.swift */; };
         A00000010000000000000043 /* OperationTaskRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000037 /* OperationTaskRegistry.swift */; };
         A00000010000000000000044 /* TranscriptionOperationLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000038 /* TranscriptionOperationLifecycle.swift */; };
+        A00000010000000000000045 /* DurableSessionBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000039 /* DurableSessionBootstrap.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -175,6 +176,7 @@
         B00000010000000000000036 /* AudioRecordingOperationFence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecordingOperationFence.swift; sourceTree = "<group>"; };
         B00000010000000000000037 /* OperationTaskRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationTaskRegistry.swift; sourceTree = "<group>"; };
         B00000010000000000000038 /* TranscriptionOperationLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionOperationLifecycle.swift; sourceTree = "<group>"; };
+        B00000010000000000000039 /* DurableSessionBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DurableSessionBootstrap.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -304,6 +306,7 @@
                 B00000010000000000000034 /* GlobalShortcutOperationBridge.swift */,
                 B00000010000000000000037 /* OperationTaskRegistry.swift */,
                 B00000010000000000000038 /* TranscriptionOperationLifecycle.swift */,
+                B00000010000000000000039 /* DurableSessionBootstrap.swift */,
             );
             path = Sources/OigoCore;
             sourceTree = "<group>";
@@ -582,6 +585,7 @@
                 A00000010000000000000040 /* GlobalShortcutOperationBridge.swift in Sources */,
                 A00000010000000000000043 /* OperationTaskRegistry.swift in Sources */,
                 A00000010000000000000044 /* TranscriptionOperationLifecycle.swift in Sources */,
+                A00000010000000000000045 /* DurableSessionBootstrap.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
