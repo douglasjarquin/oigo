@@ -63,9 +63,6 @@ struct OigoIssue86ContractTests {
         guard await bootstrapper.diagnosticsExport() == "/Users/user/private transcript content" else {
             throw ContractFailure.diagnosticsExportWasNotPreserved
         }
-        guard capability.diagnosticsExport() == "/Users/user/private transcript content" else {
-            throw ContractFailure.diagnosticsExportWasNotPreserved
-        }
         guard capability.health.statusMessage == "Storage unavailable: permission denied" else {
             throw ContractFailure.unstableStorageMessage
         }

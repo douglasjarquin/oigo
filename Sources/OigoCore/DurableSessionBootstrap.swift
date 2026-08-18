@@ -405,7 +405,6 @@ public final class DurableSessionCapability {
     public private(set) var health: DurableSessionHealth = .checking
     public private(set) var store: SessionStore?
     public private(set) var history: [SessionHistoryEntry] = []
-    private var lastFailureDiagnosticsExport: String?
     public var onChange: (() -> Void)?
 
     private let bootstrapper: any DurableSessionBootstrapping
@@ -441,7 +440,6 @@ public final class DurableSessionCapability {
         currentAttempt = nil
         store = nil
         history = []
-        lastFailureDiagnosticsExport = nil
         health = fatal ? .fatallyInvalid(category) : .recoverablyUnavailable(category)
         onChange?()
     }
@@ -460,10 +458,6 @@ public final class DurableSessionCapability {
         return try await operation(store)
     }
 
-    public func diagnosticsExport() -> String? {
-        lastFailureDiagnosticsExport
-    }
-
     private func beginAttempt() -> Bool {
         guard currentAttempt == nil else {
             return false
@@ -473,7 +467,6 @@ public final class DurableSessionCapability {
         health = .checking
         store = nil
         history = []
-        lastFailureDiagnosticsExport = nil
         onChange?()
 
         let bootstrapper = self.bootstrapper
@@ -513,7 +506,6 @@ public final class DurableSessionCapability {
         }
         store = result.store
         history = result.history
-        lastFailureDiagnosticsExport = nil
         health = .ready(result.report)
         onChange?()
     }
@@ -524,7 +516,6 @@ public final class DurableSessionCapability {
         }
         store = nil
         history = []
-        lastFailureDiagnosticsExport = failure.diagnosticsExport()
         health = failure.isFatal
             ? .fatallyInvalid(failure.category)
             : .recoverablyUnavailable(failure.category)
