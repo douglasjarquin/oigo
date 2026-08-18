@@ -43,7 +43,7 @@ public struct DurableSessionBootstrapReport: Equatable, Sendable {
     }
 }
 
-public struct DurableSessionBootstrapResult: @unchecked Sendable {
+public struct DurableSessionBootstrapResult: Sendable {
     public let store: SessionStore
     public let history: [SessionHistoryEntry]
     public let report: DurableSessionBootstrapReport
@@ -183,11 +183,11 @@ private final class DurableSessionAttemptCompletion: @unchecked Sendable {
     }
 }
 
-public struct DurableSessionBootstrapper: DurableSessionBootstrapping, @unchecked Sendable {
-    public typealias RootPreparation = () throws -> URL
-    public typealias StoreFactory = (URL) throws -> SessionStore
-    public typealias Recovery = (SessionStore) throws -> Int
-    public typealias HistoryEnumeration = (SessionStore) throws -> SessionHistoryEnumeration
+public struct DurableSessionBootstrapper: DurableSessionBootstrapping, Sendable {
+    public typealias RootPreparation = @Sendable () throws -> URL
+    public typealias StoreFactory = @Sendable (URL) throws -> SessionStore
+    public typealias Recovery = @Sendable (SessionStore) throws -> Int
+    public typealias HistoryEnumeration = @Sendable (SessionStore) throws -> SessionHistoryEnumeration
 
     private let rootPreparation: RootPreparation
     private let storeFactory: StoreFactory
@@ -195,15 +195,15 @@ public struct DurableSessionBootstrapper: DurableSessionBootstrapping, @unchecke
     private let historyEnumeration: HistoryEnumeration
 
     public init(
-        rootDirectory: URL? = nil,
-        fileManager: FileManager = .default
+        rootDirectory: URL? = nil
     ) {
+        let requestedRoot = rootDirectory
         rootPreparation = {
-            let root = try rootDirectory ?? SessionStore.defaultRootDirectory(fileManager: fileManager)
+            let root = try requestedRoot ?? SessionStore.defaultRootDirectory()
             return try Self.validatedRootDirectory(at: root)
         }
         storeFactory = { root in
-            try SessionStore(rootDirectory: root, fileManager: fileManager)
+            try SessionStore(rootDirectory: root)
         }
         recovery = { store in
             try Task.checkCancellation()

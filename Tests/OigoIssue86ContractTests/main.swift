@@ -41,7 +41,8 @@ struct OigoIssue86ContractTests {
         var insertionConstructed = 0
         var startReached = 0
         do {
-            _ = try await capability.withHealthyStore { _ in
+            _ = try await capability.withHealthyStore { store in
+                _ = try store.createSession()
                 recorderConstructed += 1
                 transcriberConstructed += 1
                 insertionConstructed += 1
@@ -110,7 +111,12 @@ struct OigoIssue86ContractTests {
             throw ContractFailure.diagnosticsExportWasNotPreserved
         }
         let reached = try await capability.withHealthyStore { receivedStore in
-            receivedStore === store
+            let persistedSession = try receivedStore.createSession()
+            guard receivedStore === store else {
+                return false
+            }
+            let durableSession = try receivedStore.load(id: persistedSession.id)
+            return durableSession.metadata.state == .preparing
         }
         guard reached else {
             throw ContractFailure.healthyStoreWasNotPassedToGate
@@ -554,7 +560,7 @@ struct OigoIssue86ContractTests {
     }
 
     private static func symlinkSafeTemporaryDirectory(_ fileManager: FileManager) -> URL {
-        fileManager.homeDirectoryForCurrentUser
+        fileManager.temporaryDirectory
     }
 }
 
