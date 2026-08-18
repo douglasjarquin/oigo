@@ -12,6 +12,7 @@ struct OigoIssue86ContractTests {
             try await failureMatrixExposesStableCategories()
             try malformedChildrenDoNotPoisonValidHistory()
             try await retryCoalescesAndFencesStaleCompletions()
+            try await shutdownCancelsBootstrapBeforeRecoveryContinues()
             try await relaunchPreservesExistingSessionData()
             print("GREEN: all issue #86 contract scenarios")
         } catch {
@@ -73,7 +74,14 @@ struct OigoIssue86ContractTests {
             .appendingPathComponent("oigo-issue86-healthy-" + UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let store = try SessionStore(rootDirectory: root)
+        let store: SessionStore
+        do {
+            store = try SessionStore(rootDirectory: root)
+        } catch {
+            throw ContractFailure.unexpectedBootstrapError(
+                String(describing: error) + " at " + root.path
+            )
+        }
         let bootstrapper = HealthyBootstrapper(
             result: DurableSessionBootstrapResult(
                 store: store,
@@ -129,11 +137,58 @@ struct OigoIssue86ContractTests {
         let rootFile = root.appendingPathComponent("root", isDirectory: false)
         try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
         try Data("root sentinel".utf8).write(to: rootFile)
+
+        let mappedRootFailures: [(DurableSessionFailureCategory, NSError)] = [
+            (.permissionDenied, NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))),
+            (.unavailableParent, NSError(domain: NSPOSIXErrorDomain, code: Int(ENOENT))),
+            (.insufficientSpaceOrWriteFailure, NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC))),
+            (.unknownIOFailure, NSError(domain: "OigoIssue86", code: 86))
+        ]
+        for (expectedCategory, error) in mappedRootFailures {
+            let failure = try await bootstrapFailure(
+                using: DurableSessionBootstrapper(
+                    rootPreparation: { throw error },
+                    storeFactory: { try SessionStore(rootDirectory: $0) },
+                    recovery: { _ in 0 },
+                    historyEnumeration: { _ in
+                        SessionHistoryEnumeration(entries: [], malformedSessionCount: 0)
+                    }
+                )
+            )
+            guard failure.category == expectedCategory else {
+                throw ContractFailure.unexpectedStorageError(String(describing: failure))
+            }
+        }
+
+        let recoveryFailure = try await bootstrapFailure(
+            using: DurableSessionBootstrapper(
+                rootPreparation: { root },
+                storeFactory: { try SessionStore(rootDirectory: $0) },
+                recovery: { _ in
+                    throw SessionStoreError.invalidMetadata(root.appendingPathComponent("recovery-metadata"))
+                },
+                historyEnumeration: { _ in
+                    SessionHistoryEnumeration(entries: [], malformedSessionCount: 0)
+                }
+            )
+        )
+        guard recoveryFailure.category == .metadataRecoveryFailure else {
+            throw ContractFailure.historyFailureWasNotClassified
+        }
+
         let fileFailure = try await bootstrapFailure(
             using: DurableSessionBootstrapper(rootDirectory: rootFile)
         )
         guard fileFailure.category == .rootIdentityViolation, fileFailure.isFatal else {
             throw ContractFailure.rootIdentityWasNotFatal
+        }
+        do {
+            _ = try SessionStore(rootDirectory: rootFile)
+            throw ContractFailure.directStoreAcceptedInvalidRoot
+        } catch let error as DurableSessionBootstrapFailure {
+            guard error.category == .rootIdentityViolation else {
+                throw ContractFailure.unexpectedStorageError(String(describing: error))
+            }
         }
 
         let symlinkTarget = root.appendingPathComponent("target", isDirectory: true)
@@ -147,6 +202,14 @@ struct OigoIssue86ContractTests {
         )
         guard symlinkFailure.category == .rootIdentityViolation, symlinkFailure.isFatal else {
             throw ContractFailure.rootIdentityWasNotFatal
+        }
+        do {
+            _ = try SessionStore(rootDirectory: symlinkRoot)
+            throw ContractFailure.directStoreAcceptedInvalidRoot
+        } catch let error as DurableSessionBootstrapFailure {
+            guard error.category == .rootIdentityViolation else {
+                throw ContractFailure.unexpectedStorageError(String(describing: error))
+            }
         }
         guard try Data(contentsOf: sentinel) == Data("target sentinel".utf8) else {
             throw ContractFailure.rootRecoveryModifiedTarget
@@ -199,6 +262,16 @@ struct OigoIssue86ContractTests {
               report.entries.first?.session.id == completed.id,
               report.malformedSessionCount == 2 else {
             throw ContractFailure.malformedChildIsolationFailed
+        }
+        let readyHealth = DurableSessionHealth.ready(
+            DurableSessionBootstrapReport(
+                recoveredSessionCount: 0,
+                historyEntryCount: report.entries.count,
+                malformedSessionCount: report.malformedSessionCount
+            )
+        )
+        guard readyHealth.statusMessage == "Storage ready: 2 malformed history items isolated" else {
+            throw ContractFailure.malformedCountWasNotReported
         }
         guard try store.load(id: completed.id).metadata.state == .completed else {
             throw ContractFailure.validSessionWasChanged
@@ -328,6 +401,43 @@ struct OigoIssue86ContractTests {
         }
     }
 
+    private static func shutdownCancelsBootstrapBeforeRecoveryContinues() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent(".oigo-issue86-cancellation-" + UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+
+        let gate = CancellationGate()
+        let store = try SessionStore(rootDirectory: root)
+        let bootstrapper = DurableSessionBootstrapper(
+            rootPreparation: { root },
+            storeFactory: { _ in store },
+            recovery: { _ in
+                gate.markStarted()
+                gate.waitForRelease()
+                gate.recordCancellation(Task.isCancelled)
+                gate.markObserved()
+                if Task.isCancelled {
+                    throw CancellationError()
+                }
+                return 0
+            },
+            historyEnumeration: { _ in
+                SessionHistoryEnumeration(entries: [], malformedSessionCount: 0)
+            }
+        )
+        let capability = DurableSessionCapability(bootstrapper: bootstrapper)
+        capability.start()
+        await gate.waitUntilStarted()
+        capability.shutdown()
+        gate.release()
+        await gate.waitUntilObserved()
+        await capability.waitForShutdown()
+        guard gate.wasCancelled else {
+            throw ContractFailure.bootstrapRecoveryOutlivedShutdown
+        }
+    }
+
     private static func bootstrapFailure(
         using bootstrapper: any DurableSessionBootstrapping
     ) async throws -> DurableSessionBootstrapFailure {
@@ -423,6 +533,80 @@ private actor DeferredBootstrapper: DurableSessionBootstrapping {
     }
 }
 
+private final class CancellationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let releaseSemaphore = DispatchSemaphore(value: 0)
+    private var started = false
+    private var observed = false
+    private var startedContinuation: CheckedContinuation<Void, Never>?
+    private var observedContinuation: CheckedContinuation<Void, Never>?
+    private var cancelled = false
+
+    func markStarted() {
+        lock.lock()
+        started = true
+        let continuation = startedContinuation
+        startedContinuation = nil
+        lock.unlock()
+        continuation?.resume()
+    }
+
+    func waitUntilStarted() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if started {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                startedContinuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+
+    func release() {
+        releaseSemaphore.signal()
+    }
+
+    func waitForRelease() {
+        releaseSemaphore.wait()
+    }
+
+    func recordCancellation(_ value: Bool) {
+        lock.lock()
+        cancelled = value
+        lock.unlock()
+    }
+
+    func markObserved() {
+        lock.lock()
+        observed = true
+        let continuation = observedContinuation
+        observedContinuation = nil
+        lock.unlock()
+        continuation?.resume()
+    }
+
+    func waitUntilObserved() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if observed {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                observedContinuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+
+    var wasCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+}
+
 private enum ContractFailure: Error, CustomStringConvertible {
     case expectedStorageToBeUnavailable
     case unexpectedStorageError(String)
@@ -434,15 +618,18 @@ private enum ContractFailure: Error, CustomStringConvertible {
     case healthyStoreWasNotPassedToGate
     case storageStatusLeakedContent
     case rootIdentityWasNotFatal
+    case directStoreAcceptedInvalidRoot
     case rootRecoveryModifiedTarget
     case historyFailureWasNotClassified
     case malformedChildIsolationFailed
+    case malformedCountWasNotReported
     case validSessionWasChanged
     case retryDidNotStart
     case retryWasNotCoalesced
     case retryDidNotPublishLatestResult
     case staleRetryOverwroteLatestResult
     case retryDidNotRecover
+    case bootstrapRecoveryOutlivedShutdown
     case relaunchLostExistingHistory
     case relaunchDidNotRecoverUnfinishedSession
     case relaunchResetExistingSession
@@ -471,12 +658,16 @@ private enum ContractFailure: Error, CustomStringConvertible {
             "storage status exposed local content"
         case .rootIdentityWasNotFatal:
             "root identity violation was not fatal"
+        case .directStoreAcceptedInvalidRoot:
+            "direct SessionStore construction accepted an invalid root"
         case .rootRecoveryModifiedTarget:
             "root identity recovery modified a symlink target"
         case .historyFailureWasNotClassified:
             "history metadata failure was not classified as a metadata or recovery failure"
         case .malformedChildIsolationFailed:
             "a malformed child poisoned valid history or was followed"
+        case .malformedCountWasNotReported:
+            "the count of isolated malformed history items was not reported"
         case .validSessionWasChanged:
             "valid history entry changed while isolating malformed children"
         case .retryDidNotStart:
@@ -489,6 +680,8 @@ private enum ContractFailure: Error, CustomStringConvertible {
             "a stale storage retry completion overwrote the latest result"
         case .retryDidNotRecover:
             "explicit storage retry did not recover"
+        case .bootstrapRecoveryOutlivedShutdown:
+            "bootstrap recovery continued after shutdown cancellation"
         case .relaunchLostExistingHistory:
             "relaunch did not preserve existing history"
         case .relaunchDidNotRecoverUnfinishedSession:

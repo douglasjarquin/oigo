@@ -99,13 +99,15 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         let activeCleanAgainTask = cleanAgainTask
         let activeRetryTask = retryTask
         let activeWorkspaceInterruptionTask = workspaceInterruptionTask
+        let activeStorageShutdown = storageCapability.hasPendingShutdown
         activeToggleTask?.cancel()
         activeCleanAgainTask?.cancel()
         if coordinator.hasActiveWork
             || activeToggleTask != nil
             || activeCleanAgainTask != nil
             || activeRetryTask != nil
-            || activeWorkspaceInterruptionTask != nil {
+            || activeWorkspaceInterruptionTask != nil
+            || activeStorageShutdown {
             Task { @MainActor [weak self] in
                 if let activeToggleTask {
                     await activeToggleTask.value
@@ -124,6 +126,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 if let activeWorkspaceInterruptionTask {
                     await activeWorkspaceInterruptionTask.value
                 }
+                await self?.storageCapability.waitForShutdown()
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
             return .terminateLater
@@ -1357,6 +1360,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static func storageFailureCategory(_ error: Error) -> DurableSessionFailureCategory? {
+        if let failure = error as? DurableSessionBootstrapFailure {
+            return failure.category
+        }
         guard let error = error as? SessionStoreError else {
             return nil
         }

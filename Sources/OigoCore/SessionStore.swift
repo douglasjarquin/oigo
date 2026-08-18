@@ -454,7 +454,8 @@ public final class SessionStore: @unchecked Sendable {
     ) throws {
         self.fileManager = fileManager
         self.faultInjector = nil
-        self.rootDirectory = try rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
+        let requestedRoot = try rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
+        self.rootDirectory = try DurableSessionBootstrapper.validatedRootDirectory(at: requestedRoot)
 
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -465,10 +466,6 @@ public final class SessionStore: @unchecked Sendable {
         decoder.dateDecodingStrategy = .iso8601
         self.decoder = decoder
 
-        try fileManager.createDirectory(
-            at: self.rootDirectory,
-            withIntermediateDirectories: true
-        )
     }
 
     @_spi(Testing)
@@ -479,7 +476,8 @@ public final class SessionStore: @unchecked Sendable {
     ) throws {
         self.fileManager = fileManager
         self.faultInjector = faultInjector
-        self.rootDirectory = try rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
+        let requestedRoot = try rootDirectory ?? Self.defaultRootDirectory(fileManager: fileManager)
+        self.rootDirectory = try DurableSessionBootstrapper.validatedRootDirectory(at: requestedRoot)
 
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -490,10 +488,6 @@ public final class SessionStore: @unchecked Sendable {
         decoder.dateDecodingStrategy = .iso8601
         self.decoder = decoder
 
-        try fileManager.createDirectory(
-            at: self.rootDirectory,
-            withIntermediateDirectories: true
-        )
     }
 
     @_spi(Testing)
@@ -1276,11 +1270,22 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     public func recoverUnfinishedSessions(at date: Date = Date()) throws -> [DictationSession] {
+        try recoverUnfinishedSessions(at: date, shouldContinue: { true })
+    }
+
+    @_spi(Testing)
+    public func recoverUnfinishedSessions(
+        at date: Date = Date(),
+        shouldContinue: @escaping @Sendable () -> Bool
+    ) throws -> [DictationSession] {
         lock.lock()
         defer { lock.unlock() }
 
         var recovered: [DictationSession] = []
         try forEachTolerantSession { session in
+            guard shouldContinue() else {
+                throw CancellationError()
+            }
             guard session.metadata.state.isUnfinished else {
                 return
             }
@@ -1296,6 +1301,9 @@ public final class SessionStore: @unchecked Sendable {
                 : "recording was interrupted before shutdown"
             metadata.failureCode = .applicationQuit
             try writeMetadata(metadata, at: session.metadataURL)
+            guard shouldContinue() else {
+                throw CancellationError()
+            }
             recovered.append(DictationSession(metadata: metadata, directoryURL: session.directoryURL))
         }
         return recovered
@@ -1970,7 +1978,7 @@ public final class SessionStore: @unchecked Sendable {
             Darwin.open(path, flags)
         }
         guard rootFD >= 0 else {
-            throw SessionStoreError.invalidSessionDirectory(directoryURL)
+            throw storageFailure(for: errno)
         }
         defer { _ = Darwin.close(rootFD) }
 
@@ -1978,9 +1986,24 @@ public final class SessionStore: @unchecked Sendable {
             Darwin.openat(rootFD, name, flags)
         }
         guard directoryFD >= 0 else {
-            throw SessionStoreError.invalidSessionDirectory(directoryURL)
+            throw storageFailure(for: errno)
         }
         return directoryFD
+    }
+
+    private func storageFailure(for errorCode: Int32) -> DurableSessionBootstrapFailure {
+        switch errorCode {
+        case EACCES, EPERM:
+            DurableSessionBootstrapFailure(category: .permissionDenied, isFatal: false)
+        case ENOENT:
+            DurableSessionBootstrapFailure(category: .unavailableParent, isFatal: false)
+        case ENOSPC, EDQUOT:
+            DurableSessionBootstrapFailure(category: .insufficientSpaceOrWriteFailure, isFatal: false)
+        case ELOOP, ENOTDIR:
+            DurableSessionBootstrapFailure(category: .rootIdentityViolation, isFatal: true)
+        default:
+            DurableSessionBootstrapFailure(category: .unknownIOFailure, isFatal: false)
+        }
     }
 
     private func fileByteCount(
@@ -2178,7 +2201,7 @@ public final class SessionStore: @unchecked Sendable {
             Darwin.openat(directoryFD, temporaryName, flags, mode_t(0o600))
         }
         guard temporaryFD >= 0 else {
-            throw SessionStoreError.invalidSessionDirectory(url)
+            throw storageFailure(for: errno)
         }
         var prepared = false
         defer {
@@ -2189,7 +2212,7 @@ public final class SessionStore: @unchecked Sendable {
         }
         try writeData(data, to: temporaryFD, at: url)
         guard Darwin.fsync(temporaryFD) == 0 else {
-            throw SessionStoreError.invalidSessionDirectory(url)
+            throw storageFailure(for: errno)
         }
         prepared = true
         return temporaryName
@@ -2207,7 +2230,7 @@ public final class SessionStore: @unchecked Sendable {
             }
         }
         guard renamed == 0 else {
-            throw SessionStoreError.invalidSessionDirectory(url)
+            throw storageFailure(for: errno)
         }
         _ = Darwin.fsync(directoryFD)
     }
@@ -2264,10 +2287,10 @@ public final class SessionStore: @unchecked Sendable {
                     if errno == EINTR {
                         continue
                     }
-                    throw SessionStoreError.invalidSessionDirectory(url)
+                    throw storageFailure(for: errno)
                 }
                 guard count > 0 else {
-                    throw SessionStoreError.invalidSessionDirectory(url)
+                    throw storageFailure(for: EIO)
                 }
                 offset += count
             }

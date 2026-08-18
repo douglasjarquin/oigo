@@ -120,6 +120,10 @@ public enum DurableSessionHealth: Equatable, Sendable, CustomStringConvertible {
         switch self {
         case .checking:
             "Checking durable storage"
+        case .ready(let report) where report.malformedSessionCount == 1:
+            "Storage ready: 1 malformed history item isolated"
+        case .ready(let report) where report.malformedSessionCount > 1:
+            "Storage ready: " + String(report.malformedSessionCount) + " malformed history items isolated"
         case .ready:
             "Storage ready"
         case .recoverablyUnavailable(let category), .fatallyInvalid(let category):
@@ -167,13 +171,18 @@ public struct DurableSessionBootstrapper: DurableSessionBootstrapping, @unchecke
     ) {
         rootPreparation = {
             let root = try rootDirectory ?? SessionStore.defaultRootDirectory(fileManager: fileManager)
-            return try Self.prepareRoot(at: root, fileManager: fileManager)
+            return try Self.validatedRootDirectory(at: root)
         }
         storeFactory = { root in
             try SessionStore(rootDirectory: root, fileManager: fileManager)
         }
         recovery = { store in
-            try store.recoverUnfinishedSessions().count
+            try Task.checkCancellation()
+            let recovered = try store.recoverUnfinishedSessions(
+                shouldContinue: { !Task.isCancelled }
+            )
+            try Task.checkCancellation()
+            return recovered.count
         }
         historyEnumeration = { store in
             try store.listHistoryReport()
@@ -194,12 +203,18 @@ public struct DurableSessionBootstrapper: DurableSessionBootstrapping, @unchecke
     }
 
     public func bootstrap() async throws -> DurableSessionBootstrapResult {
-        try await Task.detached(priority: .userInitiated) {
-            try bootstrapSynchronously()
-        }.value
+        let task = Task.detached(priority: .userInitiated) {
+            try self.bootstrapSynchronously()
+        }
+        return try await withTaskCancellationHandler(operation: {
+            try await task.value
+        }, onCancel: {
+            task.cancel()
+        })
     }
 
     private func bootstrapSynchronously() throws -> DurableSessionBootstrapResult {
+        try Task.checkCancellation()
         let root: URL
         do {
             root = try rootPreparation()
@@ -209,6 +224,7 @@ public struct DurableSessionBootstrapper: DurableSessionBootstrapping, @unchecke
             throw Self.map(error, phase: .root)
         }
 
+        try Task.checkCancellation()
         let store: SessionStore
         do {
             store = try storeFactory(root)
@@ -218,6 +234,7 @@ public struct DurableSessionBootstrapper: DurableSessionBootstrapping, @unchecke
             throw Self.map(error, phase: .store)
         }
 
+        try Task.checkCancellation()
         let recoveredSessionCount: Int
         do {
             recoveredSessionCount = try recovery(store)
@@ -227,6 +244,7 @@ public struct DurableSessionBootstrapper: DurableSessionBootstrapping, @unchecke
             throw Self.map(error, phase: .recovery)
         }
 
+        try Task.checkCancellation()
         let historyReport: SessionHistoryEnumeration
         do {
             historyReport = try historyEnumeration(store)
@@ -235,6 +253,7 @@ public struct DurableSessionBootstrapper: DurableSessionBootstrapping, @unchecke
         } catch {
             throw Self.map(error, phase: .history)
         }
+        try Task.checkCancellation()
 
         return DurableSessionBootstrapResult(
             store: store,
@@ -262,38 +281,71 @@ public struct DurableSessionBootstrapper: DurableSessionBootstrapping, @unchecke
         case unknown(String)
     }
 
-    private static func prepareRoot(at root: URL, fileManager: FileManager) throws -> URL {
-        let standardizedRoot = root.standardizedFileURL
-        let components = standardizedRoot.pathComponents
-        guard components.first == "/", components.count > 1 else {
-            throw RootPreparationFailure.identityViolation(standardizedRoot.path)
+    static func validatedRootDirectory(at root: URL) throws -> URL {
+        do {
+            return try prepareRoot(at: root)
+        } catch {
+            throw map(error, phase: .root)
+        }
+    }
+
+    private static func prepareRoot(at root: URL) throws -> URL {
+        let standardizedPath = root.standardizedFileURL.path
+        let canonicalPath = standardizedPath == "/var" || standardizedPath.hasPrefix("/var/")
+            ? "/private" + standardizedPath
+            : standardizedPath
+        let components = canonicalPath.split(separator: "/").map(String.init)
+        guard standardizedPath.hasPrefix("/"), !components.isEmpty else {
+            throw RootPreparationFailure.identityViolation(canonicalPath)
         }
 
-        var current = URL(fileURLWithPath: "/", isDirectory: true)
-        for component in components.dropFirst() {
-            current.appendPathComponent(component, isDirectory: true)
-            var info = stat()
-            let result = current.path.withCString { path in
-                lstat(path, &info)
+        let flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
+        let rootFD = "/".withCString { path in
+            Darwin.open(path, flags)
+        }
+        guard rootFD >= 0 else {
+            throw rootFailure(for: errno, path: "/")
+        }
+        var currentFD = rootFD
+        defer { _ = Darwin.close(currentFD) }
+
+        for component in components {
+            guard !component.isEmpty, component != ".", component != ".." else {
+                throw RootPreparationFailure.identityViolation(canonicalPath)
             }
-            if result == 0 {
-                guard (info.st_mode & S_IFMT) == S_IFDIR else {
-                    throw RootPreparationFailure.identityViolation(current.path)
+
+            var nextFD = component.withCString { name in
+                Darwin.openat(currentFD, name, flags)
+            }
+            if nextFD < 0, errno == ENOENT {
+                let created = component.withCString { name in
+                    Darwin.mkdirat(currentFD, name, mode_t(0o700))
                 }
-                continue
+                if created != 0, errno != EEXIST {
+                    throw rootFailure(for: errno, path: canonicalPath)
+                }
+                nextFD = component.withCString { name in
+                    Darwin.openat(currentFD, name, flags)
+                }
             }
 
-            let errorCode = errno
-            guard errorCode == ENOENT else {
-                throw Self.rootFailure(for: errorCode, path: current.path)
+            guard nextFD >= 0 else {
+                throw rootFailure(for: errno, path: canonicalPath)
             }
-            do {
-                try fileManager.createDirectory(at: current, withIntermediateDirectories: false)
-            } catch {
-                throw Self.rootFailure(for: error, path: current.path)
+            var info = stat()
+            guard Darwin.fstat(nextFD, &info) == 0 else {
+                let errorCode = errno
+                _ = Darwin.close(nextFD)
+                throw rootFailure(for: errorCode, path: canonicalPath)
             }
+            guard (info.st_mode & S_IFMT) == S_IFDIR else {
+                _ = Darwin.close(nextFD)
+                throw RootPreparationFailure.identityViolation(canonicalPath)
+            }
+            _ = Darwin.close(currentFD)
+            currentFD = nextFD
         }
-        return standardizedRoot
+        return URL(fileURLWithPath: canonicalPath, isDirectory: true)
     }
 
     private static func rootFailure(for errorCode: Int32, path: String) -> RootPreparationFailure {
@@ -302,6 +354,8 @@ public struct DurableSessionBootstrapper: DurableSessionBootstrapping, @unchecke
             .permissionDenied(path)
         case ENOENT:
             .unavailableParent(path)
+        case ELOOP, ENOTDIR:
+            .identityViolation(path)
         case ENOSPC, EDQUOT:
             .writeFailure(path)
         default:
@@ -409,6 +463,7 @@ public final class DurableSessionCapability {
 
     private let bootstrapper: any DurableSessionBootstrapping
     private var currentAttempt: Task<Void, Never>?
+    private var pendingShutdownAttempts: [Task<Void, Never>] = []
     private var generation: UInt64 = 0
 
     public init(bootstrapper: any DurableSessionBootstrapping) {
@@ -427,8 +482,23 @@ public final class DurableSessionCapability {
 
     public func shutdown() {
         generation &+= 1
-        currentAttempt?.cancel()
+        if let currentAttempt {
+            currentAttempt.cancel()
+            pendingShutdownAttempts.append(currentAttempt)
+        }
         currentAttempt = nil
+    }
+
+    public var hasPendingShutdown: Bool {
+        !pendingShutdownAttempts.isEmpty
+    }
+
+    public func waitForShutdown() async {
+        let attempts = pendingShutdownAttempts
+        pendingShutdownAttempts.removeAll(keepingCapacity: false)
+        for attempt in attempts {
+            await attempt.value
+        }
     }
 
     public func markUnhealthy(
