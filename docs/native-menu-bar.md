@@ -2,9 +2,15 @@
 
 Oigo is a single arm64 macOS 26 application process built from AppKit.
 The application uses `NSApplication` with accessory activation policy and `LSUIElement` so it does not appear in the Dock during normal operation.
-The status item menu contains only Start Dictation or Stop Dictation, Settings…, and Quit Oigo.
-The global toggle is registered with the public Carbon `RegisterEventHotKey` API.
-Oigo does not install a global event monitor and does not implement hold-to-talk behavior.
+The status item menu contains Start Dictation or Stop Dictation, the current global shortcut status, Settings…, and Quit Oigo.
+The global shortcut is registered with the public Carbon `RegisterEventHotKey` API for both pressed and released edges.
+The keyboard path starts one operation on the first press and finishes that same operation on release.
+Repeats and duplicate edges are ignored by the intent controller.
+Release during microphone, Speech, or audio startup is latched until the coordinator reaches recording.
+Keyboard release never cancels or discards the operation.
+The Start Dictation and Stop Dictation menu item remains a mouse-driven toggle and does not claim keyboard ownership.
+The keyboard callback updates a nonactivating status surface and does not make Oigo frontmost.
+Oigo does not install a global or local event monitor, use private APIs, or launch a helper process for shortcut input.
 
 ## Coordinator
 

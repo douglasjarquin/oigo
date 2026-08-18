@@ -16,7 +16,7 @@ private struct OigoIssue3ContractTests {
         let tests: [(String, () async throws -> Void)] = [
             ("all legal state transitions", testAllLegalTransitions),
             ("illegal and duplicate transitions", testIllegalTransitions),
-            ("toggle shortcut starts and stops", testToggleShortcut),
+            ("mouse menu toggle starts and stops", testMouseMenuToggle),
             ("one active task and quit cleanup", testTaskCleanup),
             ("quit cleanup from every state", testShutdownFromEveryState),
             ("idle policy", testIdlePolicy)
@@ -90,35 +90,16 @@ private struct OigoIssue3ContractTests {
         }
     }
 
-    private static func testToggleShortcut() throws {
-        let shortcut = ToggleShortcut(keyCode: 49, modifiers: 0x100000)
+    private static func testMouseMenuToggle() throws {
         let coordinator = DictationCoordinator()
-        let controller = ToggleShortcutController(
-            shortcut: shortcut,
-            coordinator: coordinator
-        )
-
-        let first = try controller.handle(
-            ShortcutInput(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers)
-        )
-        guard first == .recording, coordinator.state == .recording else {
-            throw ContractFailure(message: "first toggle did not enter recording")
+        try coordinator.toggle()
+        guard coordinator.state == .recording else {
+            throw ContractFailure(message: "mouse menu start did not enter recording")
         }
 
-        let second = try controller.handle(
-            ShortcutInput(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers)
-        )
-        guard second == .finalizing, coordinator.state == .finalizing else {
-            throw ContractFailure(message: "second toggle did not enter finalizing")
-        }
-
-        do {
-            _ = try controller.handle(ShortcutInput(keyCode: 36, modifiers: 0))
-            throw ContractFailure(message: "unconfigured shortcut was accepted")
-        } catch let error as ToggleShortcutError {
-            guard error == .notMatching else {
-                throw ContractFailure(message: "unexpected shortcut error: (error)")
-            }
+        try coordinator.toggle()
+        guard coordinator.state == .finalizing else {
+            throw ContractFailure(message: "mouse menu stop did not enter finalizing")
         }
     }
 

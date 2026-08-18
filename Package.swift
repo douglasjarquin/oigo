@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "OigoCapture", targets: ["OigoCapture"]),
         .library(name: "OigoTranscription", targets: ["OigoTranscription"]),
         .library(name: "OigoInsertion", targets: ["OigoInsertion"]),
+        .library(name: "OigoHotKey", targets: ["OigoHotKey"]),
         .library(name: "OigoSpike", targets: ["OigoSpike"]),
         .executable(name: "Oigo", targets: ["Oigo"]),
         .executable(name: "oigo-spike", targets: ["OigoSpikeCLI"]),
@@ -63,6 +64,10 @@ let package = Package(
         .executable(
             name: "oigo-issue78-contract-tests",
             targets: ["OigoIssue78ContractTests"]
+        ),
+        .executable(
+            name: "oigo-issue82-contract-tests",
+            targets: ["OigoIssue82ContractTests"]
         )
     ],
     targets: [
@@ -98,6 +103,15 @@ let package = Package(
             ]
         ),
         .target(
+            name: "OigoHotKey",
+            dependencies: ["OigoCore"],
+            path: "Sources/OigoHotKey",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("Carbon")
+            ]
+        ),
+        .target(
             name: "OigoSpike",
             linkerSettings: [
                 .linkedFramework("AVFAudio"),
@@ -117,7 +131,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "Oigo",
-            dependencies: ["OigoCore", "OigoCapture", "OigoTranscription", "OigoInsertion"],
+            dependencies: ["OigoCore", "OigoCapture", "OigoTranscription", "OigoInsertion", "OigoHotKey"],
             path: "Sources/Oigo",
             linkerSettings: [
                 .linkedFramework("AppKit"),
@@ -184,6 +198,11 @@ let package = Package(
             name: "OigoIssue78ContractTests",
             dependencies: ["OigoCore", "OigoTranscription"],
             path: "Tests/OigoIssue78ContractTests"
+        ),
+        .executableTarget(
+            name: "OigoIssue82ContractTests",
+            dependencies: ["OigoCore", "OigoHotKey"],
+            path: "Tests/OigoIssue82ContractTests"
         )
     ]
 )

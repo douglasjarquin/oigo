@@ -1,10 +1,10 @@
 import AppKit
 import OigoCore
+import OigoHotKey
 
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
-    private let keyCodeField = NSTextField(string: "")
-    private let modifiersField = NSTextField(string: "")
+    private let shortcutRecorder: ShortcutRecorderControl
     private let inputPopup = NSPopUpButton()
     private let localePopup = NSPopUpButton()
     private let modePopup = NSPopUpButton()
@@ -16,7 +16,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let accessibilityStatus = NSTextField(labelWithString: "")
     private let storageStatus = NSTextField(labelWithString: "")
     private var retryStorageButton: NSButton?
+    private let shortcutStatus = NSTextField(wrappingLabelWithString: "")
     private let messageLabel = NSTextField(labelWithString: "")
+    private let registrationStatus: () -> GlobalShortcutRegistrationStatus
+    private let registrationError: () -> String?
     private let save: (OigoSettings) -> String?
     private let refreshPermissions: () -> (OigoPermissionState, OigoPermissionState)
     private let openMicrophoneSettings: () -> Void
@@ -26,6 +29,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let openDataFolder: () -> Void
     private let retryStorage: () -> Void
     private let deleteAllHistory: () -> Void
+    private var committedShortcut: ToggleShortcut
     private var inputMenuSelections: [OigoInputSelection] = []
     private var selectedInput: OigoInputSelection
 
@@ -36,6 +40,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         microphoneState: OigoPermissionState,
         accessibilityState: OigoPermissionState,
         storageHealth: DurableSessionHealth,
+        registrationStatus: @escaping () -> GlobalShortcutRegistrationStatus,
+        registrationError: @escaping () -> String?,
         save: @escaping (OigoSettings) -> String?,
         refreshPermissions: @escaping () -> (OigoPermissionState, OigoPermissionState),
         openMicrophoneSettings: @escaping () -> Void,
@@ -46,6 +52,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         retryStorage: @escaping () -> Void,
         deleteAllHistory: @escaping () -> Void
     ) {
+        self.registrationStatus = registrationStatus
+        self.registrationError = registrationError
         selectedInput = settings.selectedInput
         self.save = save
         self.refreshPermissions = refreshPermissions
@@ -56,6 +64,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.openDataFolder = openDataFolder
         self.retryStorage = retryStorage
         self.deleteAllHistory = deleteAllHistory
+        committedShortcut = settings.globalShortcut
+        shortcutRecorder = ShortcutRecorderControl(shortcut: settings.globalShortcut)
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 620, height: 560),
@@ -68,9 +78,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
-
-        keyCodeField.stringValue = String(settings.globalShortcut.keyCode)
-        modifiersField.stringValue = String(settings.globalShortcut.modifiers)
         configureInputMenu(devices: inputDevices, selected: selectedInput)
         localePopup.addItems(withTitles: supportedLocales)
         if let selectedIndex = supportedLocales.firstIndex(where: {
@@ -101,6 +108,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         _ = notification
         let states = refreshPermissions()
         updatePermissionLabels(microphone: states.0, accessibility: states.1)
+        updateShortcutStatus()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        _ = notification
+        shortcutRecorder.cancelRecording()
+        shortcutRecorder.restoreCandidate(committedShortcut)
     }
 
     func updateInputDevices(_ devices: [OigoInputDevice]) {
@@ -112,6 +126,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         guard let contentView = window?.contentView else {
             return
         }
+        shortcutRecorder.onValidationError = { [weak self] message in
+            self?.messageLabel.stringValue = message
+        }
 
         let title = NSTextField(labelWithString: "Minimal settings")
         title.font = .boldSystemFont(ofSize: 18)
@@ -121,9 +138,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         description.textColor = .secondaryLabelColor
 
         let shortcutTitle = NSTextField(labelWithString: "Global shortcut")
-        let keyCodeLabel = NSTextField(labelWithString: "Key code")
-        let modifiersLabel = NSTextField(labelWithString: "Carbon modifiers")
-        let shortcutHelp = NSTextField(wrappingLabelWithString: "Option-Space uses key code 49 and modifiers 2304. A conflicting shortcut is rejected and the previous working choice is kept.")
+        let shortcutHelp = NSTextField(
+            wrappingLabelWithString: "Click the recorder and press a shortcut. The default is \(ToggleShortcut.default.displayName). Validation never displaces the current working registration."
+        )
         shortcutHelp.textColor = .secondaryLabelColor
         let modeLabel = NSTextField(labelWithString: "Default mode")
         let localeLabel = NSTextField(labelWithString: "Dictation language")
@@ -150,16 +167,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         messageLabel.textColor = .secondaryLabelColor
         messageLabel.maximumNumberOfLines = 2
 
-        let shortcutGrid = NSGridView(views: [
-            [shortcutTitle, NSGridCell.emptyContentView],
-            [keyCodeLabel, keyCodeField],
-            [modifiersLabel, modifiersField]
-        ])
-        shortcutGrid.rowSpacing = 8
-        shortcutGrid.columnSpacing = 12
-        shortcutGrid.translatesAutoresizingMaskIntoConstraints = false
-        keyCodeField.placeholderString = "49"
-        modifiersField.placeholderString = "2304"
+        let shortcutRow = NSStackView(views: [shortcutTitle, shortcutRecorder])
+        shortcutRow.orientation = .horizontal
+        shortcutRow.alignment = .centerY
+        shortcutRow.spacing = 12
+        shortcutRow.translatesAutoresizingMaskIntoConstraints = false
+        shortcutRecorder.widthAnchor.constraint(equalToConstant: 280).isActive = true
 
         let modeRow = row(label: modeLabel, control: modePopup)
         let localeRow = row(label: localeLabel, control: localePopup)
@@ -185,8 +198,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let stack = NSStackView(views: [
             title,
             description,
-            shortcutGrid,
+            shortcutRow,
             shortcutHelp,
+            shortcutStatus,
             inputRow,
             modeRow,
             localeRow,
@@ -217,11 +231,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             retentionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             inputRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             saveButton.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
-            keyCodeField.widthAnchor.constraint(equalToConstant: 180),
-            modifiersField.widthAnchor.constraint(equalTo: keyCodeField.widthAnchor),
             localePopup.widthAnchor.constraint(equalToConstant: 260),
             inputPopup.widthAnchor.constraint(equalTo: localePopup.widthAnchor)
         ])
+        updateShortcutStatus()
     }
 
     private func configureInputMenu(
@@ -269,9 +282,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         retryStorageButton?.isEnabled = canRetry && health != .checking
     }
 
+    private func updateShortcutStatus() {
+        switch registrationStatus() {
+        case .active(let shortcut, _):
+            let suffix = registrationError().map { ". Last error: " + $0 } ?? ""
+            shortcutStatus.stringValue = "Registration active: " + shortcut.displayName + suffix
+        case .inactive(let message):
+            shortcutStatus.stringValue = "Registration inactive: " + (registrationError() ?? message)
+        }
+    }
+
     @objc private func refreshPermissionStates() {
         let states = refreshPermissions()
         updatePermissionLabels(microphone: states.0, accessibility: states.1)
+        updateShortcutStatus()
         messageLabel.stringValue = "Permission states refreshed."
     }
 
@@ -319,9 +343,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func saveSettings() {
-        guard let keyCode = UInt32(keyCodeField.stringValue),
-              let modifiers = UInt32(modifiersField.stringValue),
-              let localeIdentifier = localePopup.selectedItem?.title,
+        guard let localeIdentifier = localePopup.selectedItem?.title,
               let modeTitle = modePopup.selectedItem?.title,
               let mode = OigoProcessingMode.allCases.first(where: { $0.displayName == modeTitle }),
               let retentionTitle = retentionPopup.selectedItem?.title,
@@ -330,8 +352,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             NSSound.beep()
             return
         }
+        let candidate = shortcutRecorder.shortcut
         let result = save(OigoSettings(
-            globalShortcut: ToggleShortcut(keyCode: keyCode, modifiers: modifiers),
+            globalShortcut: candidate,
             localeIdentifier: localeIdentifier,
             defaultMode: mode,
             showVolatilePreview: previewCheckbox.state == .on,
@@ -342,9 +365,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         ))
         if let result {
             messageLabel.stringValue = result
+            updateShortcutStatus()
             NSSound.beep()
             return
         }
+        committedShortcut = candidate
         window?.close()
     }
 }

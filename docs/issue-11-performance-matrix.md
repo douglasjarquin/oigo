@@ -162,10 +162,10 @@ Record whole-system memory pressure from the trace and the host memory-pressure 
 
 For every dictation scenario, keep the spoken fixture synthetic and discard the recording after the measurement is extracted.
 
-Use the default shortcut `Command-Option-Space` for a fresh profile by sending:
+Use the canonical default shortcut `Shift-Command-Space` for a fresh profile by sending:
 
 ```zsh
-osascript -e 'tell application "System Events" to key code 49 using {command down, option down}'
+osascript -e 'tell application "System Events" to key code 49 using {command down, shift down}'
 ```
 
 If the profile has a different shortcut, record the configured key action in the operator log without recording transcript content.

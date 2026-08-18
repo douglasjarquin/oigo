@@ -1864,59 +1864,8 @@ public struct ToggleShortcut: Codable, Equatable, Hashable, Sendable {
 
     public static let `default` = ToggleShortcut(
         keyCode: 49,
-        modifiers: 0x900
+        modifiers: 0x300
     )
-}
-
-public struct ShortcutInput: Equatable, Sendable {
-    public let keyCode: UInt32
-    public let modifiers: UInt32
-
-    public init(keyCode: UInt32, modifiers: UInt32) {
-        self.keyCode = keyCode
-        self.modifiers = modifiers
-    }
-}
-
-public enum ToggleShortcutError: Error, Equatable, CustomStringConvertible, Sendable {
-    case notMatching
-
-    public var description: String {
-        switch self {
-        case .notMatching:
-            return "shortcut input does not match configured toggle"
-        }
-    }
-}
-
-@MainActor
-public final class ToggleShortcutController {
-    public private(set) var shortcut: ToggleShortcut
-    private let coordinator: DictationCoordinator
-
-    public init(
-        shortcut: ToggleShortcut = .default,
-        coordinator: DictationCoordinator
-    ) {
-        self.shortcut = shortcut
-        self.coordinator = coordinator
-    }
-
-    public func update(shortcut: ToggleShortcut) {
-        self.shortcut = shortcut
-    }
-
-    @discardableResult
-    public func handle(_ input: ShortcutInput) throws -> DictationState {
-        guard input == ShortcutInput(
-            keyCode: shortcut.keyCode,
-            modifiers: shortcut.modifiers
-        ) else {
-            throw ToggleShortcutError.notMatching
-        }
-        try coordinator.toggle()
-        return coordinator.state
-    }
 }
 
 public enum IdlePolicy {
