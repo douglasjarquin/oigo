@@ -27,7 +27,7 @@ The former shipped `49/0x900` value is retained only as an exact migration fixtu
 | Exact legacy default migration | PASS | `.omo/evidence/issue-82/task-4-shortcut-contract-final.log` | Only `49/0x900` migrates, including the legacy `globalToggleShortcut` key. |
 | Custom key-code-zero preservation | PASS | `.omo/evidence/issue-82/task-4-shortcut-keycode-zero-final.log` | `0/0x100` remains unchanged and validates successfully. |
 | Native recorder key-code-zero capture | PASS | `.omo/evidence/issue-82/task-5-recorder-keycode-zero-green.log` | Non-repeat Command-A emits one candidate and displays `⌘A`. |
-| Recorder repeat, unsupported modifier, and Escape behavior | PASS | `.omo/evidence/issue-82/task-5-recorder-rejection-final.log` | Repeats and invalid modifiers are rejected and Escape restores the candidate. |
+| Recorder repeat, unsupported modifier, modified Escape, and unmodified Escape behavior | PASS | `.omo/evidence/issue-82/task-10-recorder-escape-final.log` | Repeats and invalid modifiers are rejected, modified Escape is saved as a valid candidate, and unmodified Escape restores the candidate. |
 | Validation-only registration | PASS | `.omo/evidence/issue-82/task-7-configuration-atomic-save-green.log` | Probe leaves the active shortcut and generation unchanged. |
 | Atomic save and persistence | PASS | `.omo/evidence/issue-82/task-7-configuration-atomic-save-green.log` | Registration commits before persistence and both values converge. |
 | Failed save restoration | PASS | `.omo/evidence/issue-82/task-7-configuration-failure-restoration-green.log` | Registration and persistence remain on the prior working shortcut. |
