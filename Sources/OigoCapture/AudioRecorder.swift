@@ -479,6 +479,9 @@ public final class SystemAudioDeviceMonitor: AudioDeviceMonitoring, @unchecked S
         ) == noErr else {
             return nil
         }
+        guard dataSize >= UInt32(MemoryLayout<AudioBufferList>.size) else {
+            return nil
+        }
         let streamBuffer = UnsafeMutableRawPointer.allocate(
             byteCount: Int(dataSize),
             alignment: MemoryLayout<AudioBufferList>.alignment
@@ -494,9 +497,22 @@ public final class SystemAudioDeviceMonitor: AudioDeviceMonitoring, @unchecked S
         ) == noErr else {
             return nil
         }
-        let buffers = UnsafeMutableAudioBufferListPointer(
-            streamBuffer.assumingMemoryBound(to: AudioBufferList.self)
+        let bufferList = streamBuffer.assumingMemoryBound(to: AudioBufferList.self)
+        let bufferCount = Int(bufferList.pointee.mNumberBuffers)
+        guard bufferCount > 0,
+              let bufferOffset = MemoryLayout<AudioBufferList>.offset(of: \.mBuffers) else {
+            return nil
+        }
+        let (bufferBytes, bufferBytesOverflow) = bufferCount.multipliedReportingOverflow(
+            by: MemoryLayout<AudioBuffer>.stride
         )
+        let (requiredSize, requiredSizeOverflow) = bufferOffset.addingReportingOverflow(bufferBytes)
+        guard !bufferBytesOverflow,
+              !requiredSizeOverflow,
+              requiredSize <= Int(dataSize) else {
+            return nil
+        }
+        let buffers = UnsafeMutableAudioBufferListPointer(bufferList)
         return buffers.reduce(0) { $0 + Int($1.mNumberChannels) }
     }
 }
@@ -507,6 +523,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private let deviceMonitor: AudioDeviceMonitoring
     private let inputRouter: AudioInputDeviceRouting
     private let instrumentation: PerformanceInstrumentation
+    private let callbackDeliveryGate = AudioRecordingCallbackGate()
     private var engine: AVAudioEngine?
     private var preparedEngine: AVAudioEngine?
     private var audioFile: AVAudioFile?
@@ -917,18 +934,25 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                 failure(failureDescription)
             }
         } else if let callback, let forwardedBuffer {
-            lock.lock()
-            let isCurrentOperation = recording
-                && recordingFence.accepts(generation)
-                && !failureReported
-            lock.unlock()
-            guard isCurrentOperation else {
-                return
-            }
-            if markFirstBuffer {
-                instrumentation.mark(.firstAudioBuffer)
-            }
-            callback(forwardedBuffer)
+            callbackDeliveryGate.deliverIfAllowed(
+                { [weak self] in
+                    guard let self else {
+                        return false
+                    }
+                    lock.lock()
+                    let isCurrentOperation = recording
+                        && recordingFence.accepts(generation)
+                        && !failureReported
+                    lock.unlock()
+                    return isCurrentOperation
+                },
+                {
+                    if markFirstBuffer {
+                        instrumentation.mark(.firstAudioBuffer)
+                    }
+                    callback(forwardedBuffer)
+                }
+            )
         }
     }
 
@@ -971,36 +995,41 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     }
 
     private func beginTeardown(expectedGeneration: UInt64?) -> TeardownResources? {
-        lock.lock()
-        guard recording || starting,
-              expectedGeneration.map(recordingFence.accepts) ?? true else {
-            lock.unlock()
+        let teardown: (resources: TeardownResources, configurationObserver: NSObjectProtocol?)? = callbackDeliveryGate.performExclusively {
+            lock.lock()
+            defer { lock.unlock() }
+            guard recording || starting,
+                  expectedGeneration.map(recordingFence.accepts) ?? true else {
+                return nil
+            }
+            recording = false
+            starting = false
+            finishing = true
+            pendingInterruptionReason = nil
+            recordingFence.invalidate()
+            firstBufferReported = false
+            activeSelection = nil
+            activeDeviceUID = nil
+            let resources = TeardownResources(
+                engine: engine,
+                onFinish: onFinish,
+                descriptor: audioFileDescriptor
+            )
+            engine = nil
+            audioFile = nil
+            audioFileDescriptor = nil
+            onBuffer = nil
+            onFinish = nil
+            let observer = configurationObserver
+            configurationObserver = nil
+            onInterruption = nil
+            onFailure = nil
+            return (resources, observer)
+        }
+        guard let teardown else {
             return nil
         }
-        recording = false
-        starting = false
-        finishing = true
-        pendingInterruptionReason = nil
-        recordingFence.invalidate()
-        firstBufferReported = false
-        activeSelection = nil
-        activeDeviceUID = nil
-        let resources = TeardownResources(
-            engine: engine,
-            onFinish: onFinish,
-            descriptor: audioFileDescriptor
-        )
-        engine = nil
-        audioFile = nil
-        audioFileDescriptor = nil
-        onBuffer = nil
-        onFinish = nil
-        let observer = configurationObserver
-        configurationObserver = nil
-        onInterruption = nil
-        onFailure = nil
-        lock.unlock()
-        if let observer {
+        if let observer = teardown.configurationObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         lock.lock()
@@ -1011,7 +1040,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
         deviceMonitor.stop()
-        return resources
+        return teardown.resources
     }
 
     private func handleInterruption(_ reason: String, generation: UInt64? = nil) {

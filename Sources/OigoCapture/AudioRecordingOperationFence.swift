@@ -18,3 +18,30 @@ public struct AudioRecordingOperationFence: Sendable {
         generation == currentGeneration
     }
 }
+
+@_spi(Testing)
+public final class AudioRecordingCallbackGate: @unchecked Sendable {
+    private let lock = NSRecursiveLock()
+
+    public init() {}
+
+    @discardableResult
+    public func deliverIfAllowed(
+        _ isAllowed: () -> Bool,
+        _ callback: () -> Void
+    ) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard isAllowed() else {
+            return false
+        }
+        callback()
+        return true
+    }
+
+    public func performExclusively<T>(_ action: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return action()
+    }
+}

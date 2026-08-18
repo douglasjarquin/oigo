@@ -1,6 +1,6 @@
 import Foundation
 import OigoCore
-import OigoCapture
+@_spi(Testing) import OigoCapture
 
 private struct ContractFailure: Error, CustomStringConvertible {
     let message: String
@@ -20,7 +20,8 @@ private struct OigoIssue76ContractTests {
             ("menu-and-unavailable", testMenuAndUnavailable),
             ("route-before-format", testRouteBeforeFormat),
             ("missing-pinned-no-fallback", testMissingPinnedNoFallback),
-            ("recording-operation-fence", testRecordingOperationFence)
+            ("recording-operation-fence", testRecordingOperationFence),
+            ("callback-delivery-gate", testCallbackDeliveryGate)
         ]
 
         let selected = tests.filter { filter == nil || $0.0.contains(filter ?? "") }
@@ -239,6 +240,102 @@ private struct OigoIssue76ContractTests {
         guard !fence.accepts(firstGeneration),
               fence.accepts(secondGeneration) else {
             throw ContractFailure(message: "stale recording callback generation was not rejected after teardown")
+        }
+    }
+
+    private static func testCallbackDeliveryGate() throws {
+        let gate = AudioRecordingCallbackGate()
+        let state = CallbackGateTestState()
+        let callbackStarted = DispatchSemaphore(value: 0)
+        let releaseCallback = DispatchSemaphore(value: 0)
+        let invalidationReady = DispatchSemaphore(value: 0)
+        let invalidationFinished = DispatchSemaphore(value: 0)
+
+        DispatchQueue.global().async {
+            _ = gate.deliverIfAllowed(
+                state.isAllowedForDelivery,
+                {
+                    callbackStarted.signal()
+                    releaseCallback.wait()
+                    state.markDelivered()
+                }
+            )
+        }
+        guard callbackStarted.wait(timeout: .now() + 1) == .success else {
+            throw ContractFailure(message: "callback delivery did not acquire its gate")
+        }
+
+        DispatchQueue.global().async {
+            invalidationReady.signal()
+            gate.performExclusively {
+                state.invalidate()
+            }
+            invalidationFinished.signal()
+        }
+        guard invalidationReady.wait(timeout: .now() + 1) == .success else {
+            throw ContractFailure(message: "callback invalidation did not start")
+        }
+        releaseCallback.signal()
+        guard invalidationFinished.wait(timeout: .now() + 1) == .success else {
+            throw ContractFailure(message: "callback invalidation did not complete")
+        }
+        guard state.wasDelivered,
+              state.callbackFinishedBeforeInvalidation else {
+            throw ContractFailure(message: "callback delivery raced teardown instead of serializing with it")
+        }
+
+        let deliveredAfterInvalidation = gate.deliverIfAllowed(
+            state.isAllowedForDelivery,
+            {
+                state.clearDelivered()
+            }
+        )
+        guard !deliveredAfterInvalidation, state.wasDelivered else {
+            throw ContractFailure(message: "stale callback delivered after invalidation")
+        }
+    }
+
+    private final class CallbackGateTestState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var allowed = true
+        private var delivered = false
+        private var finishedBeforeInvalidation = false
+
+        var wasDelivered: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return delivered
+        }
+
+        var callbackFinishedBeforeInvalidation: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return finishedBeforeInvalidation
+        }
+
+        func isAllowedForDelivery() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return allowed
+        }
+
+        func markDelivered() {
+            lock.lock()
+            delivered = true
+            lock.unlock()
+        }
+
+        func invalidate() {
+            lock.lock()
+            allowed = false
+            finishedBeforeInvalidation = delivered
+            lock.unlock()
+        }
+
+        func clearDelivered() {
+            lock.lock()
+            delivered = false
+            lock.unlock()
         }
     }
 }
