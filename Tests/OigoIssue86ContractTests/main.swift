@@ -67,6 +67,9 @@ struct OigoIssue86ContractTests {
         guard await bootstrapper.diagnosticsExport() == "/Users/user/private transcript content" else {
             throw ContractFailure.diagnosticsExportWasNotPreserved
         }
+        guard capability.diagnosticsExport() == "/Users/user/private transcript content" else {
+            throw ContractFailure.diagnosticsExportWasNotPreserved
+        }
         guard capability.health.statusMessage == "Storage unavailable: permission denied" else {
             throw ContractFailure.unstableStorageMessage
         }
@@ -102,6 +105,9 @@ struct OigoIssue86ContractTests {
 
         guard capability.health.isReady, capability.store === store else {
             throw ContractFailure.healthyStoreWasNotPublished
+        }
+        guard capability.diagnosticsExport() == nil else {
+            throw ContractFailure.diagnosticsExportWasNotPreserved
         }
         let reached = try await capability.withHealthyStore { receivedStore in
             receivedStore === store
