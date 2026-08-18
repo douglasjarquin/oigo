@@ -53,8 +53,28 @@ public enum OigoShortcutPresentation {
             "Y"
         case 17:
             "T"
-        case 18...28:
-            String(keyCode - 17)
+        case 18:
+            "1"
+        case 19:
+            "2"
+        case 20:
+            "3"
+        case 21:
+            "4"
+        case 22:
+            "6"
+        case 23:
+            "5"
+        case 24:
+            "="
+        case 25:
+            "9"
+        case 26:
+            "7"
+        case 27:
+            "-"
+        case 28:
+            "8"
         case 29:
             "0"
         case 36:

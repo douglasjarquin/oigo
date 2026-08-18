@@ -156,6 +156,21 @@ extension OigoIssue82ContractTests {
             throw ContractFailure(message: "special key was not formatted readably")
         }
 
+        let expectedNumericKeyNames: [(UInt32, String)] = [
+            (22, "6"),
+            (23, "5"),
+            (24, "="),
+            (25, "9"),
+            (26, "7"),
+            (27, "-"),
+            (28, "8")
+        ]
+        for (keyCode, expectedName) in expectedNumericKeyNames {
+            guard OigoShortcutPresentation.keyName(for: keyCode) == expectedName else {
+                throw ContractFailure(message: "key code \(keyCode) was not formatted as \(expectedName)")
+            }
+        }
+
         recorder.keyDown(with: try keyEvent(
             keyCode: 12,
             modifiers: [.command],
