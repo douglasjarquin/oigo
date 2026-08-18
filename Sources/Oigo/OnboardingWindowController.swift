@@ -10,6 +10,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let checkSpeechAssets: (String) async -> SpeechAssetState
     private let saveLanguage: (String) -> Void
     private let saveStep: (OigoOnboardingStep) -> Void
+    private let saveInputSelection: (OigoInputSelection) -> Void
     private let requestMicrophone: () async -> OigoPermissionState
     private let openMicrophoneSettings: () -> Void
     private let validateShortcut: (ToggleShortcut) -> OigoShortcutValidation
@@ -34,12 +35,17 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var testRunning = false
     private var completed = false
     private var storageHealth: DurableSessionHealth
+    private var inputMenuSelections: [OigoInputSelection] = []
+    private var selectedInput: OigoInputSelection
 
     private let progressLabel = NSTextField(labelWithString: "")
     private let titleLabel = NSTextField(labelWithString: "")
     private let bodyLabel = NSTextField(wrappingLabelWithString: "")
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let storageStatusLabel = NSTextField(wrappingLabelWithString: "")
+    private let inputPopup = NSPopUpButton()
+    private let inputLabel = NSTextField(labelWithString: "Microphone input")
+    private let inputRow = NSStackView()
     private let languagePopup = NSPopUpButton()
     private let keyCodeField = NSTextField(string: "")
     private let modifiersField = NSTextField(string: "")
@@ -56,6 +62,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         support: OigoSystemSupportResult,
         initialStep: OigoOnboardingStep = .system,
         globalShortcut: ToggleShortcut,
+        inputDevices: [OigoInputDevice],
+        selectedInput: OigoInputSelection,
         microphoneState: OigoPermissionState,
         accessibilityState: OigoPermissionState,
         storageHealth: DurableSessionHealth,
@@ -63,6 +71,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         checkSpeechAssets: @escaping (String) async -> SpeechAssetState,
         saveLanguage: @escaping (String) -> Void,
         saveStep: @escaping (OigoOnboardingStep) -> Void,
+        saveInputSelection: @escaping (OigoInputSelection) -> Void,
         requestMicrophone: @escaping () async -> OigoPermissionState,
         openMicrophoneSettings: @escaping () -> Void,
         validateShortcut: @escaping (ToggleShortcut) -> OigoShortcutValidation,
@@ -80,10 +89,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     ) {
         self.support = support
         self.currentStep = initialStep
+        self.selectedInput = selectedInput
         self.loadSupportedLanguages = loadSupportedLanguages
         self.checkSpeechAssets = checkSpeechAssets
         self.saveLanguage = saveLanguage
         self.saveStep = saveStep
+        self.saveInputSelection = saveInputSelection
         self.requestMicrophone = requestMicrophone
         self.openMicrophoneSettings = openMicrophoneSettings
         self.validateShortcut = validateShortcut
@@ -114,6 +125,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         keyCodeField.stringValue = String(globalShortcut.keyCode)
         modifiersField.stringValue = String(globalShortcut.modifiers)
+        configureInputMenu(devices: inputDevices, selected: selectedInput)
         configureWindow()
         render()
     }
@@ -130,6 +142,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             cancelTest()
         }
         if support.isSupported, !completed {
+            saveInputSelection(selectedInputFromMenu())
             saveStep(currentStep)
         }
         onClose()
@@ -140,6 +153,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func updateInputDevices(_ devices: [OigoInputDevice]) {
+        selectedInput = selectedInputFromMenu()
+        configureInputMenu(devices: devices, selected: selectedInput)
     }
 
     func focusTestField() {
@@ -197,11 +215,18 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         ])
         shortcutRow.orientation = .horizontal
         shortcutRow.spacing = 8
+        inputRow.addArrangedSubview(inputLabel)
+        inputRow.addArrangedSubview(inputPopup)
+        inputRow.orientation = .horizontal
+        inputRow.alignment = .centerY
+        inputRow.spacing = 8
+        inputLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         let stack = NSStackView(views: [
             progressLabel,
             titleLabel,
             bodyLabel,
+            inputRow,
             languagePopup,
             shortcutRow,
             testField,
@@ -231,7 +256,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             bodyLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             storageStatusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            inputRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             languagePopup.widthAnchor.constraint(equalToConstant: 280),
+            inputPopup.widthAnchor.constraint(equalToConstant: 280),
             testField.widthAnchor.constraint(equalTo: stack.widthAnchor),
             shortcutRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             keyCodeField.widthAnchor.constraint(equalToConstant: 80),
@@ -250,6 +277,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         titleLabel.stringValue = isSupported ? currentStep.title : "This Mac cannot run Oigo"
         bodyLabel.stringValue = isSupported ? body(for: currentStep) : support.reason
         languagePopup.isHidden = currentStep != .language
+        inputRow.isHidden = currentStep != .microphone
         keyCodeField.superview?.isHidden = currentStep != .shortcut
         testField.isHidden = !isSupported || currentStep != .testDictation
         historyButton.isHidden = currentStep != .recovery
@@ -377,6 +405,27 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    private func configureInputMenu(
+        devices: [OigoInputDevice],
+        selected: OigoInputSelection
+    ) {
+        let items = OigoInputMenu.items(devices: devices, selected: selected)
+        inputMenuSelections = items.map(\.selection)
+        inputPopup.removeAllItems()
+        inputPopup.addItems(withTitles: items.map(\.title))
+        if let selectedIndex = items.firstIndex(where: { $0.selection == selected }) {
+            inputPopup.selectItem(at: selectedIndex)
+        }
+    }
+
+    private func selectedInputFromMenu() -> OigoInputSelection {
+        let index = inputPopup.indexOfSelectedItem
+        guard inputMenuSelections.indices.contains(index) else {
+            return .systemDefault
+        }
+        return inputMenuSelections[index]
+    }
+
     @objc private func performAction() {
         switch currentStep {
         case .language:
@@ -468,6 +517,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         if currentStep == .recovery, !storageHealth.isReady {
             statusLabel.stringValue = "Storage unavailable. Retry storage before finishing setup."
             return
+        }
+        if currentStep == .microphone {
+            selectedInput = selectedInputFromMenu()
+            saveInputSelection(selectedInput)
         }
         guard let next = nextStep(after: currentStep) else {
             completed = true

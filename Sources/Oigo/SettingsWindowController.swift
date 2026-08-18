@@ -5,6 +5,7 @@ import OigoCore
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let keyCodeField = NSTextField(string: "")
     private let modifiersField = NSTextField(string: "")
+    private let inputPopup = NSPopUpButton()
     private let localePopup = NSPopUpButton()
     private let modePopup = NSPopUpButton()
     private let retentionPopup = NSPopUpButton()
@@ -25,9 +26,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let openDataFolder: () -> Void
     private let retryStorage: () -> Void
     private let deleteAllHistory: () -> Void
+    private var inputMenuSelections: [OigoInputSelection] = []
+    private var selectedInput: OigoInputSelection
 
     init(
         settings: OigoSettings,
+        inputDevices: [OigoInputDevice],
         supportedLocales: [String],
         microphoneState: OigoPermissionState,
         accessibilityState: OigoPermissionState,
@@ -42,6 +46,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         retryStorage: @escaping () -> Void,
         deleteAllHistory: @escaping () -> Void
     ) {
+        selectedInput = settings.selectedInput
         self.save = save
         self.refreshPermissions = refreshPermissions
         self.openMicrophoneSettings = openMicrophoneSettings
@@ -66,6 +71,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         keyCodeField.stringValue = String(settings.globalShortcut.keyCode)
         modifiersField.stringValue = String(settings.globalShortcut.modifiers)
+        configureInputMenu(devices: inputDevices, selected: selectedInput)
         localePopup.addItems(withTitles: supportedLocales)
         if let selectedIndex = supportedLocales.firstIndex(where: {
             $0.caseInsensitiveCompare(settings.localeIdentifier) == .orderedSame
@@ -97,6 +103,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         updatePermissionLabels(microphone: states.0, accessibility: states.1)
     }
 
+    func updateInputDevices(_ devices: [OigoInputDevice]) {
+        selectedInput = selectedInputFromMenu()
+        configureInputMenu(devices: devices, selected: selectedInput)
+    }
+
     private func configureWindow() {
         guard let contentView = window?.contentView else {
             return
@@ -117,6 +128,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let modeLabel = NSTextField(labelWithString: "Default mode")
         let localeLabel = NSTextField(labelWithString: "Dictation language")
         let retentionLabel = NSTextField(labelWithString: "Audio retention")
+        let inputLabel = NSTextField(labelWithString: "Microphone input")
 
         let refreshButton = NSButton(title: "Refresh permission states", target: self, action: #selector(refreshPermissionStates))
         let microphoneSettingsButton = NSButton(title: "Open Microphone Settings", target: self, action: #selector(openMicrophoneSettingsAction))
@@ -152,6 +164,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let modeRow = row(label: modeLabel, control: modePopup)
         let localeRow = row(label: localeLabel, control: localePopup)
         let retentionRow = row(label: retentionLabel, control: retentionPopup)
+        let inputRow = row(label: inputLabel, control: inputPopup)
         let permissionsTitle = NSTextField(labelWithString: "Permissions")
         permissionsTitle.font = .boldSystemFont(ofSize: 13)
         let permissionStack = NSStackView(views: [microphoneStatus, microphoneSettingsButton, accessibilityStatus, accessibilitySettingsButton, refreshButton])
@@ -174,6 +187,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             description,
             shortcutGrid,
             shortcutHelp,
+            inputRow,
             modeRow,
             localeRow,
             retentionRow,
@@ -201,11 +215,34 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             modeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             localeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             retentionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            inputRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             saveButton.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
             keyCodeField.widthAnchor.constraint(equalToConstant: 180),
             modifiersField.widthAnchor.constraint(equalTo: keyCodeField.widthAnchor),
-            localePopup.widthAnchor.constraint(equalToConstant: 260)
+            localePopup.widthAnchor.constraint(equalToConstant: 260),
+            inputPopup.widthAnchor.constraint(equalTo: localePopup.widthAnchor)
         ])
+    }
+
+    private func configureInputMenu(
+        devices: [OigoInputDevice],
+        selected: OigoInputSelection
+    ) {
+        let items = OigoInputMenu.items(devices: devices, selected: selected)
+        inputMenuSelections = items.map(\.selection)
+        inputPopup.removeAllItems()
+        inputPopup.addItems(withTitles: items.map(\.title))
+        if let selectedIndex = items.firstIndex(where: { $0.selection == selected }) {
+            inputPopup.selectItem(at: selectedIndex)
+        }
+    }
+
+    private func selectedInputFromMenu() -> OigoInputSelection {
+        let index = inputPopup.indexOfSelectedItem
+        guard inputMenuSelections.indices.contains(index) else {
+            return .systemDefault
+        }
+        return inputMenuSelections[index]
     }
 
     private func row(label: NSTextField, control: NSControl) -> NSStackView {
@@ -300,7 +337,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             showVolatilePreview: previewCheckbox.state == .on,
             audioRetention: retention,
             keepSuccessfulAudioIndefinitely: keepAudioCheckbox.state == .on,
-            launchAtLogin: launchAtLoginCheckbox.state == .on
+            launchAtLogin: launchAtLoginCheckbox.state == .on,
+            selectedInput: selectedInputFromMenu()
         ))
         if let result {
             messageLabel.stringValue = result

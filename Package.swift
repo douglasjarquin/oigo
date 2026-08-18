@@ -49,12 +49,20 @@ let package = Package(
             targets: ["OigoIssue10ContractTests"]
         ),
         .executable(
+            name: "oigo-issue76-contract-tests",
+            targets: ["OigoIssue76ContractTests"]
+        ),
+        .executable(
             name: "oigo-issue11-performance-check",
             targets: ["OigoIssue11PerformanceCheck"]
         ),
         .executable(
             name: "oigo-issue86-contract-tests",
             targets: ["OigoIssue86ContractTests"]
+        ),
+        .executable(
+            name: "oigo-issue78-contract-tests",
+            targets: ["OigoIssue78ContractTests"]
         )
     ],
     targets: [
@@ -158,6 +166,11 @@ let package = Package(
             path: "Tests/OigoIssue10ContractTests"
         ),
         .executableTarget(
+            name: "OigoIssue76ContractTests",
+            dependencies: ["OigoCore", "OigoCapture"],
+            path: "Tests/OigoIssue76ContractTests"
+        ),
+        .executableTarget(
             name: "OigoIssue11PerformanceCheck",
             dependencies: ["OigoCore", "OigoTranscription"],
             path: "Tests/OigoIssue11PerformanceCheck"
@@ -166,6 +179,11 @@ let package = Package(
             name: "OigoIssue86ContractTests",
             dependencies: ["OigoCore"],
             path: "Tests/OigoIssue86ContractTests"
+        ),
+        .executableTarget(
+            name: "OigoIssue78ContractTests",
+            dependencies: ["OigoCore", "OigoTranscription"],
+            path: "Tests/OigoIssue78ContractTests"
         )
     ]
 )
