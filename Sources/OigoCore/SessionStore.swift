@@ -75,6 +75,7 @@ public enum DictationFailureCode: String, Codable, CaseIterable, Equatable, Send
     case audioWriteFailed = "audio_write_failed"
     case microphonePermissionRevoked = "microphone_permission_revoked"
     case transcriptionFailed = "transcription_failed"
+    case transcriptionTimedOut = "transcription_timed_out"
     case cleanupTimedOut = "cleanup_timed_out"
     case targetLost = "target_lost"
     case cancelled
@@ -86,6 +87,15 @@ public enum DictationFailureCode: String, Codable, CaseIterable, Equatable, Send
         interruption: Bool = false
     ) -> DictationFailureCode {
         let normalized = reason.lowercased()
+        let timeoutReason = normalized.contains("timed out")
+            || normalized.contains("timeout")
+            || normalized.contains("deadline")
+        if normalized.contains("cleanup") && timeoutReason {
+            return .cleanupTimedOut
+        }
+        if timeoutReason {
+            return .transcriptionTimedOut
+        }
         if normalized.contains("shutdown") || normalized.contains("quit") {
             return .applicationQuit
         }
@@ -117,10 +127,6 @@ public enum DictationFailureCode: String, Codable, CaseIterable, Equatable, Send
             || normalized.contains("transcrib")
             || normalized.contains("analysis") {
             return .transcriptionFailed
-        }
-        if normalized.contains("cleanup")
-            && (normalized.contains("timeout") || normalized.contains("deadline")) {
-            return .cleanupTimedOut
         }
         if normalized.contains("target") {
             return .targetLost
@@ -374,6 +380,7 @@ public struct RawTextStaging: Equatable, Sendable {
 
 public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendable {
     case missingSession(UUID)
+    case stateChanged(UUID, expected: DictationSessionState, actual: DictationSessionState)
     case invalidMetadata(URL)
     case invalidSessionDirectory(URL)
     case transcriptTooLarge(URL)
@@ -386,6 +393,10 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
         switch self {
         case .missingSession(let id):
             "dictation session does not exist: " + id.uuidString
+        case .stateChanged(let id, let expected, let actual):
+            "dictation session state changed: " + id.uuidString
+                + " expected " + expected.rawValue
+                + " but was " + actual.rawValue
         case .invalidMetadata(let url):
             "dictation session metadata is invalid: " + url.path
         case .invalidSessionDirectory(let url):
@@ -600,13 +611,21 @@ public final class SessionStore: @unchecked Sendable {
         insertionOutcome: InsertionOutcome? = nil,
         insertionFailureReason: String? = nil,
         insertionTextSource: TranscriptInsertionSource? = nil,
-        cleanupFallbackReason: String? = nil
+        cleanupFallbackReason: String? = nil,
+        expectedState: DictationSessionState? = nil
     ) throws -> DictationSession {
         lock.lock()
         defer { lock.unlock() }
 
         return try withSessionDirectory(at: session.directoryURL) { directoryFD in
             let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            if let expectedState, current.metadata.state != expectedState {
+                throw SessionStoreError.stateChanged(
+                    current.id,
+                    expected: expectedState,
+                    actual: current.metadata.state
+                )
+            }
             var metadata = current.metadata
             metadata.updatedAt = date
             let metadataOnlyCleanupUpdate = insertionOutcome == nil
@@ -979,13 +998,23 @@ public final class SessionStore: @unchecked Sendable {
     public func commitRawTextStaging(
         _ staging: RawTextStaging,
         for session: DictationSession,
-        at date: Date = Date()
+        at date: Date = Date(),
+        expectedState: DictationSessionState? = nil,
+        resultingState: DictationSessionState? = nil,
+        audioByteCount: Int64? = nil
     ) throws -> DictationSession {
         lock.lock()
         defer { lock.unlock() }
 
         return try withSessionDirectory(at: session.directoryURL) { directoryFD in
             let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            if let expectedState, current.metadata.state != expectedState {
+                throw SessionStoreError.stateChanged(
+                    current.id,
+                    expected: expectedState,
+                    actual: current.metadata.state
+                )
+            }
             try validate(staging, for: current)
             let stagingURL = current.directoryURL.appendingPathComponent(staging.fileName)
             let stagingFD = staging.fileName.withCString { name in
@@ -1004,6 +1033,21 @@ public final class SessionStore: @unchecked Sendable {
 
             var metadata = current.metadata
             metadata.updatedAt = date
+            if let resultingState {
+                metadata.state = resultingState
+                if resultingState == .completed
+                    || resultingState == .failed
+                    || resultingState == .cancelled
+                    || resultingState == .interrupted {
+                    metadata.endedAt = date
+                    if metadata.duration == nil, let startedAt = metadata.startedAt {
+                        metadata.duration = max(0, date.timeIntervalSince(startedAt))
+                    }
+                }
+            }
+            if let audioByteCount {
+                metadata.audioByteCount = audioByteCount
+            }
             metadata.rawTextByteCount = Int64(fileInfo.st_size)
             metadata.rawTextRevision += 1
             metadata.firstTranscriptLine = try readFirstTranscriptLine(
