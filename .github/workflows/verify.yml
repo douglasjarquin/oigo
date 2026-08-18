@@ -43,3 +43,5 @@ jobs:
         run: swift run oigo-issue10-contract-tests
       - name: Issue eleven performance and lifecycle contract harness
         run: swift run oigo-issue11-performance-check
+      - name: Issue eighty-two global hotkey contract harness
+        run: swift run oigo-issue82-contract-tests

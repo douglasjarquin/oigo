@@ -6,6 +6,7 @@ import OigoCore
 import OigoCapture
 import OigoTranscription
 import OigoInsertion
+import OigoHotKey
 
 @available(macOS 26.0, *)
 @MainActor

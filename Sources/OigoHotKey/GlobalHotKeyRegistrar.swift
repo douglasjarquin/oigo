@@ -16,13 +16,15 @@ enum GlobalShortcutRegistrationError: Error, CustomStringConvertible {
 }
 
 @MainActor
-final class CarbonGlobalShortcutRegistrar {
+public final class CarbonGlobalShortcutRegistrar {
     private var hotKey: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
     private var action: (@MainActor () -> Void)?
     private var hotKeyID = EventHotKeyID(signature: 0x4F49474F, id: 1)
 
-    func register(
+    public init() {}
+
+    public func register(
         shortcut: ToggleShortcut,
         action: @escaping @MainActor () -> Void
     ) throws {
@@ -68,7 +70,7 @@ final class CarbonGlobalShortcutRegistrar {
         }
     }
 
-    func unregister() {
+    public func unregister() {
         if let hotKey {
             UnregisterEventHotKey(hotKey)
             self.hotKey = nil

@@ -49,6 +49,10 @@
         A00000010000000000000028 /* OnboardingWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000025 /* OnboardingWindowController.swift */; };
         A00000010000000000000029 /* ProductContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000026 /* ProductContracts.swift */; };
         A00000010000000000000030 /* PerformanceContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000027 /* PerformanceContracts.swift */; };
+        A00000010000000000000031 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000008 /* AppKit.framework */; };
+        A00000010000000000000032 /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000009 /* Carbon.framework */; };
+        A00000010000000000000033 /* libOigoCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000B /* libOigoCore.a */; };
+        A00000010000000000000034 /* libOigoHotKey.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000028 /* libOigoHotKey.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -94,6 +98,20 @@
             remoteGlobalIDString = E00000010000000000000005;
             remoteInfo = OigoInsertion;
         };
+        K00000010000000000000007 /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = F00000010000000000000001 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = E00000010000000000000006;
+            remoteInfo = OigoHotKey;
+        };
+        K00000010000000000000008 /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = F00000010000000000000001 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = E00000010000000000000002;
+            remoteInfo = OigoCore;
+        };
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
@@ -136,6 +154,7 @@
         B00000010000000000000025 /* OnboardingWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWindowController.swift; sourceTree = "<group>"; };
         B00000010000000000000026 /* ProductContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductContracts.swift; sourceTree = "<group>"; };
         B00000010000000000000027 /* PerformanceContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceContracts.swift; sourceTree = "<group>"; };
+        B00000010000000000000028 /* libOigoHotKey.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoHotKey.a; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -151,6 +170,7 @@
                 A00000010000000000000011 /* libOigoCapture.a in Frameworks */,
                 A00000010000000000000013 /* libOigoTranscription.a in Frameworks */,
                 A00000010000000000000021 /* libOigoInsertion.a in Frameworks */,
+                A00000010000000000000034 /* libOigoHotKey.a in Frameworks */,
                 A00000010000000000000026 /* ServiceManagement.framework in Frameworks */,
             );
             runOnlyForDeploymentPostprocessing = 0;
@@ -196,6 +216,16 @@
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
+        D00000010000000000000012 /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A00000010000000000000031 /* AppKit.framework in Frameworks */,
+                A00000010000000000000032 /* Carbon.framework in Frameworks */,
+                A00000010000000000000033 /* libOigoCore.a in Frameworks */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -207,6 +237,7 @@
                 C00000010000000000000006 /* OigoCapture */,
                 C00000010000000000000007 /* OigoTranscription */,
                 C00000010000000000000008 /* OigoInsertion */,
+                C00000010000000000000009 /* OigoHotKey */,
                 B0000001000000000000000C /* Info.plist */,
                 C00000010000000000000004 /* Frameworks */,
                 C00000010000000000000005 /* Products */,
@@ -226,6 +257,14 @@
                 B00000010000000000000025 /* OnboardingWindowController.swift */,
             );
             path = Sources/Oigo;
+            sourceTree = "<group>";
+        };
+        C00000010000000000000009 /* OigoHotKey */ = {
+            isa = PBXGroup;
+            children = (
+                B00000010000000000000004 /* GlobalHotKeyRegistrar.swift */,
+            );
+            path = Sources/OigoHotKey;
             sourceTree = "<group>";
         };
         C00000010000000000000003 /* OigoCore */ = {
@@ -293,6 +332,7 @@
                 B0000001000000000000000E /* libOigoCapture.a */,
                 B00000010000000000000013 /* libOigoTranscription.a */,
                 B0000001000000000000001B /* libOigoInsertion.a */,
+                B00000010000000000000028 /* libOigoHotKey.a */,
             );
             name = Products;
             sourceTree = "<group>";
@@ -315,6 +355,7 @@
                 J00000010000000000000002 /* PBXTargetDependency */,
                 J00000010000000000000004 /* PBXTargetDependency */,
                 J00000010000000000000007 /* PBXTargetDependency */,
+                J00000010000000000000008 /* PBXTargetDependency */,
             );
             name = Oigo;
             productName = Oigo;
@@ -388,6 +429,23 @@
             productReference = B0000001000000000000001B /* libOigoInsertion.a */;
             productType = "com.apple.product-type.library.static";
         };
+        E00000010000000000000006 /* OigoHotKey */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = O00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoHotKey" */;
+            buildPhases = (
+                D00000010000000000000013 /* Sources */,
+                D00000010000000000000012 /* Frameworks */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+                J00000010000000000000009 /* PBXTargetDependency */,
+            );
+            name = OigoHotKey;
+            productName = OigoHotKey;
+            productReference = B00000010000000000000028 /* libOigoHotKey.a */;
+            productType = "com.apple.product-type.library.static";
+        };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -412,6 +470,9 @@
                     E00000010000000000000005 = {
                         CreatedOnToolsVersion = 16.0;
                     };
+                    E00000010000000000000006 = {
+                        CreatedOnToolsVersion = 16.0;
+                    };
                 };
             };
             buildConfigurationList = G00000010000000000000011 /* Build configuration list for PBXProject "Oigo" */;
@@ -432,6 +493,7 @@
                 E00000010000000000000003 /* OigoCapture */,
                 E00000010000000000000004 /* OigoTranscription */,
                 E00000010000000000000005 /* OigoInsertion */,
+                E00000010000000000000006 /* OigoHotKey */,
             );
         };
 /* End PBXProject section */
@@ -457,11 +519,18 @@
                 A00000010000000000000001 /* main.swift in Sources */,
                 A00000010000000000000002 /* OigoAppDelegate.swift in Sources */,
                 A00000010000000000000003 /* StatusSurfaceController.swift in Sources */,
-                A00000010000000000000004 /* GlobalHotKeyRegistrar.swift in Sources */,
                 A00000010000000000000005 /* SettingsWindowController.swift in Sources */,
                 A00000010000000000000023 /* HistoryWindowController.swift in Sources */,
                 A00000010000000000000027 /* LaunchAtLoginService.swift in Sources */,
                 A00000010000000000000028 /* OnboardingWindowController.swift in Sources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        D00000010000000000000013 /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A00000010000000000000004 /* GlobalHotKeyRegistrar.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -546,6 +615,16 @@
             isa = PBXTargetDependency;
             target = E00000010000000000000005 /* OigoInsertion */;
             targetProxy = K00000010000000000000006 /* PBXContainerItemProxy */;
+        };
+        J00000010000000000000008 /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = E00000010000000000000006 /* OigoHotKey */;
+            targetProxy = K00000010000000000000007 /* PBXContainerItemProxy */;
+        };
+        J00000010000000000000009 /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = E00000010000000000000002 /* OigoCore */;
+            targetProxy = K00000010000000000000008 /* PBXContainerItemProxy */;
         };
 /* End PBXTargetDependency section */
 
@@ -686,6 +765,28 @@
             };
             name = Release;
         };
+        O00000010000000000000001 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = "$(ARCHS_STANDARD)";
+                CODE_SIGNING_ALLOWED = NO;
+                CODE_SIGN_IDENTITY = "";
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                PRODUCT_NAME = OigoHotKey;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Debug;
+        };
+        O00000010000000000000002 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = "$(ARCHS_STANDARD)";
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                PRODUCT_NAME = OigoHotKey;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Release;
+        };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -739,6 +840,15 @@
             buildConfigurations = (
                 N00000010000000000000001 /* Debug */,
                 N00000010000000000000002 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        O00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoHotKey" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                O00000010000000000000001 /* Debug */,
+                O00000010000000000000002 /* Release */,
             );
             defaultConfigurationIsVisible = 0;
             defaultConfigurationName = Release;
