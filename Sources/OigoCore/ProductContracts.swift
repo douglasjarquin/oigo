@@ -155,6 +155,63 @@ public enum OigoInputDeviceCatalog {
             return device
         }
     }
+
+    public static func resolveAndRoute(
+        _ selection: OigoInputSelection,
+        from devices: [OigoInputDevice],
+        route: (OigoInputDevice) throws -> Void
+    ) throws -> OigoInputDevice {
+        let device = try resolve(selection, from: devices)
+        try route(device)
+        return device
+    }
+}
+
+public struct OigoInputMenuItem: Equatable, Sendable {
+    public let title: String
+    public let selection: OigoInputSelection
+    public let isUnavailable: Bool
+
+    public init(
+        title: String,
+        selection: OigoInputSelection,
+        isUnavailable: Bool = false
+    ) {
+        self.title = title
+        self.selection = selection
+        self.isUnavailable = isUnavailable
+    }
+}
+
+public enum OigoInputMenu {
+    public static func items(
+        devices: [OigoInputDevice],
+        selected: OigoInputSelection
+    ) -> [OigoInputMenuItem] {
+        let visibleDevices = OigoInputDeviceCatalog.visibleDevices(from: devices)
+        var items = [
+            OigoInputMenuItem(
+                title: "System Default",
+                selection: .systemDefault
+            )
+        ]
+        items.append(contentsOf: visibleDevices.map { device in
+            OigoInputMenuItem(
+                title: device.displayName,
+                selection: .pinned(uid: device.uid)
+            )
+        })
+
+        if case .pinned(let uid) = selected,
+           !visibleDevices.contains(where: { $0.uid == uid }) {
+            items.append(OigoInputMenuItem(
+                title: "Unavailable input - reconnect or choose another source",
+                selection: .pinned(uid: uid),
+                isUnavailable: true
+            ))
+        }
+        return items
+    }
 }
 
 public struct OigoSettings: Codable, Equatable, Sendable {

@@ -9,6 +9,9 @@ public enum AudioRecorderError: Error, CustomStringConvertible, Sendable {
     case notRecording
     case missingApplicationBundle
     case microphonePermission(String)
+    case inputDeviceUnavailable
+    case selectedInputUnavailable
+    case inputDeviceRouteFailed
     case invalidInputFormat
     case engineStartFailed(String)
 
@@ -22,6 +25,12 @@ public enum AudioRecorderError: Error, CustomStringConvertible, Sendable {
             "microphone capture requires an application bundle with NSMicrophoneUsageDescription; the command-line host cannot initialize live capture"
         case .microphonePermission(let permission):
             "microphone permission is " + permission + "; allow Oigo in System Settings > Privacy & Security > Microphone"
+        case .inputDeviceUnavailable:
+            "no microphone input is available; connect an input or choose another source in Oigo Settings"
+        case .selectedInputUnavailable:
+            "the selected microphone is unavailable; reconnect it or choose another source in Oigo Settings"
+        case .inputDeviceRouteFailed:
+            "Oigo could not select the requested microphone; choose another source in Settings and try again"
         case .invalidInputFormat:
             "microphone input format is unavailable"
         case .engineStartFailed(let reason):
@@ -31,8 +40,36 @@ public enum AudioRecorderError: Error, CustomStringConvertible, Sendable {
 }
 
 public protocol AudioDeviceMonitoring: AnyObject {
-    func start(onChange: @escaping @Sendable (String) -> Void)
+    func currentDevices() throws -> [OigoInputDevice]
+    func start(onChange: @escaping @Sendable ([OigoInputDevice]) -> Void)
     func stop()
+}
+
+public protocol AudioInputDeviceRouting: AnyObject {
+    func route(inputNode: AVAudioInputNode, to deviceID: UInt32) throws
+}
+
+@available(macOS 14.0, *)
+public final class SystemAudioInputDeviceRouter: AudioInputDeviceRouting, @unchecked Sendable {
+    public init() {}
+
+    public func route(inputNode: AVAudioInputNode, to deviceID: UInt32) throws {
+        guard let audioUnit = inputNode.audioUnit else {
+            throw AudioRecorderError.inputDeviceRouteFailed
+        }
+        var device = AudioDeviceID(deviceID)
+        let size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &device,
+            size
+        ) == noErr else {
+            throw AudioRecorderError.inputDeviceRouteFailed
+        }
+    }
 }
 
 @available(macOS 14.0, *)
@@ -57,64 +94,315 @@ public final class SystemAudioDeviceMonitor: AudioDeviceMonitoring, @unchecked S
     }
 
     private let lock = NSLock()
-    private var registration: Registration?
-    private var onChange: (@Sendable (String) -> Void)?
+    private var registrations: [Registration] = []
+    private var onChange: (@Sendable ([OigoInputDevice]) -> Void)?
 
     public init() {}
 
-    public func start(onChange: @escaping @Sendable (String) -> Void) {
+    public func currentDevices() throws -> [OigoInputDevice] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize = UInt32(0)
+        guard AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &dataSize
+        ) == noErr else {
+            throw AudioRecorderError.inputDeviceUnavailable
+        }
+
+        let deviceCount = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        guard deviceCount > 0 else {
+            return []
+        }
+        var deviceIDs = [AudioDeviceID](repeating: AudioDeviceID(kAudioObjectUnknown), count: deviceCount)
+        let status = deviceIDs.withUnsafeMutableBytes { bytes -> OSStatus in
+            guard let baseAddress = bytes.baseAddress else {
+                return kAudioHardwareBadPropertySizeError
+            }
+            return AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                0,
+                nil,
+                &dataSize,
+                baseAddress
+            )
+        }
+        guard status == noErr else {
+            throw AudioRecorderError.inputDeviceUnavailable
+        }
+
+        let defaultDevice = Self.readDeviceID(
+            AudioDeviceID(kAudioObjectSystemObject),
+            selector: kAudioHardwarePropertyDefaultInputDevice,
+            scope: kAudioObjectPropertyScopeGlobal,
+            element: kAudioObjectPropertyElementMain
+        )
+        return deviceIDs.compactMap { deviceID in
+            Self.makeDevice(deviceID, isDefault: deviceID == defaultDevice)
+        }
+    }
+
+    public func start(onChange: @escaping @Sendable ([OigoInputDevice]) -> Void) {
         stop()
         let queue = DispatchQueue(label: "com.oigo.audio-device-monitor")
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             self?.notifyChange()
         }
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        guard AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            queue,
-            listener
-        ) == noErr else {
-            return
+        let selectors = [
+            kAudioHardwarePropertyDevices,
+            kAudioHardwarePropertyDefaultInputDevice
+        ]
+        var registrations: [Registration] = []
+        for selector in selectors {
+            var address = AudioObjectPropertyAddress(
+                mSelector: selector,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            guard AudioObjectAddPropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                queue,
+                listener
+            ) == noErr else {
+                for registration in registrations {
+                    var registeredAddress = registration.address
+                    _ = AudioObjectRemovePropertyListenerBlock(
+                        registration.objectID,
+                        &registeredAddress,
+                        registration.queue,
+                        registration.listener
+                    )
+                }
+                return
+            }
+            registrations.append(Registration(
+                objectID: AudioObjectID(kAudioObjectSystemObject),
+                address: address,
+                queue: queue,
+                listener: listener
+            ))
         }
         lock.lock()
         self.onChange = onChange
-        registration = Registration(
-            objectID: AudioObjectID(kAudioObjectSystemObject),
-            address: address,
-            queue: queue,
-            listener: listener
-        )
+        self.registrations = registrations
         lock.unlock()
     }
 
     public func stop() {
         lock.lock()
-        let registration = self.registration
-        self.registration = nil
+        let registrations = self.registrations
+        self.registrations = []
         onChange = nil
         lock.unlock()
 
-        guard let registration else {
-            return
+        for registration in registrations {
+            var address = registration.address
+            _ = AudioObjectRemovePropertyListenerBlock(
+                registration.objectID,
+                &address,
+                registration.queue,
+                registration.listener
+            )
         }
-        _ = AudioObjectRemovePropertyListenerBlock(
-            registration.objectID,
-            &registration.address,
-            registration.queue,
-            registration.listener
-        )
     }
 
     private func notifyChange() {
         lock.lock()
         let callback = onChange
         lock.unlock()
-        callback?("default input device changed")
+        guard let devices = try? currentDevices() else {
+            return
+        }
+        callback?(devices)
+    }
+
+    private static func makeDevice(
+        _ deviceID: AudioDeviceID,
+        isDefault: Bool
+    ) -> OigoInputDevice? {
+        guard let uid = readString(
+            deviceID,
+            selector: kAudioDevicePropertyDeviceUID,
+            scope: kAudioObjectPropertyScopeGlobal
+        ),
+        let displayName = readString(
+            deviceID,
+            selector: kAudioObjectPropertyName,
+            scope: kAudioObjectPropertyScopeGlobal
+        ),
+        let inputChannelCount = readInputChannelCount(deviceID),
+        let nominalSampleRate = readDouble(
+            deviceID,
+            selector: kAudioDevicePropertyNominalSampleRate,
+            scope: kAudioObjectPropertyScopeGlobal,
+            element: kAudioObjectPropertyElementMain
+        ),
+        let alive = readUInt32(
+            deviceID,
+            selector: kAudioDevicePropertyDeviceIsAlive,
+            scope: kAudioObjectPropertyScopeGlobal,
+            element: kAudioObjectPropertyElementMain
+        ) else {
+            return nil
+        }
+        return OigoInputDevice(
+            uid: uid,
+            displayName: displayName,
+            deviceID: UInt32(deviceID),
+            inputChannelCount: inputChannelCount,
+            nominalSampleRate: nominalSampleRate,
+            isAlive: alive != 0,
+            isDefault: isDefault
+        )
+    }
+
+    private static func readDeviceID(
+        _ objectID: AudioObjectID,
+        selector: AudioObjectPropertySelector,
+        scope: AudioObjectPropertyScope,
+        element: AudioObjectPropertyElement
+    ) -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: scope,
+            mElement: element
+        )
+        var value = AudioDeviceID(kAudioObjectUnknown)
+        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(
+            objectID,
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &value
+        ) == noErr else {
+            return nil
+        }
+        return value
+    }
+
+    private static func readDouble(
+        _ objectID: AudioObjectID,
+        selector: AudioObjectPropertySelector,
+        scope: AudioObjectPropertyScope,
+        element: AudioObjectPropertyElement
+    ) -> Double? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: scope,
+            mElement: element
+        )
+        var value = Double(0)
+        var dataSize = UInt32(MemoryLayout<Double>.size)
+        guard AudioObjectGetPropertyData(
+            objectID,
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &value
+        ) == noErr else {
+            return nil
+        }
+        return value
+    }
+
+    private static func readUInt32(
+        _ objectID: AudioObjectID,
+        selector: AudioObjectPropertySelector,
+        scope: AudioObjectPropertyScope,
+        element: AudioObjectPropertyElement
+    ) -> UInt32? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: scope,
+            mElement: element
+        )
+        var value = UInt32(0)
+        var dataSize = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(
+            objectID,
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &value
+        ) == noErr else {
+            return nil
+        }
+        return value
+    }
+
+    private static func readString(
+        _ objectID: AudioObjectID,
+        selector: AudioObjectPropertySelector,
+        scope: AudioObjectPropertyScope
+    ) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: Unmanaged<CFString>?
+        var dataSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(
+            objectID,
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &value
+        ) == noErr,
+        let value else {
+            return nil
+        }
+        return value.takeUnretainedValue() as String
+    }
+
+    private static func readInputChannelCount(_ deviceID: AudioDeviceID) -> Int? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize = UInt32(0)
+        guard AudioObjectGetPropertyDataSize(
+            deviceID,
+            &address,
+            0,
+            nil,
+            &dataSize
+        ) == noErr else {
+            return nil
+        }
+        let streamBuffer = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(dataSize),
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { streamBuffer.deallocate() }
+        guard AudioObjectGetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            &dataSize,
+            streamBuffer
+        ) == noErr else {
+            return nil
+        }
+        let buffers = UnsafeMutableAudioBufferListPointer(
+            streamBuffer.assumingMemoryBound(to: AudioBufferList.self)
+        )
+        return buffers.reduce(0) { $0 + Int($1.mNumberChannels) }
     }
 }
 
@@ -122,8 +410,10 @@ public final class SystemAudioDeviceMonitor: AudioDeviceMonitoring, @unchecked S
 public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private let lock = NSLock()
     private let deviceMonitor: AudioDeviceMonitoring
+    private let inputRouter: AudioInputDeviceRouting
     private let instrumentation: PerformanceInstrumentation
     private var engine: AVAudioEngine?
+    private var preparedEngine: AVAudioEngine?
     private var audioFile: AVAudioFile?
     private var audioFileDescriptor: AudioFileDescriptor?
     private var onBuffer: (@Sendable (AudioCaptureBuffer) -> Void)?
@@ -135,13 +425,28 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private var recording = false
     private var failureReported = false
     private var firstBufferReported = false
+    private var selectedInput: OigoInputSelection = .systemDefault
+    private var activeSelection: OigoInputSelection?
+    private var activeDeviceUID: String?
 
     public init(
         deviceMonitor: AudioDeviceMonitoring = SystemAudioDeviceMonitor(),
+        inputRouter: AudioInputDeviceRouting = SystemAudioInputDeviceRouter(),
         instrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
     ) {
         self.deviceMonitor = deviceMonitor
+        self.inputRouter = inputRouter
         self.instrumentation = instrumentation
+    }
+
+    public func setInputSelection(_ selection: OigoInputSelection) {
+        lock.lock()
+        selectedInput = selection
+        if !recording {
+            activeSelection = selection
+            preparedEngine = nil
+        }
+        lock.unlock()
     }
 
     public func captureFormat() throws -> AudioCaptureFormat {
@@ -149,10 +454,16 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             throw AudioRecorderError.missingApplicationBundle
         }
 
-        guard let inputConfiguration = Self.inputConfiguration(),
+        let engine = AVAudioEngine()
+        let inputNode = engine.inputNode
+        _ = try prepareInput(on: inputNode)
+        guard let inputConfiguration = Self.inputConfiguration(for: inputNode),
               inputConfiguration.channelCount == 1 else {
             throw AudioRecorderError.invalidInputFormat
         }
+        lock.lock()
+        preparedEngine = engine
+        lock.unlock()
         return AudioCaptureFormat(
             sampleRate: inputConfiguration.sampleRate,
             channelCount: 1
@@ -221,9 +532,14 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             throw AudioRecorderError.microphonePermission(String(describing: permission))
         }
 
-        let engine = AVAudioEngine()
+        lock.lock()
+        let preparedEngine = self.preparedEngine
+        self.preparedEngine = nil
+        lock.unlock()
+        let engine = preparedEngine ?? AVAudioEngine()
         let inputNode = engine.inputNode
-        guard let inputConfiguration = Self.inputConfiguration(),
+        _ = try prepareInput(on: inputNode)
+        guard let inputConfiguration = Self.inputConfiguration(for: inputNode),
               inputConfiguration.channelCount == 1 else {
             throw AudioRecorderError.invalidInputFormat
         }
@@ -269,8 +585,8 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             lock.lock()
             configurationObserver = observer
             lock.unlock()
-            deviceMonitor.start { [weak self] reason in
-                self?.handleInterruption(reason)
+            deviceMonitor.start { [weak self] devices in
+                self?.handleDeviceChange(devices)
             }
             let workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
             let lifecycleNames = [
@@ -299,6 +615,56 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         } catch {
             cancel()
             throw AudioRecorderError.engineStartFailed(String(describing: error))
+        }
+    }
+
+    private func prepareInput(on inputNode: AVAudioInputNode) throws -> OigoInputDevice {
+        lock.lock()
+        let selection = selectedInput
+        if !recording {
+            activeSelection = selection
+        }
+        lock.unlock()
+
+        let devices = try deviceMonitor.currentDevices()
+        do {
+            let device = try OigoInputDeviceCatalog.resolveAndRoute(
+                selection,
+                from: devices,
+                route: { [inputRouter] device in
+                    try inputRouter.route(inputNode: inputNode, to: device.deviceID)
+                }
+            )
+            lock.lock()
+            activeDeviceUID = device.uid
+            lock.unlock()
+            return device
+        } catch OigoInputDeviceResolutionError.pinnedInputUnavailable {
+            throw AudioRecorderError.selectedInputUnavailable
+        } catch OigoInputDeviceResolutionError.noAvailableInput {
+            throw AudioRecorderError.inputDeviceUnavailable
+        } catch let error as AudioRecorderError {
+            throw error
+        } catch {
+            throw AudioRecorderError.inputDeviceRouteFailed
+        }
+    }
+
+    private func handleDeviceChange(_ devices: [OigoInputDevice]) {
+        lock.lock()
+        let activeSelection = self.activeSelection
+        let activeDeviceUID = self.activeDeviceUID
+        let recording = self.recording
+        lock.unlock()
+        guard recording,
+              let activeSelection,
+              let activeDeviceUID else {
+            return
+        }
+        let currentDevice = try? OigoInputDeviceCatalog.resolve(activeSelection, from: devices)
+        guard currentDevice?.uid == activeDeviceUID else {
+            handleInterruption("audio input device changed; choose the source again before restarting")
+            return
         }
     }
 
@@ -379,85 +745,19 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         let channelCount: UInt32
     }
 
-    private static func inputConfiguration() -> InputConfiguration? {
-        var deviceAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var device = AudioDeviceID(kAudioObjectUnknown)
-        var deviceSize = UInt32(MemoryLayout<AudioDeviceID>.size)
-        guard AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &deviceAddress,
-            0,
-            nil,
-            &deviceSize,
-            &device
-        ) == noErr,
-        device != AudioDeviceID(kAudioObjectUnknown) else {
+    private static func inputConfiguration(
+        for inputNode: AVAudioInputNode
+    ) -> InputConfiguration? {
+        let format = inputNode.inputFormat(forBus: 0)
+        guard format.sampleRate.isFinite,
+              format.sampleRate > 0,
+              format.channelCount > 0 else {
             return nil
         }
-
-        var streamAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyStreamConfiguration,
-            mScope: kAudioObjectPropertyScopeInput,
-            mElement: kAudioObjectPropertyElementMain
+        return InputConfiguration(
+            sampleRate: format.sampleRate,
+            channelCount: format.channelCount
         )
-        var streamSize = UInt32(0)
-        guard AudioObjectGetPropertyDataSize(
-            device,
-            &streamAddress,
-            0,
-            nil,
-            &streamSize
-        ) == noErr,
-        streamSize >= UInt32(MemoryLayout<AudioBufferList>.size) else {
-            return nil
-        }
-
-        let streamBuffer = UnsafeMutableRawPointer.allocate(
-            byteCount: Int(streamSize),
-            alignment: MemoryLayout<AudioBufferList>.alignment
-        )
-        defer { streamBuffer.deallocate() }
-        guard AudioObjectGetPropertyData(
-            device,
-            &streamAddress,
-            0,
-            nil,
-            &streamSize,
-            streamBuffer
-        ) == noErr else {
-            return nil
-        }
-        let buffers = UnsafeMutableAudioBufferListPointer(
-            streamBuffer.assumingMemoryBound(to: AudioBufferList.self)
-        )
-        let channelCount = buffers.reduce(0) { $0 + $1.mNumberChannels }
-        guard channelCount > 0 else {
-            return nil
-        }
-
-        var rateAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyNominalSampleRate,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var sampleRate = Float64(0)
-        var rateSize = UInt32(MemoryLayout<Float64>.size)
-        guard AudioObjectGetPropertyData(
-            device,
-            &rateAddress,
-            0,
-            nil,
-            &rateSize,
-            &sampleRate
-        ) == noErr,
-        sampleRate > 0 else {
-            return nil
-        }
-        return InputConfiguration(sampleRate: sampleRate, channelCount: channelCount)
     }
 
     private func beginTeardown() -> TeardownResources? {
@@ -468,6 +768,8 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         }
         recording = false
         firstBufferReported = false
+        activeSelection = nil
+        activeDeviceUID = nil
         let resources = TeardownResources(
             engine: engine,
             onFinish: onFinish,

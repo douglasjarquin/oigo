@@ -12,7 +12,8 @@ import OigoInsertion
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = DictationCoordinator()
     private let performanceInstrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
-    private let recorder = AudioRecorder()
+    private let deviceMonitor = SystemAudioDeviceMonitor()
+    private lazy var recorder = AudioRecorder(deviceMonitor: deviceMonitor)
     private var transcription: TranscriptionService?
     private let insertion = InsertionService()
     private let playback = AudioPlayback()
@@ -136,6 +137,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func presentSettings(supportedLocales: [String]) {
         let window = SettingsWindowController(
             settings: settings,
+            inputDevices: currentInputDevices(),
             supportedLocales: supportedLocales,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
@@ -180,6 +182,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             support: support,
             initialStep: initialStep,
             globalShortcut: settings.globalShortcut,
+            inputDevices: currentInputDevices(),
+            selectedInput: settings.selectedInput,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
             loadSupportedLanguages: { [weak self] in
@@ -213,6 +217,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             saveStep: { [weak self] step in
                 self?.onboardingStore.save(OigoOnboardingState(step: step))
+            },
+            saveInputSelection: { [weak self] selection in
+                guard let self else { return }
+                self.settings = self.settings.with(selectedInput: selection)
+                self.settingsStore.save(self.settings)
+                self.recorder.setInputSelection(selection)
             },
             requestMicrophone: {
                 _ = await AudioRecorder.requestMicrophonePermission()
@@ -528,6 +538,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 try await ensureMicrophonePermission()
                 try Task.checkCancellation()
                 targetSnapshot = insertion.captureTarget()
+                recorder.setInputSelection(settings.selectedInput)
                 let format = try recorder.captureFormat()
                 try Task.checkCancellation()
                 let service = transcriptionService()
@@ -1253,12 +1264,17 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         settings = newSettings
         settingsStore.save(settings)
+        recorder.setInputSelection(settings.selectedInput)
         if previousSettings.localeIdentifier != settings.localeIdentifier {
             transcription = nil
         }
         registerShortcut()
         updateSurface()
         return nil
+    }
+
+    private func currentInputDevices() -> [OigoInputDevice] {
+        (try? deviceMonitor.currentDevices()) ?? []
     }
 
     private func validateShortcut(_ candidate: ToggleShortcut) -> OigoShortcutValidation {

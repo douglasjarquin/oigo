@@ -15,7 +15,10 @@ private struct OigoIssue76ContractTests {
         let filter = CommandLine.arguments.dropFirst().drop(while: { $0 != "--filter" }).dropFirst().first
         let tests: [(String, () throws -> Void)] = [
             ("inventory-and-selection", testInventoryAndSelection),
-            ("settings-migration", testSettingsMigration)
+            ("settings-migration", testSettingsMigration),
+            ("menu-and-unavailable", testMenuAndUnavailable),
+            ("route-before-format", testRouteBeforeFormat),
+            ("missing-pinned-no-fallback", testMissingPinnedNoFallback)
         ]
 
         let selected = tests.filter { filter == nil || $0.0.contains(filter ?? "") }
@@ -128,6 +131,95 @@ private struct OigoIssue76ContractTests {
         let selectedInput = encoded?["selectedInput"] as? [String: Any]
         guard selectedInput?["kind"] as? String == "systemDefault" else {
             throw ContractFailure(message: "legacy settings did not migrate to explicit System Default input selection")
+        }
+    }
+
+    private static func testMenuAndUnavailable() throws {
+        let devices = [
+            OigoInputDevice(
+                uid: "uid-z",
+                displayName: "USB Mic",
+                deviceID: 2,
+                inputChannelCount: 2,
+                nominalSampleRate: 48_000,
+                isAlive: true,
+                isDefault: false
+            ),
+            OigoInputDevice(
+                uid: "uid-a",
+                displayName: "USB Mic",
+                deviceID: 1,
+                inputChannelCount: 1,
+                nominalSampleRate: 44_100,
+                isAlive: true,
+                isDefault: true
+            )
+        ]
+
+        let items = OigoInputMenu.items(
+            devices: devices,
+            selected: .pinned(uid: "uid-missing")
+        )
+        guard items.first?.title == "System Default",
+              items.filter({ $0.title == "USB Mic" }).count == 2,
+              items.contains(where: { $0.isUnavailable && $0.title.contains("Unavailable") }),
+              items.allSatisfy({ !$0.title.contains("uid-") }) else {
+            throw ContractFailure(message: "input menu did not expose every local input, preserve duplicate names, or annotate a missing pinned device safely")
+        }
+    }
+
+    private static func testRouteBeforeFormat() throws {
+        let device = OigoInputDevice(
+            uid: "uid-pinned",
+            displayName: "Pinned Mic",
+            deviceID: 12,
+            inputChannelCount: 1,
+            nominalSampleRate: 48_000,
+            isAlive: true,
+            isDefault: false
+        )
+        var events: [String] = []
+        _ = try OigoInputDeviceCatalog.resolveAndRoute(
+            .pinned(uid: device.uid),
+            from: [device],
+            route: { routedDevice in
+                guard routedDevice.deviceID == device.deviceID else {
+                    throw ContractFailure(message: "pinned route used a transient device ID from another device")
+                }
+                events.append("route")
+            }
+        )
+        events.append("inspect-format")
+        guard events == ["route", "inspect-format"] else {
+            throw ContractFailure(message: "format inspection was not ordered after pinned-device routing")
+        }
+    }
+
+    private static func testMissingPinnedNoFallback() throws {
+        let defaultDevice = OigoInputDevice(
+            uid: "uid-default",
+            displayName: "Default Mic",
+            deviceID: 1,
+            inputChannelCount: 1,
+            nominalSampleRate: 48_000,
+            isAlive: true,
+            isDefault: true
+        )
+        var routed = false
+        do {
+            _ = try OigoInputDeviceCatalog.resolveAndRoute(
+                .pinned(uid: "uid-missing"),
+                from: [defaultDevice],
+                route: { _ in routed = true }
+            )
+            throw ContractFailure(message: "a missing pinned input silently fell back to the default microphone")
+        } catch let error as OigoInputDeviceResolutionError {
+            guard error == .pinnedInputUnavailable,
+                  !routed,
+                  !error.description.contains("uid-missing"),
+                  !error.description.contains("Default Mic") else {
+                throw ContractFailure(message: "missing pinned input did not fail closed with a privacy-safe actionable error")
+            }
         }
     }
 }
