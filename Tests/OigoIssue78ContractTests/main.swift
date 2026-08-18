@@ -24,7 +24,8 @@ private struct OigoIssue78ContractTests {
             ("retry timeout preserves canonical raw text", testRetryTimeoutPreservesCanonicalRawText),
             ("interruption timeout preserves terminal outcome", testInterruptionTimeoutPreservesTerminalOutcome),
             ("shutdown timeout replies with stable outcome", testShutdownTimeoutRepliesWithStableOutcome),
-            ("one hundred lifecycle cycles release resources", testOneHundredLifecycleCyclesReleaseResources)
+            ("one hundred lifecycle cycles release resources", testOneHundredLifecycleCyclesReleaseResources),
+            ("one hundred adversarial lifecycle cycles release resources", testOneHundredAdversarialLifecycleCyclesReleaseResources)
         ]
 
         var failures = 0
@@ -76,7 +77,11 @@ private struct OigoIssue78ContractTests {
         }
         await transcription.waitUntilFinishStarted()
         stopTask.cancel()
-        try await Task.sleep(for: .milliseconds(400))
+        guard try await waitForCompletion(completed) else {
+            transcription.releaseFinish()
+            _ = await stopTask.value
+            throw ContractFailure(message: "cancellation remained inside noncooperative finalization after its budget")
+        }
 
         guard completed.value else {
             transcription.releaseFinish()
@@ -119,7 +124,11 @@ private struct OigoIssue78ContractTests {
             _ = try? await coordinator.stopRecordingWithTranscription()
         }
         await transcription.waitUntilFinishStarted()
-        try await Task.sleep(for: .milliseconds(400))
+        guard try await waitForCompletion(completed) else {
+            transcription.releaseFinish()
+            _ = await stopTask.value
+            throw ContractFailure(message: "finalization timeout did not return within its budget")
+        }
 
         guard completed.value,
               let timedOut = coordinator.currentSession,
@@ -139,7 +148,9 @@ private struct OigoIssue78ContractTests {
             volatilePreview: "late preview",
             isFinal: true
         ))
-        try await Task.sleep(for: .milliseconds(50))
+        for _ in 0..<20 {
+            await Task.yield()
+        }
         guard updates.values.count == lateUpdateCount,
               try store.readRawText(for: timedOut) == "committed segment" else {
             transcription.releaseFinish()
@@ -164,8 +175,7 @@ private struct OigoIssue78ContractTests {
 
         transcription.releaseFinish()
         _ = await stopTask.value
-        try await Task.sleep(for: .milliseconds(150))
-        guard coordinator.activeOwnedOperationCount == 0 else {
+        guard try await waitForResourcesToRelease(coordinator) else {
             throw ContractFailure(message: "timed-out Speech work was not released after the fixture permitted it")
         }
 
@@ -199,7 +209,11 @@ private struct OigoIssue78ContractTests {
         }
 
         await transcription.waitUntilStartStarted()
-        try await Task.sleep(for: .milliseconds(250))
+        guard try await waitForCompletion(completed) else {
+            transcription.releaseStart()
+            _ = await startTask.value
+            throw ContractFailure(message: "startup timeout did not return within its budget")
+        }
         guard completed.value,
               coordinator.currentSession?.metadata.state == .failed,
               coordinator.currentSession?.metadata.failureCode == .transcriptionTimedOut,
@@ -226,10 +240,7 @@ private struct OigoIssue78ContractTests {
 
         transcription.releaseStart()
         _ = await startTask.value
-        try await waitForOwnedOperationsToRelease(coordinator)
-        try await Task.sleep(for: .milliseconds(50))
-        guard coordinator.activeOwnedOperationCount == 0,
-              !coordinator.hasActiveTranscription else {
+        guard try await waitForResourcesToRelease(coordinator) else {
             throw ContractFailure(message: "startup loser remained owned after release")
         }
     }
@@ -263,7 +274,11 @@ private struct OigoIssue78ContractTests {
         }
 
         await transcription.waitUntilRetryStarted()
-        try await Task.sleep(for: .milliseconds(250))
+        guard try await waitForCompletion(completed) else {
+            transcription.releaseRetry()
+            _ = await retryTask.value
+            throw ContractFailure(message: "retry timeout did not return within its budget")
+        }
         let timedOutSession = try store.load(id: canonical.id)
         guard completed.value,
               timedOutSession.metadata.state == .failed,
@@ -297,12 +312,11 @@ private struct OigoIssue78ContractTests {
 
         transcription.releaseRetry()
         _ = await retryTask.value
-        try await waitForOwnedOperationsToRelease(coordinator)
-        try await Task.sleep(for: .milliseconds(50))
+        guard try await waitForResourcesToRelease(coordinator) else {
+            throw ContractFailure(message: "retry loser remained owned after release")
+        }
         let releasedSession = try store.load(id: canonical.id)
-        guard coordinator.activeOwnedOperationCount == 0,
-              !coordinator.hasActiveTranscription,
-              try store.readRawText(for: releasedSession) == "prior canonical",
+        guard try store.readRawText(for: releasedSession) == "prior canonical",
               try retryStagingFiles(in: releasedSession).isEmpty else {
             throw ContractFailure(message: "released retry loser did not discard staging or preserve canonical raw text")
         }
@@ -330,7 +344,11 @@ private struct OigoIssue78ContractTests {
         }
 
         await transcription.waitUntilCancelStarted()
-        try await Task.sleep(for: .milliseconds(250))
+        guard try await waitForCompletion(completed) else {
+            transcription.releaseCancel()
+            _ = await interruptionTask.value
+            throw ContractFailure(message: "interruption timeout did not return within its budget")
+        }
         guard completed.value,
               coordinator.currentSession?.metadata.state == .interrupted,
               coordinator.currentSession?.metadata.failureCode == .transcriptionTimedOut,
@@ -342,10 +360,7 @@ private struct OigoIssue78ContractTests {
 
         transcription.releaseCancel()
         _ = await interruptionTask.value
-        try await waitForOwnedOperationsToRelease(coordinator)
-        try await Task.sleep(for: .milliseconds(50))
-        guard coordinator.activeOwnedOperationCount == 0,
-              !coordinator.hasActiveTranscription else {
+        guard try await waitForResourcesToRelease(coordinator) else {
             throw ContractFailure(message: "interruption loser remained owned after release")
         }
     }
@@ -372,7 +387,11 @@ private struct OigoIssue78ContractTests {
         }
 
         await transcription.waitUntilCancelStarted()
-        try await Task.sleep(for: .milliseconds(250))
+        guard try await waitForCompletion(completed) else {
+            transcription.releaseCancel()
+            _ = await shutdownTask.value
+            throw ContractFailure(message: "shutdown timeout did not return within its budget")
+        }
         guard completed.value,
               coordinator.currentSession?.metadata.state == .failed,
               coordinator.currentSession?.metadata.failureCode == .transcriptionTimedOut,
@@ -385,10 +404,7 @@ private struct OigoIssue78ContractTests {
 
         transcription.releaseCancel()
         _ = await shutdownTask.value
-        try await waitForOwnedOperationsToRelease(coordinator)
-        try await Task.sleep(for: .milliseconds(50))
-        guard coordinator.activeOwnedOperationCount == 0,
-              !coordinator.hasActiveTranscription else {
+        guard try await waitForResourcesToRelease(coordinator) else {
             throw ContractFailure(message: "shutdown loser remained owned after release")
         }
     }
@@ -417,20 +433,178 @@ private struct OigoIssue78ContractTests {
         }
     }
 
+    @MainActor
+    private static func testOneHundredAdversarialLifecycleCyclesReleaseResources() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue78-adversarial-cycles-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let coordinator = DictationCoordinator(timeoutPolicy: .testing)
+        for cycle in 0..<100 {
+            switch cycle % 4 {
+            case 0:
+                _ = try await coordinator.startRecordingWithTranscription(
+                    using: ContractAudioCapture(),
+                    store: store,
+                    transcription: ImmediateTranscriptionController(),
+                    format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+                )
+                await coordinator.cancelActiveWork()
+            case 1:
+                try await runFinalizationTimeoutCycle(coordinator: coordinator, store: store)
+            case 2:
+                try await runInterruptionTimeoutCycle(coordinator: coordinator, store: store)
+            default:
+                try await runRetryTimeoutCycle(coordinator: coordinator, store: store)
+            }
+            guard try await waitForResourcesToRelease(coordinator) else {
+                throw ContractFailure(message: "adversarial lifecycle cycle left resources active at index " + String(cycle))
+            }
+        }
+    }
+
+    @MainActor
+    private static func runFinalizationTimeoutCycle(
+        coordinator: DictationCoordinator,
+        store: SessionStore
+    ) async throws {
+        let transcription = NonCooperativeFinalizationController()
+        let session = try await coordinator.startRecordingWithTranscription(
+            using: ContractAudioCapture(),
+            store: store,
+            transcription: transcription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        _ = try store.persistRawText("cycle canonical", for: session)
+        let completed = CompletionFlag()
+        let stopTask = Task { @MainActor in
+            defer { completed.mark() }
+            _ = try? await coordinator.stopRecordingWithTranscription()
+        }
+        await transcription.waitUntilFinishStarted()
+        guard try await waitForCompletion(completed),
+              coordinator.currentSession?.metadata.state == .failed,
+              coordinator.currentSession?.metadata.failureCode == .transcriptionTimedOut,
+              coordinator.activeOwnedOperationCount > 0 else {
+            transcription.releaseFinish()
+            _ = await stopTask.value
+            throw ContractFailure(message: "adversarial finalization cycle did not time out with owned work")
+        }
+        transcription.releaseFinish()
+        _ = await stopTask.value
+    }
+
+    @MainActor
+    private static func runInterruptionTimeoutCycle(
+        coordinator: DictationCoordinator,
+        store: SessionStore
+    ) async throws {
+        let transcription = NonCooperativeCancellationController()
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: ContractAudioCapture(),
+            store: store,
+            transcription: transcription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        let completed = CompletionFlag()
+        let interruptionTask = Task { @MainActor in
+            defer { completed.mark() }
+            _ = try? await coordinator.interruptRecordingWithTranscription(reason: "cycle sleep")
+        }
+        await transcription.waitUntilCancelStarted()
+        guard try await waitForCompletion(completed),
+              coordinator.currentSession?.metadata.state == .interrupted,
+              coordinator.currentSession?.metadata.failureCode == .transcriptionTimedOut,
+              coordinator.activeOwnedOperationCount > 0 else {
+            transcription.releaseCancel()
+            _ = await interruptionTask.value
+            throw ContractFailure(message: "adversarial interruption cycle did not time out with owned work")
+        }
+        transcription.releaseCancel()
+        _ = await interruptionTask.value
+    }
+
+    @MainActor
+    private static func runRetryTimeoutCycle(
+        coordinator: DictationCoordinator,
+        store: SessionStore
+    ) async throws {
+        let created = try store.createSession()
+        let failed = try store.update(
+            created,
+            state: .failed,
+            at: Date(),
+            failureReason: "cycle live transcription failed",
+            failureCode: .transcriptionFailed
+        )
+        let canonical = try store.persistRawText("cycle canonical", for: failed)
+        let transcription = NonCooperativeRetryController()
+        let completed = CompletionFlag()
+        let retryTask = Task { @MainActor in
+            defer { completed.mark() }
+            _ = try? await coordinator.retryRecordingWithTranscription(
+                for: canonical,
+                using: transcription,
+                store: store
+            )
+        }
+        await transcription.waitUntilRetryStarted()
+        guard try await waitForCompletion(completed),
+              coordinator.activeOwnedOperationCount > 0,
+              let timedOut = try? store.load(id: canonical.id),
+              timedOut.metadata.state == .failed,
+              timedOut.metadata.failureCode == .transcriptionTimedOut,
+              try store.readRawText(for: timedOut) == "cycle canonical" else {
+            transcription.releaseRetry()
+            _ = await retryTask.value
+            throw ContractFailure(message: "adversarial retry cycle did not preserve canonical raw text")
+        }
+        transcription.releaseRetry()
+        _ = await retryTask.value
+        guard try await waitForResourcesToRelease(coordinator) else {
+            throw ContractFailure(message: "adversarial retry cycle retained owned work after release")
+        }
+        let released = try store.load(id: canonical.id)
+        guard try store.readRawText(for: released) == "cycle canonical",
+              try retryStagingFiles(in: released).isEmpty else {
+            throw ContractFailure(message: "adversarial retry cycle left staging or changed canonical raw text")
+        }
+    }
+
     private static func retryStagingFiles(in session: DictationSession) throws -> [String] {
         try FileManager.default.contentsOfDirectory(atPath: session.directoryURL.path)
             .filter { $0.hasSuffix(".retry") }
     }
 
     @MainActor
-    private static func waitForOwnedOperationsToRelease(
-        _ coordinator: DictationCoordinator
-    ) async throws {
-        let deadline = DispatchTime.now().uptimeNanoseconds + 1_000_000_000
-        while coordinator.activeOwnedOperationCount > 0,
+    private static func waitForCompletion(
+        _ completion: CompletionFlag,
+        timeoutNanoseconds: UInt64 = 1_000_000_000
+    ) async throws -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+        while !completion.value,
               DispatchTime.now().uptimeNanoseconds < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
+        return completion.value
+    }
+
+    @MainActor
+    private static func waitForResourcesToRelease(
+        _ coordinator: DictationCoordinator,
+        timeoutNanoseconds: UInt64 = 1_000_000_000
+    ) async throws -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+        while (coordinator.activeOwnedOperationCount > 0
+            || coordinator.hasActiveTranscription
+            || coordinator.hasActiveWork),
+              DispatchTime.now().uptimeNanoseconds < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return coordinator.activeOwnedOperationCount == 0
+            && !coordinator.hasActiveTranscription
+            && !coordinator.hasActiveWork
     }
 }
 
