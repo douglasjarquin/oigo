@@ -399,8 +399,6 @@ private struct OigoIssue77ContractTests {
             },
             recordOutcome: { _ in
                 trace.events.append("record")
-            },
-            restoreFocus: {
                 trace.events.append("restore")
             }
         )
@@ -449,8 +447,6 @@ private struct OigoIssue77ContractTests {
             },
             recordOutcome: { _ in
                 trace.events.append("record")
-            },
-            restoreFocus: {
                 trace.events.append("restore")
             }
         )
@@ -495,8 +491,6 @@ private struct OigoIssue77ContractTests {
                 },
                 recordOutcome: { _ in
                     trace.events.append("record")
-                },
-                restoreFocus: {
                     trace.events.append("restore")
                 }
             )

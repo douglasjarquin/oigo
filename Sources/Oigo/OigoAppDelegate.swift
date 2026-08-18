@@ -1571,15 +1571,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                             Self.friendlyError("Paste Again failed", error)
                         )
                     }
-                },
-                discard: { target in
-                    self.insertion.discardTarget(target)
-                },
-                restoreFocus: {
                     self.historyWindow?.showAndFocus()
                     if source == .clean {
                         self.historyWindow?.showCleanTranscript()
                     }
+                },
+                discard: { target in
+                    self.insertion.discardTarget(target)
                 }
             )
         }
