@@ -87,13 +87,26 @@ public enum DictationFailureCode: String, Codable, CaseIterable, Equatable, Send
         interruption: Bool = false
     ) -> DictationFailureCode {
         let normalized = reason.lowercased()
-        let timeoutReason = normalized.contains("timed out")
-            || normalized.contains("timeout")
-            || normalized.contains("deadline")
-        if normalized.contains("cleanup") && timeoutReason {
+        let cleanupTimeoutReasons: Set<String> = [
+            "automatic cleanup exceeded its deadline",
+            "cleanup timed out",
+            "cleanup timeout"
+        ]
+        let transcriptionTimeoutReasons: Set<String> = [
+            "transcription startup timed out",
+            "transcription finalization timed out",
+            "transcription retry timed out",
+            "transcription cancellation timed out",
+            "transcription interruption timed out",
+            "transcription shutdown timed out",
+            "application shutdown speech timeout"
+        ]
+        let cleanupTimedOut = cleanupTimeoutReasons.contains(normalized)
+        let transcriptionTimedOut = transcriptionTimeoutReasons.contains(normalized)
+        if cleanupTimedOut {
             return .cleanupTimedOut
         }
-        if timeoutReason {
+        if transcriptionTimedOut {
             return .transcriptionTimedOut
         }
         if normalized.contains("shutdown") || normalized.contains("quit") {

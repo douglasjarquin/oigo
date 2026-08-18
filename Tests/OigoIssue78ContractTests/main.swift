@@ -30,6 +30,7 @@ private struct OigoIssue78ContractTests {
             ("shutdown timeout replies with stable outcome", testShutdownTimeoutRepliesWithStableOutcome),
             ("shutdown classifies typed timeout without detail", testShutdownClassifiesTypedTimeout),
             ("shutdown ignores untyped timeout prose", testShutdownIgnoresUntypedTimeoutProse),
+            ("failure codes ignore untrusted timeout prose", testFailureCodesIgnoreUntrustedTimeoutProse),
             ("one hundred lifecycle cycles release resources", testOneHundredLifecycleCyclesReleaseResources),
             ("one hundred adversarial lifecycle cycles release resources", testOneHundredAdversarialLifecycleCyclesReleaseResources)
         ]
@@ -661,6 +662,14 @@ private struct OigoIssue78ContractTests {
               coordinator.currentSession?.metadata.failureReason == "operation failed",
               try await waitForResourcesToRelease(coordinator) else {
             throw ContractFailure(message: "untyped timeout prose was promoted to a typed timeout outcome")
+        }
+    }
+
+    private static func testFailureCodesIgnoreUntrustedTimeoutProse() throws {
+        guard DictationFailureCode.infer(from: "ordinary controller timeout text") == .unknownFailure,
+              DictationFailureCode.infer(from: "a deadline was mentioned in a transcript") == .unknownFailure,
+              DictationFailureCode.infer(from: "transcription shutdown timed out") == .transcriptionTimedOut else {
+            throw ContractFailure(message: "untrusted timeout prose changed the failure code")
         }
     }
 
