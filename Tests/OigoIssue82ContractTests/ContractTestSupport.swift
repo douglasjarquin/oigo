@@ -9,7 +9,6 @@ struct ContractFailure: Error, CustomStringConvertible {
         message
     }
 }
-
 enum SettingsWriteFailure: Error, CustomStringConvertible {
     case diskFull
 
@@ -68,4 +67,3 @@ final class RecordingConfigurationRegistrationClient: GlobalShortcutRegistration
         lastError = nil
     }
 }
-

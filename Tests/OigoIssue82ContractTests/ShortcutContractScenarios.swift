@@ -224,4 +224,3 @@ extension OigoIssue82ContractTests {
 
 
 }
-

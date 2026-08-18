@@ -89,4 +89,3 @@ extension OigoIssue82ContractTests {
         return shortcut
     }
 }
-
