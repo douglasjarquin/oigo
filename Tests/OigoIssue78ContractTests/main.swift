@@ -32,6 +32,7 @@ private struct OigoIssue78ContractTests {
             ("shutdown ignores untyped timeout prose", testShutdownIgnoresUntypedTimeoutProse),
             ("failure codes ignore untrusted timeout prose", testFailureCodesIgnoreUntrustedTimeoutProse),
             ("interruption ignores untyped timeout prose", testInterruptionIgnoresUntypedTimeoutProse),
+            ("interruption ignores caller timeout prose", testInterruptionIgnoresCallerTimeoutProse),
             ("one hundred lifecycle cycles release resources", testOneHundredLifecycleCyclesReleaseResources),
             ("one hundred adversarial lifecycle cycles release resources", testOneHundredAdversarialLifecycleCyclesReleaseResources)
         ]
@@ -704,6 +705,30 @@ private struct OigoIssue78ContractTests {
               coordinator.currentSession?.metadata.failureReason == "operation failed",
               try await waitForResourcesToRelease(coordinator) else {
             throw ContractFailure(message: "untyped interruption timeout prose changed the terminal failure code")
+        }
+    }
+
+    @MainActor
+    private static func testInterruptionIgnoresCallerTimeoutProse() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue78-caller-timeout-prose-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let coordinator = DictationCoordinator(timeoutPolicy: .testing)
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: ContractAudioCapture(),
+            store: store,
+            transcription: ImmediateTranscriptionController(),
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+
+        let interrupted = try await coordinator.interruptRecordingWithTranscription(
+            reason: "transcription shutdown timed out"
+        )
+        guard interrupted.metadata.state == .interrupted,
+              interrupted.metadata.failureCode == .audioEngineInterrupted else {
+            throw ContractFailure(message: "caller timeout prose changed an ordinary interruption outcome")
         }
     }
 

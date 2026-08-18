@@ -1182,7 +1182,11 @@ public final class DictationCoordinator {
                 in: store,
                 state: terminalState,
                 reason: failureReason,
-                failureCode: failureCode(for: terminalState, reason: failureReason),
+                failureCode: failureCode(
+                    for: terminalState,
+                    reason: failureReason,
+                    typedTimeout: timedOut
+                ),
                 rawTextByteCount: nil
             )
             if [.preparing, .recording, .finalizing, .cleaning, .inserting].contains(self.state) {
@@ -1420,21 +1424,25 @@ public final class DictationCoordinator {
 
     private func failureCode(
         for state: DictationSessionState,
-        reason: String?
+        reason: String?,
+        typedTimeout: Bool = false
     ) -> DictationFailureCode? {
+        if typedTimeout {
+            return .transcriptionTimedOut
+        }
         switch state {
         case .cancelled:
-            DictationFailureCode.infer(from: reason ?? "cancelled") == .transcriptionTimedOut
-                ? .transcriptionTimedOut
-                : .cancelled
+            return .cancelled
         case .interrupted:
-            DictationFailureCode.infer(from: reason ?? "recording was interrupted") == .transcriptionTimedOut
-                ? .transcriptionTimedOut
-                : .infer(from: reason ?? "recording was interrupted", interruption: true)
+            let inferred = DictationFailureCode.infer(
+                from: reason ?? "recording was interrupted",
+                interruption: true
+            )
+            return inferred == .transcriptionTimedOut ? .audioEngineInterrupted : inferred
         case .failed:
-            .infer(from: reason ?? "capture failed")
+            return .infer(from: reason ?? "capture failed")
         default:
-            nil
+            return nil
         }
     }
 
