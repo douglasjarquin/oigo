@@ -24,6 +24,7 @@ The former shipped `49/0x900` value is retained only as an exact migration fixtu
 | Processing feedback bridge | PASS | `.omo/evidence/issue-82/task-6-app-bridge-processing-green.log` | Feedback names the exact processing state and counters remain unchanged. |
 | Mouse-owned recording isolation | PASS | `.omo/evidence/issue-82/task-6-bridge-aggregate-final.log` | Keyboard input cannot stop a recording started by the menu command. |
 | Canonical default and readable presentation | PASS | `.omo/evidence/issue-82/task-4-shortcut-contract-final.log` | Default is `49/0x300` and displays as `Shift-Command-Space`. |
+| Canonical default against Apple's documented standard shortcut list | PASS_PUBLIC_MATRIX | `.omo/evidence/issue-82/task-17-supported-shortcut-conflict.log`, `docs/issue-82-supported-shortcut-conflict-evidence.md` | `Shift-Command-Space` is absent from the cited Apple standard list; host-customized shortcuts remain an explicit native boundary. |
 | Exact legacy default migration | PASS | `.omo/evidence/issue-82/task-4-shortcut-contract-final.log` | Only `49/0x900` migrates, including the legacy `globalToggleShortcut` key. |
 | Custom key-code-zero preservation | PASS | `.omo/evidence/issue-82/task-4-shortcut-keycode-zero-final.log` | `0/0x100` remains unchanged and validates successfully. |
 | Native recorder key-code-zero capture | PASS | `.omo/evidence/issue-82/task-5-recorder-keycode-zero-green.log` | Non-repeat Command-A emits one candidate and displays `⌘A`. |
