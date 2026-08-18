@@ -527,6 +527,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private var activeSelection: OigoInputSelection?
     private var activeDeviceUID: String?
     private var recordingFence = AudioRecordingOperationFence()
+    private var preparedInput: PreparedInput?
 
     public init(
         deviceMonitor: AudioDeviceMonitoring = SystemAudioDeviceMonitor(),
@@ -544,6 +545,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         if !recording && !starting {
             activeSelection = selection
             preparedEngine = nil
+            preparedInput = nil
         }
         lock.unlock()
     }
@@ -559,6 +561,11 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         let inputConfiguration = preparation.configuration
         lock.lock()
         preparedEngine = engine
+        preparedInput = PreparedInput(
+            selection: preparation.selection,
+            deviceUID: preparation.device.uid,
+            configuration: inputConfiguration
+        )
         lock.unlock()
         return AudioCaptureFormat(
             sampleRate: inputConfiguration.sampleRate,
@@ -631,10 +638,18 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         lock.lock()
         let preparedEngine = self.preparedEngine
         self.preparedEngine = nil
+        let preparedInput = self.preparedInput
+        self.preparedInput = nil
         lock.unlock()
         let engine = preparedEngine ?? AVAudioEngine()
         let inputNode = engine.inputNode
-        let preparation = try prepareInput(on: inputNode)
+        let preparation: (device: OigoInputDevice, configuration: InputConfiguration)
+        if let preparedInput {
+            preparation = try resolvePreparedInput(preparedInput, on: inputNode)
+        } else {
+            let fullPreparation = try prepareInput(on: inputNode)
+            preparation = (fullPreparation.device, fullPreparation.configuration)
+        }
         let inputConfiguration = preparation.configuration
         let captureFormat = AVAudioFormat(
             standardFormatWithSampleRate: inputConfiguration.sampleRate,
@@ -722,8 +737,16 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             }
             lock.unlock()
             if let startupInterruption {
-                cancel()
-                throw AudioRecorderError.engineStartFailed(startupInterruption)
+                lock.lock()
+                let callback: (@Sendable (String) -> Void)? = onInterruption
+                lock.unlock()
+                guard let resources = beginTeardown(expectedGeneration: recordingGeneration) else {
+                    return
+                }
+                finish(resources) {
+                    callback?(startupInterruption)
+                }
+                return
             }
             guard startupIsCurrent else {
                 throw AudioRecorderError.inputDeviceUnavailable
@@ -736,7 +759,11 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
     private func prepareInput(
         on inputNode: AVAudioInputNode
-    ) throws -> (device: OigoInputDevice, configuration: InputConfiguration) {
+    ) throws -> (
+        device: OigoInputDevice,
+        configuration: InputConfiguration,
+        selection: OigoInputSelection
+    ) {
         lock.lock()
         let selection = selectedInput
         if !recording {
@@ -767,7 +794,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             lock.lock()
             activeDeviceUID = device.uid
             lock.unlock()
-            return (device, inputConfiguration)
+            return (device, inputConfiguration, selection)
         } catch OigoInputDeviceResolutionError.pinnedInputUnavailable {
             throw AudioRecorderError.selectedInputUnavailable
         } catch OigoInputDeviceResolutionError.noAvailableInput {
@@ -777,6 +804,27 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         } catch {
             throw AudioRecorderError.inputDeviceRouteFailed
         }
+    }
+
+    private func resolvePreparedInput(
+        _ preparedInput: PreparedInput,
+        on inputNode: AVAudioInputNode
+    ) throws -> (device: OigoInputDevice, configuration: InputConfiguration) {
+        let devices = try deviceMonitor.currentDevices()
+        let visibleDevices = OigoInputDeviceCatalog.visibleDevices(from: devices)
+        guard let device = visibleDevices.first(where: { $0.uid == preparedInput.deviceUID }) else {
+            switch preparedInput.selection {
+            case .systemDefault:
+                throw AudioRecorderError.inputDeviceUnavailable
+            case .pinned:
+                throw AudioRecorderError.selectedInputUnavailable
+            }
+        }
+        try inputRouter.route(inputNode: inputNode, to: device.deviceID)
+        lock.lock()
+        activeDeviceUID = device.uid
+        lock.unlock()
+        return (device, preparedInput.configuration)
     }
 
     private func handleDeviceChange(_ devices: [OigoInputDevice], generation: UInt64) {
@@ -895,6 +943,12 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private struct InputConfiguration {
         let sampleRate: Double
         let channelCount: UInt32
+    }
+
+    private struct PreparedInput {
+        let selection: OigoInputSelection
+        let deviceUID: String
+        let configuration: InputConfiguration
     }
 
     private static func inputConfiguration(
