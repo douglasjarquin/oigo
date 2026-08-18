@@ -841,16 +841,17 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         }
 
         do {
-            let persistedSession = try store.commitRawTextStaging(staging, for: session)
+            try checkCancellationRequested()
+            let persistedSession = try store.commitRawTextStaging(
+                staging,
+                for: session,
+                expectedState: .retrying,
+                resultingState: .completed,
+                audioByteCount: securedAudioFile.byteCount
+            )
             stagingCommitted = true
             let rawText = try store.readRawText(for: persistedSession)
             let rawTextByteCount = Int64(Data(rawText.utf8).count)
-            _ = try store.update(
-                persistedSession,
-                state: .completed,
-                audioByteCount: securedAudioFile.byteCount,
-                rawTextByteCount: rawTextByteCount
-            )
             await SpeechModels.endRetention()
             instrumentation.mark(.transcriptionFinalized)
             return TranscriptionResult(

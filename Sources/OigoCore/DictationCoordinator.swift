@@ -661,6 +661,14 @@ public final class DictationCoordinator {
                 stage: .cancellation
             )
             let persistedSession = try? store.load(id: retryingSession.id)
+            if let persistedSession, persistedSession.metadata.state == .completed {
+                _ = try? apply(.retryCompleted)
+                currentSession = persistedSession
+                lastFailureReason = nil
+                lastFailureCode = nil
+                diagnostics.record("saved audio transcription completed before retry timeout")
+                return persistedSession
+            }
             if terminalOperationInFlight
                 || pendingTranscriptionTerminalState == .interrupted
                 || persistedSession?.metadata.state == .interrupted {
@@ -674,13 +682,24 @@ public final class DictationCoordinator {
                 currentSession = interruptedSession ?? persistedSession ?? retryingSession
             } else {
                 lastFailureReason = reason
-                currentSession = persistTerminalState(
+                let terminalSession = persistTerminalState(
                     retryingSession,
                     in: store,
                     state: .failed,
                     reason: reason,
-                    failureCode: DictationFailureCode.infer(from: reason)
+                    failureCode: DictationFailureCode.infer(from: reason),
+                    expectedState: .retrying
                 )
+                if let reconciledSession = try? store.load(id: retryingSession.id),
+                   reconciledSession.metadata.state == .completed {
+                    _ = try? apply(.retryCompleted)
+                    currentSession = reconciledSession
+                    lastFailureReason = nil
+                    lastFailureCode = nil
+                    diagnostics.record("saved audio transcription completed during retry timeout")
+                    return reconciledSession
+                }
+                currentSession = terminalSession
             }
             throw error
         }
@@ -1326,7 +1345,8 @@ public final class DictationCoordinator {
         rawTextByteCount: Int64? = nil,
         insertionOutcome: InsertionOutcome? = nil,
         insertionFailureReason: String? = nil,
-        at date: Date = Date()
+        at date: Date = Date(),
+        expectedState: DictationSessionState? = nil
     ) -> DictationSession {
         let audioBytes = audioByteCount()
         do {
@@ -1339,7 +1359,8 @@ public final class DictationCoordinator {
                 audioByteCount: audioBytes,
                 rawTextByteCount: rawTextByteCount,
                 insertionOutcome: insertionOutcome,
-                insertionFailureReason: insertionFailureReason
+                insertionFailureReason: insertionFailureReason,
+                expectedState: expectedState
             )
         } catch {
             diagnostics.record("terminal metadata write failed: " + String(describing: error))
@@ -1353,7 +1374,8 @@ public final class DictationCoordinator {
                     audioByteCount: audioBytes,
                     rawTextByteCount: rawTextByteCount,
                     insertionOutcome: insertionOutcome,
-                    insertionFailureReason: insertionFailureReason
+                    insertionFailureReason: insertionFailureReason,
+                    expectedState: expectedState
                 )
             } catch {
                 diagnostics.record("terminal metadata retry failed: " + String(describing: error))

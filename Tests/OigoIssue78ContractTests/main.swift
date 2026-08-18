@@ -22,6 +22,8 @@ private struct OigoIssue78ContractTests {
             ("finalization timeout preserves recovery", testFinalizationTimeoutPreservesRecovery),
             ("startup timeout preserves ownership", testStartupTimeoutPreservesOwnership),
             ("retry timeout preserves canonical raw text", testRetryTimeoutPreservesCanonicalRawText),
+            ("retry commit rejects terminal state", testRetryCommitRejectsTerminalState),
+            ("late retry commit cannot override timeout", testLateRetryCommitCannotOverrideTimeout),
             ("interruption timeout preserves terminal outcome", testInterruptionTimeoutPreservesTerminalOutcome),
             ("shutdown timeout replies with stable outcome", testShutdownTimeoutRepliesWithStableOutcome),
             ("one hundred lifecycle cycles release resources", testOneHundredLifecycleCyclesReleaseResources),
@@ -366,6 +368,111 @@ private struct OigoIssue78ContractTests {
     }
 
     @MainActor
+    private static func testRetryCommitRejectsTerminalState() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue78-retry-state-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let created = try store.createSession()
+        let failed = try store.update(
+            created,
+            state: .failed,
+            failureReason: "live transcription failed",
+            failureCode: .transcriptionFailed
+        )
+        let retrying = try store.beginTranscriptionRetry(for: failed)
+        _ = try store.persistRawText("prior canonical", for: retrying)
+        let staging = try store.beginRawTextStaging(for: retrying)
+        try store.appendRawText("late replacement", to: staging, for: retrying)
+        _ = try store.update(
+            retrying,
+            state: .failed,
+            failureReason: "retry timed out",
+            failureCode: .transcriptionTimedOut
+        )
+
+        do {
+            _ = try store.commitRawTextStaging(
+                staging,
+                for: retrying,
+                expectedState: .retrying,
+                resultingState: .completed
+            )
+            throw ContractFailure(message: "retry staging committed after the coordinator recorded a terminal timeout")
+        } catch let error as SessionStoreError {
+            guard case .stateChanged = error else {
+                throw ContractFailure(message: "retry staging returned the wrong stale-state error: " + error.description)
+            }
+        }
+
+        let terminal = try store.load(id: retrying.id)
+        guard terminal.metadata.state == .failed,
+              terminal.metadata.failureCode == .transcriptionTimedOut,
+              try store.readRawText(for: terminal) == "prior canonical" else {
+            throw ContractFailure(message: "stale retry commit changed the terminal session or canonical raw text")
+        }
+    }
+
+    @MainActor
+    private static func testLateRetryCommitCannotOverrideTimeout() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue78-late-retry-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let created = try store.createSession()
+        let failed = try store.update(
+            created,
+            state: .failed,
+            at: Date(),
+            failureReason: "live transcription failed",
+            failureCode: .transcriptionFailed
+        )
+        let canonical = try store.persistRawText("prior canonical", for: failed)
+        let transcription = LateRetryCommitController()
+        let coordinator = DictationCoordinator(timeoutPolicy: .testing)
+        let completed = CompletionFlag()
+        let retryTask = Task { @MainActor in
+            defer { completed.mark() }
+            _ = try? await coordinator.retryRecordingWithTranscription(
+                for: canonical,
+                using: transcription,
+                store: store
+            )
+        }
+
+        await transcription.waitUntilRetryStarted()
+        guard try await waitForCompletion(completed) else {
+            transcription.releaseRetry()
+            _ = await retryTask.value
+            throw ContractFailure(message: "late retry fixture did not reach the timeout boundary")
+        }
+        let timedOut = try store.load(id: canonical.id)
+        guard timedOut.metadata.state == .failed,
+              timedOut.metadata.failureCode == .transcriptionTimedOut,
+              try store.readRawText(for: timedOut) == "prior canonical",
+              coordinator.activeOwnedOperationCount > 0 else {
+            transcription.releaseRetry()
+            _ = await retryTask.value
+            throw ContractFailure(message: "retry timeout did not establish the terminal state before the loser committed")
+        }
+
+        transcription.releaseRetry()
+        _ = await retryTask.value
+        guard try await waitForResourcesToRelease(coordinator) else {
+            throw ContractFailure(message: "late retry loser remained owned after release")
+        }
+        let released = try store.load(id: canonical.id)
+        guard released.metadata.state == .failed,
+              released.metadata.failureCode == .transcriptionTimedOut,
+              try store.readRawText(for: released) == "prior canonical",
+              try retryStagingFiles(in: released).isEmpty else {
+            throw ContractFailure(message: "late retry commit changed the terminal outcome or canonical raw text")
+        }
+    }
+
+    @MainActor
     private static func testShutdownTimeoutRepliesWithStableOutcome() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("oigo-issue78-shutdown-" + UUID().uuidString, isDirectory: true)
@@ -426,6 +533,7 @@ private struct OigoIssue78ContractTests {
             )
             await coordinator.cancelActiveWork()
             guard coordinator.activeResourceCount == 0,
+                  coordinator.activeTaskCount == 0,
                   coordinator.activeOwnedOperationCount == 0,
                   !coordinator.hasActiveWork else {
                 throw ContractFailure(message: "lifecycle resources survived a cancellation cycle")
@@ -458,7 +566,9 @@ private struct OigoIssue78ContractTests {
             default:
                 try await runRetryTimeoutCycle(coordinator: coordinator, store: store)
             }
-            guard try await waitForResourcesToRelease(coordinator) else {
+            guard try await waitForResourcesToRelease(coordinator),
+                  coordinator.activeResourceCount == 0,
+                  coordinator.activeTaskCount == 0 else {
                 throw ContractFailure(message: "adversarial lifecycle cycle left resources active at index " + String(cycle))
             }
         }
@@ -596,13 +706,17 @@ private struct OigoIssue78ContractTests {
         timeoutNanoseconds: UInt64 = 1_000_000_000
     ) async throws -> Bool {
         let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
-        while (coordinator.activeOwnedOperationCount > 0
+        while (coordinator.activeResourceCount > 0
+            || coordinator.activeTaskCount > 0
+            || coordinator.activeOwnedOperationCount > 0
             || coordinator.hasActiveTranscription
             || coordinator.hasActiveWork),
               DispatchTime.now().uptimeNanoseconds < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        return coordinator.activeOwnedOperationCount == 0
+        return coordinator.activeResourceCount == 0
+            && coordinator.activeTaskCount == 0
+            && coordinator.activeOwnedOperationCount == 0
             && !coordinator.hasActiveTranscription
             && !coordinator.hasActiveWork
     }
@@ -924,6 +1038,108 @@ private final class NonCooperativeRetryController: TranscriptionController, @unc
             return continuation
         }
         continuation?.resume(throwing: TranscriptionError.analysisFailed("released retry fixture"))
+    }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+}
+
+@available(macOS 26.0, *)
+private final class LateRetryCommitController: TranscriptionController, @unchecked Sendable {
+    private let lock = NSLock()
+    private var retryContinuation: CheckedContinuation<TranscriptionResult, Error>?
+    private var retryStarted = false
+    private var retryWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func start(
+        session: DictationSession,
+        format: AudioCaptureFormat,
+        store: SessionStore,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+    ) async throws {
+        _ = session
+        _ = format
+        _ = store
+        _ = onUpdate
+    }
+
+    func append(_ buffer: AudioCaptureBuffer) {
+        _ = buffer
+    }
+
+    func finish() async throws -> TranscriptionResult {
+        TranscriptionResult(finalizedText: "", rawTextByteCount: 0)
+    }
+
+    func cancel() async throws -> TranscriptionResult? {
+        nil
+    }
+
+    func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult {
+        let staging = try store.beginRawTextStaging(for: session)
+        try store.appendRawText("late replacement", to: staging, for: session)
+        var stagingCommitted = false
+        defer {
+            if !stagingCommitted {
+                try? store.discardRawTextStaging(staging, for: session)
+            }
+        }
+
+        _ = try await withCheckedThrowingContinuation { continuation in
+            let waiters = withLock {
+                retryStarted = true
+                retryContinuation = continuation
+                let waiters = retryWaiters
+                retryWaiters.removeAll(keepingCapacity: true)
+                return waiters
+            }
+            waiters.forEach { $0.resume() }
+        }
+        let persistedSession = try store.commitRawTextStaging(
+            staging,
+            for: session,
+            expectedState: .retrying,
+            resultingState: .completed
+        )
+        stagingCommitted = true
+        let rawText = try store.readRawText(for: persistedSession)
+        return TranscriptionResult(
+            finalizedText: rawText,
+            rawTextByteCount: Int64(Data(rawText.utf8).count)
+        )
+    }
+
+    func waitUntilRetryStarted() async {
+        await withCheckedContinuation { continuation in
+            let resumeImmediately = withLock {
+                if retryStarted {
+                    return true
+                }
+                retryWaiters.append(continuation)
+                return false
+            }
+            if resumeImmediately {
+                continuation.resume()
+            }
+        }
+    }
+
+    func releaseRetry() {
+        let continuation = withLock {
+            let continuation = retryContinuation
+            retryContinuation = nil
+            return continuation
+        }
+        continuation?.resume(returning: TranscriptionResult(
+            finalizedText: "late replacement",
+            rawTextByteCount: Int64(Data("late replacement".utf8).count)
+        ))
     }
 
     private func withLock<T>(_ body: () -> T) -> T {
