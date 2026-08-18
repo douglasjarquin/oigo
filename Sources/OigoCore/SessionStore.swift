@@ -402,18 +402,18 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
             "Oigo application support is unavailable"
         case .missingSession(let id):
             "dictation session does not exist: " + id.uuidString
-        case .invalidMetadata(let url):
-            "dictation session metadata is invalid: " + url.path
-        case .invalidSessionDirectory(let url):
-            "dictation session directory is invalid: " + url.path
-        case .transcriptTooLarge(let url):
-            "raw transcript is too large to load safely: " + url.path
+        case .invalidMetadata:
+            "dictation session metadata is invalid"
+        case .invalidSessionDirectory:
+            "dictation session directory is invalid"
+        case .transcriptTooLarge:
+            "raw transcript is too large to load safely"
         case .insertionAlreadyAttempted(let id):
             "dictation session insertion was already attempted: " + id.uuidString
         case .activeSession(let id):
             "dictation session is active and cannot be deleted: " + id.uuidString
-        case .rawTextChanged(let url):
-            "raw transcript changed while derived text was pending: " + url.path
+        case .rawTextChanged:
+            "raw transcript changed while derived text was pending"
         case .deletionConfirmationRequired:
             "Delete All History requires deliberate confirmation"
         }
@@ -546,6 +546,7 @@ public final class SessionStore: @unchecked Sendable {
         let session = DictationSession(metadata: metadata, directoryURL: directoryURL)
         do {
             try writeMetadata(metadata, at: session.metadataURL)
+            try ensureRootPathIdentity()
             return session
         } catch {
             _ = directoryName.withCString { name in
@@ -1493,6 +1494,7 @@ public final class SessionStore: @unchecked Sendable {
             guard renamed == 0 else {
                 throw storageFailure(for: errno)
             }
+            try ensureRootPathIdentity()
             try removeDirectoryTree(
                 named: tombstoneName,
                 in: rootDirectoryFD,
@@ -2120,6 +2122,12 @@ public final class SessionStore: @unchecked Sendable {
         guard directoryFD >= 0 else {
             throw storageFailure(for: errno)
         }
+        do {
+            try ensureRootPathIdentity()
+        } catch {
+            _ = Darwin.close(directoryFD)
+            throw error
+        }
         return directoryFD
     }
 
@@ -2238,6 +2246,7 @@ public final class SessionStore: @unchecked Sendable {
         guard Darwin.fsync(probeFD) == 0 else {
             throw storageFailure(for: errno)
         }
+        try ensureRootPathIdentity()
     }
 
     private static func storageFailureCategory(for errorCode: Int32) -> DurableSessionFailureCategory {

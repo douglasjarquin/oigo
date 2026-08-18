@@ -478,8 +478,26 @@ public struct DurableSessionBootstrapper: DurableSessionBootstrapping, @unchecke
         return DurableSessionBootstrapFailure(
             category: category,
             isFatal: category == .rootIdentityViolation,
-            underlyingDescription: String(describing: error)
+            underlyingDescription: diagnosticsDescription(for: error)
         )
+    }
+
+    private static func diagnosticsDescription(for error: Error) -> String {
+        if let error = error as? SessionStoreError {
+            switch error {
+            case .invalidMetadata(let url):
+                return "dictation session metadata is invalid: " + url.path
+            case .invalidSessionDirectory(let url):
+                return "dictation session directory is invalid: " + url.path
+            case .transcriptTooLarge(let url):
+                return "raw transcript is too large to load safely: " + url.path
+            case .rawTextChanged(let url):
+                return "raw transcript changed while derived text was pending: " + url.path
+            default:
+                return String(describing: error)
+            }
+        }
+        return String(describing: error)
     }
 }
 

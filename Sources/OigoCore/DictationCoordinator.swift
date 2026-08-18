@@ -407,7 +407,7 @@ public final class DictationCoordinator {
             return preparedSession
         } catch {
             capture.cancel()
-            let reason = String(describing: error)
+            let reason = Self.failureReason(for: error)
             lastFailureReason = reason
             lastFailureCode = DictationFailureCode.infer(from: reason)
             let failedSession = persistTerminalState(
@@ -585,7 +585,7 @@ public final class DictationCoordinator {
                 releaseCapture()
                 throw error
             }
-            let reason = String(describing: error)
+            let reason = Self.failureReason(for: error)
             lastFailureReason = reason
             lastFailureCode = DictationFailureCode.infer(from: reason)
             let failedSession = persistTerminalState(
@@ -651,7 +651,7 @@ public final class DictationCoordinator {
             diagnostics.record("saved audio transcription retried")
             return completedSession
         } catch {
-            let reason = String(describing: error)
+            let reason = Self.failureReason(for: error)
             let persistedSession = try? store.load(id: retryingSession.id)
             if terminalOperationInFlight
                 || pendingTranscriptionTerminalState == .interrupted
@@ -707,7 +707,7 @@ public final class DictationCoordinator {
             diagnostics.record("audio capture stopped")
             return completedSession
         } catch {
-            let reason = String(describing: error)
+            let reason = Self.failureReason(for: error)
             lastFailureReason = reason
             lastFailureCode = DictationFailureCode.infer(from: reason)
             capture.cancel()
@@ -780,7 +780,7 @@ public final class DictationCoordinator {
                 releaseCapture()
                 throw error
             }
-            let reason = String(describing: error)
+            let reason = Self.failureReason(for: error)
             lastFailureReason = reason
             lastFailureCode = DictationFailureCode.infer(from: reason)
             capture.cancel()
@@ -1013,7 +1013,7 @@ public final class DictationCoordinator {
         do {
             result = try await transcription.cancel()
         } catch {
-            let failureReason = String(describing: error)
+            let failureReason = Self.failureReason(for: error)
             lastFailureReason = failureReason
             let failedSession = persistTerminalState(
                 session,
@@ -1046,7 +1046,7 @@ public final class DictationCoordinator {
             diagnostics.record("audio capture and transcription finished as " + state.rawValue)
             return finishedSession
         } catch {
-            lastFailureReason = String(describing: error)
+            lastFailureReason = Self.failureReason(for: error)
             let failedSession = persistTerminalState(
                 session,
                 in: store,
@@ -1099,7 +1099,7 @@ public final class DictationCoordinator {
             diagnostics.record("audio capture finished as " + state.rawValue)
             return finishedSession
         } catch {
-            lastFailureReason = String(describing: error)
+            lastFailureReason = Self.failureReason(for: error)
             let failedSession = try? store.update(
                 session,
                 state: .failed,
@@ -1180,6 +1180,33 @@ public final class DictationCoordinator {
         diagnostics.record("audio capture and transcription failed: " + reason)
     }
 
+    private static func failureReason(for error: Error) -> String {
+        if let failure = error as? DurableSessionBootstrapFailure {
+            return "storage failure: " + failure.category.statusDescription
+        }
+        if let error = error as? SessionStoreError {
+            switch error {
+            case .applicationSupportUnavailable,
+                 .invalidMetadata,
+                 .invalidSessionDirectory:
+                return "durable session storage is unavailable"
+            case .missingSession:
+                return "saved session is unavailable"
+            case .transcriptTooLarge:
+                return "saved transcript is too large"
+            case .insertionAlreadyAttempted:
+                return "saved session insertion was already attempted"
+            case .activeSession:
+                return "saved session is still active"
+            case .rawTextChanged:
+                return "saved transcript changed before cleanup completed"
+            case .deletionConfirmationRequired:
+                return "history deletion requires confirmation"
+            }
+        }
+        return String(describing: error)
+    }
+
     private func failureCode(
         for state: DictationSessionState,
         reason: String?
@@ -1221,7 +1248,7 @@ public final class DictationCoordinator {
                 insertionFailureReason: insertionFailureReason
             )
         } catch {
-            diagnostics.record("terminal metadata write failed: " + String(describing: error))
+            diagnostics.record("terminal metadata write failed: " + Self.failureReason(for: error))
             do {
                 return try store.update(
                     session,
@@ -1235,7 +1262,7 @@ public final class DictationCoordinator {
                     insertionFailureReason: insertionFailureReason
                 )
             } catch {
-                diagnostics.record("terminal metadata retry failed: " + String(describing: error))
+                diagnostics.record("terminal metadata retry failed: " + Self.failureReason(for: error))
                 return inMemoryTerminalState(
                     session,
                     state: state,
@@ -1444,7 +1471,7 @@ public final class DictationCoordinator {
                 result = nil
                 terminalState = .failed
                 terminalEvent = .fail
-                terminalReason = String(describing: error)
+                terminalReason = Self.failureReason(for: error)
                 lastFailureReason = terminalReason
             }
             let interruptedSession = persistTerminalState(

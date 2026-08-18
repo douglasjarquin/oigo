@@ -243,6 +243,10 @@ struct OigoIssue86ContractTests {
               historyFailure.diagnosticsExport()?.contains("private-transcript-content") == true else {
             throw ContractFailure.diagnosticsExportWasNotPreserved
         }
+        guard !String(describing: SessionStoreError.invalidMetadata(historySecret))
+            .contains("private-transcript-content") else {
+            throw ContractFailure.storageStatusLeakedContent
+        }
     }
 
     private static func malformedChildrenDoNotPoisonValidHistory() throws {

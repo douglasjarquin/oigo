@@ -720,11 +720,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             updateSurface()
             return
         } catch {
+            let failureReason = Self.failureReason(for: error)
             if coordinator.hasActiveWork {
-                await coordinator.cancelActiveWork(reason: String(describing: error))
+                await coordinator.cancelActiveWork(reason: failureReason)
             }
             settlePendingSessionBoundary(
-                reason: String(describing: error),
+                reason: failureReason,
                 cancelled: false
             )
             markStorageUnhealthyIfNeeded(error)
@@ -742,7 +743,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 mode: settings.defaultMode,
                 copied: false
             )
-            NSLog("Oigo rejected the toggle command: %@", String(describing: error))
+            NSLog("Oigo rejected the toggle command: %@", failureReason)
             updateSurface()
         }
     }
@@ -1646,7 +1647,34 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         if let transcriptionError = error as? TranscriptionError {
             return prefix + ": " + transcriptionError.description
         }
-        return prefix + ": " + String(describing: error)
+        return prefix + ": " + failureReason(for: error)
+    }
+
+    private static func failureReason(for error: Error) -> String {
+        if let category = storageFailureCategory(error) {
+            return "storage failure: " + category.statusDescription
+        }
+        if let error = error as? SessionStoreError {
+            switch error {
+            case .transcriptTooLarge:
+                return "saved transcript is too large"
+            case .rawTextChanged:
+                return "saved transcript changed before cleanup completed"
+            case .missingSession:
+                return "saved session is unavailable"
+            case .insertionAlreadyAttempted:
+                return "saved session insertion was already attempted"
+            case .activeSession:
+                return "saved session is still active"
+            case .deletionConfirmationRequired:
+                return "history deletion requires confirmation"
+            case .applicationSupportUnavailable,
+                 .invalidMetadata,
+                 .invalidSessionDirectory:
+                return "durable session storage is unavailable"
+            }
+        }
+        return String(describing: error)
     }
 
     private static func displayStatus(for outcome: InsertionOutcome) -> OigoHUDProcessingState {
