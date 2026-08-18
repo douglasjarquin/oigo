@@ -48,6 +48,8 @@ Unavailable native rows are not substituted with SwiftPM, direct callback, unsig
 
 Native acceptance must be rerun against the exact Release `Oigo.app` on macOS 26+ with another application frontmost.
 
+The issue #12 compatibility and dogfood handoff is tracked in `docs/issue-12-global-shortcut-handoff-matrix.md`.
+
 The native run must record frontmost bundle identity before press, during recording, after release, and after terminal insertion or copy-only completion.
 
 The native run must not grant, revoke, reset, or otherwise mutate Microphone, Accessibility, Automation, Input Monitoring, shared defaults, or system shortcut state.

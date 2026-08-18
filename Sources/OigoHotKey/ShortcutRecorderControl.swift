@@ -76,11 +76,6 @@ public final class ShortcutRecorderControl: NSControl {
             return
         }
 
-        if event.keyCode == 53 {
-            cancelRecording()
-            return
-        }
-
         guard !event.isARepeat else {
             return
         }
@@ -89,6 +84,11 @@ public final class ShortcutRecorderControl: NSControl {
         let supportedFlags: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
         guard flags.subtracting(supportedFlags).isEmpty else {
             reject("Choose only supported modifiers: Command, Shift, Option, or Control")
+            return
+        }
+
+        if event.keyCode == 53, flags.isEmpty {
+            cancelRecording()
             return
         }
 

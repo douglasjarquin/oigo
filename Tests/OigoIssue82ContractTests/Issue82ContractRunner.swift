@@ -332,6 +332,19 @@ private struct OigoIssue82ContractTests {
             throw ContractFailure(message: "recorder did not retain the accepted candidate")
         }
 
+        let commandEscape = ToggleShortcut(keyCode: 53, modifiers: ToggleShortcutModifiers.command)
+        recorder.beginRecording()
+        recorder.keyDown(with: try keyEvent(
+            keyCode: 53,
+            modifiers: [.command],
+            characters: "\u{1b}",
+            isARepeat: false
+        ))
+        guard recorder.shortcut == commandEscape,
+              !recorder.isRecording else {
+            throw ContractFailure(message: "recorder treated modified Escape as cancellation instead of a valid shortcut")
+        }
+
         recorder.beginRecording()
         recorder.keyDown(with: try keyEvent(
             keyCode: 13,

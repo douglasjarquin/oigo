@@ -1436,26 +1436,38 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func applySettings(_ newSettings: OigoSettings) -> String? {
         let previousSettings = settings
         let shortcutChanged = previousSettings.globalShortcut != newSettings.globalShortcut
+        let launchAtLoginChanged = previousSettings.launchAtLogin != newSettings.launchAtLogin
+
+        if launchAtLoginChanged {
+            do {
+                try launchAtLoginController.setEnabled(newSettings.launchAtLogin)
+            } catch {
+                return "Launch at Login could not be changed: " + String(describing: error)
+            }
+        }
+
         if shortcutChanged {
             let shortcutValidation = shortcutConfiguration.save(
                 newSettings.globalShortcut,
                 persist: { _ in }
             )
             guard shortcutValidation.isAvailable else {
-                return Self.shortcutValidationMessage(shortcutValidation)
+                let shortcutError = Self.shortcutValidationMessage(shortcutValidation)
+                guard launchAtLoginChanged else {
+                    updateSurface()
+                    return shortcutError
+                }
+                do {
+                    try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
+                } catch {
+                    updateSurface()
+                    return shortcutError + "; Launch at Login could not be restored: " + String(describing: error)
+                }
+                updateSurface()
+                return shortcutError
             }
         }
 
-        if previousSettings.launchAtLogin != newSettings.launchAtLogin {
-            do {
-                try launchAtLoginController.setEnabled(newSettings.launchAtLogin)
-            } catch {
-                if shortcutChanged {
-                    _ = shortcutConfiguration.save(previousSettings.globalShortcut, persist: { _ in })
-                }
-                return "Launch at Login could not be changed: " + String(describing: error)
-            }
-        }
         settings = newSettings
         settingsStore.save(settings)
         if previousSettings.localeIdentifier != settings.localeIdentifier {
