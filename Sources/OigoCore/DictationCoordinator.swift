@@ -1340,7 +1340,7 @@ public final class DictationCoordinator {
                 try await transcription.cancel()
             }
         } catch {
-            lastFailureReason = String(describing: error)
+            lastFailureReason = "speech capture failure cancellation timed out"
             lastFailureCode = .transcriptionTimedOut
             let timedOutSession = persistTerminalState(
                 session,
@@ -1797,7 +1797,7 @@ public final class DictationCoordinator {
                 terminalState = .failed
                 terminalEvent = .fail
                 if error is BoundedOperationError
-                    || DictationFailureCode.infer(from: String(describing: error)) == .transcriptionTimedOut {
+                    || DictationFailureCode.infer(from: Self.failureReason(for: error)) == .transcriptionTimedOut {
                     terminalReason = "application shutdown speech timeout"
                     terminalFailureCode = .transcriptionTimedOut
                 } else {
