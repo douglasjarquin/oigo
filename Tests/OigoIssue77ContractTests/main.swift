@@ -24,6 +24,7 @@ private struct OigoIssue77ContractTests {
             ("target-contract secure field veto", testSecureFieldVeto),
             ("insertion-contract capture precedes microphone permission", testCapturePrecedesMicrophonePermission),
             ("insertion-contract dispatch is not verification", testDispatchIsNotVerification),
+            ("insertion-contract dispatch failure retains clipboard", testDispatchFailureRetainsClipboard),
             ("insertion-contract verified acknowledgement", testVerifiedAcknowledgement),
             ("history-paste-again", testHistoryPasteAgain),
             ("history-paste-again timeout", testHistoryPasteAgainTimeout),
@@ -311,6 +312,34 @@ private struct OigoIssue77ContractTests {
               !first.matches(differentElement) else {
             throw ContractFailure(message: "identifier-less AX elements were matched without an equality-derived token")
         }
+
+        let collidingIdentity = InsertionTargetIdentity(
+            accessibilityIdentifier: "shared-field",
+            windowIdentifier: "window-a",
+            role: "AXCustomEditor",
+            subrole: "AXTextArea"
+        )
+        let firstWithToken = InsertionTargetSnapshot(
+            frontmostProcessIdentifier: 42,
+            bundleIdentifier: "com.example.editor",
+            focusedElementIdentifier: nil,
+            role: "AXCustomEditor",
+            isSecureTextField: false,
+            identity: collidingIdentity,
+            captureToken: UUID()
+        )
+        let secondWithToken = InsertionTargetSnapshot(
+            frontmostProcessIdentifier: 42,
+            bundleIdentifier: "com.example.editor",
+            focusedElementIdentifier: nil,
+            role: "AXCustomEditor",
+            isSecureTextField: false,
+            identity: collidingIdentity,
+            captureToken: UUID()
+        )
+        guard !firstWithToken.matches(secondWithToken) else {
+            throw ContractFailure(message: "distinct captured elements with colliding public metadata were authorized")
+        }
     }
 
     private static func testCapturePrecedesMicrophonePermission() async throws {
@@ -367,6 +396,32 @@ private struct OigoIssue77ContractTests {
         ).insertRawText(for: session, store: store, target: target)
         guard result.outcome == .pasted else {
             throw ContractFailure(message: "an explicit acknowledgement did not produce the verified outcome")
+        }
+    }
+
+    private static func testDispatchFailureRetainsClipboard() throws {
+        let (store, session) = try persistedSession(rawText: "dispatch failure transcript")
+        defer { try? FileManager.default.removeItem(at: store.rootDirectory) }
+        let pasteboard = FakePasteboard()
+        let result = InsertionService(
+            targetEnvironment: FakeTargetEnvironment(validation: .safe),
+            pasteboard: pasteboard,
+            eventSender: FakeEventSender(result: .failed)
+        ).insertRawText(
+            for: session,
+            store: store,
+            target: InsertionTargetSnapshot(
+                frontmostProcessIdentifier: 42,
+                bundleIdentifier: "com.example.editor",
+                focusedElementIdentifier: "field",
+                role: "AXTextArea",
+                isSecureTextField: false
+            )
+        )
+        guard result.outcome == .copied,
+              result.reasonCode == .eventDispatchFailed,
+              pasteboard.writes == ["dispatch failure transcript"] else {
+            throw ContractFailure(message: "dispatch failure discarded the clipboard fallback or reported the wrong outcome")
         }
     }
 
@@ -577,8 +632,10 @@ private final class CancellationController {
 
 @MainActor
 private final class FakePasteboard: InsertionPasteboard {
+    private(set) var writes: [String] = []
+
     func write(_ rawText: String) -> Bool {
-        _ = rawText
+        writes.append(rawText)
         return true
     }
 }

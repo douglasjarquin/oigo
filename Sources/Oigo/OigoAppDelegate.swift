@@ -799,6 +799,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             showShortcutFeedback(.ignoredBusy(coordinator.state))
             return
         }
+        guard pasteAgainTask == nil else {
+            shortcutBridge.reset()
+            shortcutFeedbackDetail = "Paste Again is finishing. Try again in a moment."
+            historyWindow?.showMessage(shortcutFeedbackDetail ?? "Paste Again is finishing.")
+            updateSurface()
+            return
+        }
         do {
             toggleTask = try coordinator.startTask { @MainActor [weak self] in
                 guard let self else { return }
@@ -826,6 +833,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func finishDictation() {
         guard toggleTask == nil else {
             showShortcutFeedback(.ignoredBusy(coordinator.state))
+            return
+        }
+        guard pasteAgainTask == nil else {
+            shortcutBridge.reset()
+            shortcutFeedbackDetail = "Paste Again is finishing. Try again in a moment."
+            historyWindow?.showMessage(shortcutFeedbackDetail ?? "Paste Again is finishing.")
+            updateSurface()
             return
         }
         do {

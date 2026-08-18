@@ -75,13 +75,13 @@ public final class InsertionService {
         store: SessionStore,
         target: InsertionTargetSnapshot
     ) -> InsertionResult {
+        defer { targetEnvironment.discard(target) }
         guard attemptedSessionID != session.id else {
             return InsertionResult(
                 outcome: .failed,
                 reasonCode: .insertionAlreadyAttempted
             )
         }
-        defer { targetEnvironment.discard(target) }
 
         let text: String
         do {
@@ -108,7 +108,7 @@ public final class InsertionService {
         } catch {
             return InsertionResult(
                 outcome: .failed,
-                reasonCode: .insertionAlreadyAttempted
+                reasonCode: .insertionClaimFailed
             )
         }
         attemptedSessionID = session.id
@@ -233,7 +233,7 @@ public final class InsertionService {
                 return Self.copyOnlyResult(for: validation)
             case .failed:
                 return InsertionResult(
-                    outcome: .failed,
+                    outcome: .copied,
                     reasonCode: .eventDispatchFailed
                 )
             }

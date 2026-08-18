@@ -144,8 +144,11 @@ public struct InsertionTargetSnapshot: Equatable, Sendable {
               isSecureTextField == other.isSecureTextField else {
             return false
         }
-        if let captureToken, captureToken == other.captureToken {
-            return true
+        if let captureToken, let otherCaptureToken = other.captureToken {
+            return captureToken == otherCaptureToken
+        }
+        if captureToken != nil || other.captureToken != nil {
+            return false
         }
         if let identity, let otherIdentity = other.identity {
             return identity.corroborates(with: otherIdentity)
@@ -296,6 +299,7 @@ public protocol InsertionEventSender: AnyObject {
 
 public enum InsertionReasonCode: String, Codable, CaseIterable, Equatable, Sendable {
     case insertionAlreadyAttempted = "insertion_already_attempted"
+    case insertionClaimFailed = "insertion_claim_failed"
     case transcriptReadFailed = "transcript_read_failed"
     case transcriptEmpty = "transcript_empty"
     case clipboardWriteFailed = "clipboard_write_failed"
