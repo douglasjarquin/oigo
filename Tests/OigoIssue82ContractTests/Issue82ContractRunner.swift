@@ -1,4 +1,5 @@
 import Darwin
+import Foundation
 import OigoCore
 import OigoHotKey
 
@@ -28,7 +29,9 @@ private struct OigoIssue82ContractTests {
             ("registrar atomic replacement", testRegistrarAtomicReplacement),
             ("registrar failure and generation", testRegistrarFailureAndGeneration),
             ("intent rapid tap", testIntentRapidTap),
-            ("intent duplicates and processing", testIntentDuplicatesAndProcessing)
+            ("intent duplicates and processing", testIntentDuplicatesAndProcessing),
+            ("shortcut contract default and migration", testShortcutContractDefaultAndMigration),
+            ("shortcut keycode zero", testShortcutKeyCodeZero)
         ]
         let selected = scenarios.filter { normalizedFilter == nil || $0.0.contains(normalizedFilter ?? "") }
         guard !selected.isEmpty else {
@@ -157,6 +160,78 @@ private struct OigoIssue82ContractTests {
               controller.receive(.pressed, state: .cleaning) == .ignoredProcessing(.cleaning),
               controller.receive(.released, state: .inserting) == .ignoredProcessing(.inserting) else {
             throw ContractFailure(message: "processing or mouse-owned recording input was not ignored explicitly")
+        }
+    }
+
+    private static func testShortcutContractDefaultAndMigration() throws {
+        let legacy = ToggleShortcut(keyCode: 49, modifiers: 0x900)
+        let canonical = ToggleShortcut(keyCode: 49, modifiers: 0x300)
+        guard ToggleShortcut.default == canonical,
+              canonical.displayName == "Shift-Command-Space" else {
+            throw ContractFailure(message: "shortcut default did not use Shift-Command-Space")
+        }
+
+        let suiteName = "oigo-issue82-shortcut-migration-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let stored = OigoSettings(
+            globalShortcut: legacy,
+            localeIdentifier: "en-US",
+            defaultMode: .clean,
+            showVolatilePreview: false,
+            audioRetention: .oneWeek,
+            keepSuccessfulAudioIndefinitely: true,
+            launchAtLogin: true
+        )
+        defaults.set(try JSONEncoder().encode(stored), forKey: "oigo.settings.v1")
+        let loaded = OigoSettingsStore(defaults: defaults).load()
+        guard loaded.globalShortcut == canonical,
+              loaded.localeIdentifier == stored.localeIdentifier,
+              loaded.defaultMode == stored.defaultMode,
+              loaded.showVolatilePreview == stored.showVolatilePreview,
+              loaded.audioRetention == stored.audioRetention,
+              loaded.keepSuccessfulAudioIndefinitely == stored.keepSuccessfulAudioIndefinitely,
+              loaded.launchAtLogin == stored.launchAtLogin else {
+            throw ContractFailure(message: "legacy v1 shortcut did not migrate without changing other settings")
+        }
+
+        let persisted = try JSONDecoder().decode(
+            OigoSettings.self,
+            from: defaults.data(forKey: "oigo.settings.v1")!
+        )
+        guard persisted.globalShortcut == canonical,
+              OigoSettingsStore(defaults: defaults).load() == loaded else {
+            throw ContractFailure(message: "shortcut migration was not persisted idempotently")
+        }
+
+        defaults.removeObject(forKey: "oigo.settings.v1")
+        defaults.set(try JSONEncoder().encode(legacy), forKey: "globalToggleShortcut")
+        guard OigoSettingsStore(defaults: defaults).load().globalShortcut == canonical else {
+            throw ContractFailure(message: "legacy globalToggleShortcut key did not migrate")
+        }
+
+        defaults.removeObject(forKey: "oigo.settings.v1")
+        defaults.set(
+            try JSONEncoder().encode(OigoSettings(globalShortcut: ToggleShortcut(keyCode: 0, modifiers: 0x100))),
+            forKey: "oigo.settings.v1"
+        )
+        guard OigoSettingsStore(defaults: defaults).load().globalShortcut == ToggleShortcut(keyCode: 0, modifiers: 0x100) else {
+            throw ContractFailure(message: "custom key-code-zero shortcut was changed during migration")
+        }
+    }
+
+    private static func testShortcutKeyCodeZero() throws {
+        let keyCodeZero = ToggleShortcut(keyCode: 0, modifiers: 0x100)
+        guard OigoShortcutValidator.validate(keyCodeZero, occupied: []).isAvailable,
+              keyCodeZero.displayName == "Command-A" else {
+            throw ContractFailure(message: "key code zero with Command was rejected")
+        }
+        guard !OigoShortcutValidator.validate(
+            ToggleShortcut(keyCode: 0, modifiers: 0),
+            occupied: []
+        ).isAvailable else {
+            throw ContractFailure(message: "modifier-free shortcut was accepted")
         }
     }
 

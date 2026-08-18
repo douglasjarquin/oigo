@@ -99,6 +99,7 @@ public struct OigoSettings: Codable, Equatable, Sendable {
 
 public final class OigoSettingsStore {
     private static let key = "oigo.settings.v1"
+    private static let legacyShortcutDefault = ToggleShortcut(keyCode: 49, modifiers: 0x900)
     private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
@@ -108,19 +109,36 @@ public final class OigoSettingsStore {
     public func load() -> OigoSettings {
         if let data = defaults.data(forKey: Self.key),
            let settings = try? JSONDecoder().decode(OigoSettings.self, from: data) {
-            return settings
+            let migrated = migrate(settings)
+            if migrated != settings {
+                save(migrated)
+            }
+            return migrated
         }
 
         var settings = OigoSettings.default
+        var loadedLegacyShortcut = false
         if let data = defaults.data(forKey: "globalToggleShortcut"),
            let shortcut = try? JSONDecoder().decode(ToggleShortcut.self, from: data) {
-            settings.globalShortcut = shortcut
+            settings.globalShortcut = migrate(shortcut)
+            loadedLegacyShortcut = true
         }
         if let rawMode = defaults.string(forKey: "transcriptCleanupMode"),
            let mode = OigoProcessingMode(rawValue: rawMode) {
             settings.defaultMode = mode
         }
+        if loadedLegacyShortcut {
+            save(settings)
+        }
         return settings
+    }
+
+    private func migrate(_ settings: OigoSettings) -> OigoSettings {
+        settings.with(globalShortcut: migrate(settings.globalShortcut))
+    }
+
+    private func migrate(_ shortcut: ToggleShortcut) -> ToggleShortcut {
+        shortcut == Self.legacyShortcutDefault ? .default : shortcut
     }
 
     public func save(_ settings: OigoSettings) {
@@ -401,11 +419,11 @@ public enum OigoShortcutValidator {
         _ shortcut: ToggleShortcut,
         occupied: [ToggleShortcut]
     ) -> OigoShortcutValidation {
-        guard shortcut.keyCode > 0 else {
-            return .invalid("Choose a keyboard key for the global shortcut")
+        guard shortcut.modifiers & ToggleShortcutModifiers.supportedMask != 0 else {
+            return .invalid("Choose Command, Shift, Option, or Control for the global shortcut")
         }
-        guard shortcut.modifiers != 0 else {
-            return .invalid("Choose at least one modifier for the global shortcut")
+        guard shortcut.modifiers & ~ToggleShortcutModifiers.supportedMask == 0 else {
+            return .invalid("Choose only Command, Shift, Option, or Control for the global shortcut")
         }
         guard !occupied.contains(shortcut) else {
             return .conflict("That shortcut is already registered by another application")

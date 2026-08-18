@@ -1435,7 +1435,7 @@ public struct ToggleShortcut: Codable, Equatable, Hashable, Sendable {
 
     public static let `default` = ToggleShortcut(
         keyCode: 49,
-        modifiers: 0x900
+        modifiers: 0x300
     )
 }
 

@@ -55,6 +55,7 @@
         A00000010000000000000034 /* libOigoHotKey.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000028 /* libOigoHotKey.a */; };
         A00000010000000000000035 /* GlobalShortcutRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000029 /* GlobalShortcutRegistration.swift */; };
         A00000010000000000000036 /* GlobalShortcutIntentController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000030 /* GlobalShortcutIntentController.swift */; };
+        A00000010000000000000037 /* ShortcutPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000031 /* ShortcutPresentation.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -159,6 +160,7 @@
         B00000010000000000000028 /* libOigoHotKey.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoHotKey.a; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000029 /* GlobalShortcutRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutRegistration.swift; sourceTree = "<group>"; };
         B00000010000000000000030 /* GlobalShortcutIntentController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutIntentController.swift; sourceTree = "<group>"; };
+        B00000010000000000000031 /* ShortcutPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutPresentation.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -281,6 +283,7 @@
                 B00000010000000000000026 /* ProductContracts.swift */,
                 B00000010000000000000027 /* PerformanceContracts.swift */,
                 B00000010000000000000030 /* GlobalShortcutIntentController.swift */,
+                B00000010000000000000031 /* ShortcutPresentation.swift */,
             );
             path = Sources/OigoCore;
             sourceTree = "<group>";
@@ -551,6 +554,7 @@
                 A00000010000000000000029 /* ProductContracts.swift in Sources */,
                 A00000010000000000000030 /* PerformanceContracts.swift in Sources */,
                 A00000010000000000000036 /* GlobalShortcutIntentController.swift in Sources */,
+                A00000010000000000000037 /* ShortcutPresentation.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
