@@ -18,13 +18,16 @@ private struct OigoIssue77ContractTests {
             ("target-contract alternate editable role", testAlternateEditableRole),
             ("target-contract read-only conventional role", testReadOnlyConventionalRole),
             ("target-contract stable identity corroboration", testStableIdentityCorroboration),
+            ("target-contract token preserves identifier-less identity", testTokenPreservesIdentifierLessIdentity),
+            ("target-contract explicit wrapper change fails closed", testExplicitWrapperChangeFailsClosed),
             ("target-contract hash collision fails closed", testHashCollisionFailsClosed),
             ("target-contract secure field veto", testSecureFieldVeto),
             ("insertion-contract capture precedes microphone permission", testCapturePrecedesMicrophonePermission),
             ("insertion-contract dispatch is not verification", testDispatchIsNotVerification),
             ("insertion-contract verified acknowledgement", testVerifiedAcknowledgement),
             ("history-paste-again", testHistoryPasteAgain),
-            ("history-paste-again timeout", testHistoryPasteAgainTimeout)
+            ("history-paste-again timeout", testHistoryPasteAgainTimeout),
+            ("history-paste-again cancellation", testHistoryPasteAgainCancellation)
         ]
         let filter = CommandLine.arguments.dropFirst()
             .drop(while: { $0 != "--filter" })
@@ -182,7 +185,7 @@ private struct OigoIssue77ContractTests {
             currentIsSecureTextField: false,
             accessibilityTrusted: true,
             currentIdentity: rewrappedIdentity,
-            identityMatch: false,
+            identityMatch: nil,
             currentCapabilities: capabilities
         )
         guard sameTarget == .safe else {
@@ -232,6 +235,81 @@ private struct OigoIssue77ContractTests {
         )
         guard result == .secureTextField else {
             throw ContractFailure(message: "secure target was not rejected first")
+        }
+    }
+
+    private static func testExplicitWrapperChangeFailsClosed() throws {
+        let snapshot = InsertionTargetSnapshot(
+            frontmostProcessIdentifier: 42,
+            bundleIdentifier: "com.example.editor",
+            focusedElementIdentifier: nil,
+            role: "AXCustomEditor",
+            isSecureTextField: false,
+            identity: InsertionTargetIdentity(
+                accessibilityIdentifier: "field-a",
+                windowIdentifier: "window-a",
+                role: "AXCustomEditor",
+                ancestry: ["AXWindow:window-a"]
+            ),
+            capabilities: editableCapabilities()
+        )
+        let result = TargetValidation.evaluate(
+            snapshot: snapshot,
+            currentProcessIdentifier: 42,
+            currentBundleIdentifier: "com.example.editor",
+            currentFocusedElementIdentifier: nil,
+            currentRole: "AXCustomEditor",
+            currentIsSecureTextField: false,
+            accessibilityTrusted: true,
+            currentIdentity: InsertionTargetIdentity(
+                windowIdentifier: "window-a",
+                role: "AXCustomEditor",
+                ancestry: ["AXWindow:window-a"]
+            ),
+            identityMatch: false,
+            currentCapabilities: editableCapabilities()
+        )
+        guard result == .focusedElementChanged else {
+            throw ContractFailure(message: "an explicitly different Accessibility element was authorized by shared window metadata")
+        }
+    }
+
+    private static func testTokenPreservesIdentifierLessIdentity() throws {
+        let token = UUID()
+        let identity = InsertionTargetIdentity(
+            role: "AXCustomEditor",
+            subrole: "AXTextArea"
+        )
+        let first = InsertionTargetSnapshot(
+            frontmostProcessIdentifier: 42,
+            bundleIdentifier: "com.example.editor",
+            focusedElementIdentifier: nil,
+            role: "AXCustomEditor",
+            isSecureTextField: false,
+            identity: identity,
+            captureToken: token
+        )
+        let sameElement = InsertionTargetSnapshot(
+            frontmostProcessIdentifier: 42,
+            bundleIdentifier: "com.example.editor",
+            focusedElementIdentifier: nil,
+            role: "AXCustomEditor",
+            isSecureTextField: false,
+            identity: identity,
+            captureToken: token
+        )
+        let differentElement = InsertionTargetSnapshot(
+            frontmostProcessIdentifier: 42,
+            bundleIdentifier: "com.example.editor",
+            focusedElementIdentifier: nil,
+            role: "AXCustomEditor",
+            isSecureTextField: false,
+            identity: identity,
+            captureToken: UUID()
+        )
+        guard first.matches(sameElement),
+              !first.matches(differentElement) else {
+            throw ContractFailure(message: "identifier-less AX elements were matched without an equality-derived token")
         }
     }
 
@@ -321,9 +399,11 @@ private struct OigoIssue77ContractTests {
             },
             recordOutcome: { _ in
                 trace.events.append("record")
+            },
+            restoreFocus: {
+                trace.events.append("restore")
             }
         )
-        trace.events.append("restore")
         guard result.outcome == .dispatched,
               trace.events == [
                   "wait", "capture", "wait", "capture", "wait", "capture",
@@ -369,12 +449,64 @@ private struct OigoIssue77ContractTests {
             },
             recordOutcome: { _ in
                 trace.events.append("record")
+            },
+            restoreFocus: {
+                trace.events.append("restore")
             }
         )
         guard result.outcome == .copied,
               result.reasonCode == .targetHandoffTimedOut,
-              trace.events == ["wait", "capture", "wait", "capture", "copy", "record"] else {
+              trace.events == ["wait", "capture", "wait", "capture", "copy", "record", "restore"] else {
             throw ContractFailure(message: "Paste Again timeout did not preserve clipboard-only safety")
+        }
+    }
+
+    private static func testHistoryPasteAgainCancellation() async throws {
+        let trace = EventTrace()
+        let cancellation = CancellationController()
+        let handoff = InsertionTargetHandoff(
+            maxAttempts: 2,
+            waitForDestination: {
+                trace.events.append("wait")
+                await Task.yield()
+                cancellation.requestCancellation()
+            }
+        )
+        let flow = InsertionPasteAgainFlow(handoff: handoff)
+        let operation = Task { @MainActor in
+            await flow.run(
+                capture: {
+                    trace.events.append("capture")
+                    return historyTarget(identifier: "field")
+                },
+                paste: { _ in
+                    trace.events.append("dispatch")
+                    return InsertionResult(outcome: .dispatched)
+                },
+                copyOnly: { selection in
+                    guard selection == .cancelled else {
+                        return InsertionResult(outcome: .failed)
+                    }
+                    trace.events.append("copy")
+                    return InsertionResult(
+                        outcome: .copied,
+                        reasonCode: .targetHandoffCancelled
+                    )
+                },
+                recordOutcome: { _ in
+                    trace.events.append("record")
+                },
+                restoreFocus: {
+                    trace.events.append("restore")
+                }
+            )
+        }
+        cancellation.cancel = { operation.cancel() }
+        let result = await operation.value
+        guard result.outcome == .copied,
+              result.reasonCode == .targetHandoffCancelled,
+              trace.events == ["wait", "copy", "record", "restore"] else {
+            throw ContractFailure(message: "Paste Again cancellation dispatched or recorded the wrong outcome")
         }
     }
 
@@ -385,6 +517,15 @@ private struct OigoIssue77ContractTests {
             focusedElementIdentifier: identifier,
             role: "AXTextArea",
             isSecureTextField: false
+        )
+    }
+
+    private static func editableCapabilities() -> InsertionTargetCapabilities {
+        InsertionTargetCapabilities(
+            supportsValue: true,
+            valueIsSettable: true,
+            supportsSelectedText: false,
+            selectedTextIsSettable: false
         )
     }
 
@@ -429,6 +570,15 @@ private final class FakeTargetEnvironment: InsertionTargetEnvironment {
 @MainActor
 private final class EventTrace {
     var events: [String] = []
+}
+
+@MainActor
+private final class CancellationController {
+    var cancel: (() -> Void)?
+
+    func requestCancellation() {
+        cancel?()
+    }
 }
 
 @MainActor

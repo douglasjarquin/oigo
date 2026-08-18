@@ -42,10 +42,10 @@ public struct InsertionTargetIdentity: Equatable, Sendable {
     }
 
     public func corroborates(with other: InsertionTargetIdentity) -> Bool {
-        if let accessibilityIdentifier, let otherIdentifier = other.accessibilityIdentifier {
-            guard accessibilityIdentifier == otherIdentifier else {
-                return false
-            }
+        guard let accessibilityIdentifier,
+              let otherIdentifier = other.accessibilityIdentifier,
+              accessibilityIdentifier == otherIdentifier else {
+            return false
         }
         if let windowIdentifier, let otherWindowIdentifier = other.windowIdentifier {
             guard windowIdentifier == otherWindowIdentifier else {
@@ -67,18 +67,7 @@ public struct InsertionTargetIdentity: Equatable, Sendable {
                 return false
             }
         }
-        if accessibilityIdentifier != nil, other.accessibilityIdentifier != nil {
-            return true
-        }
-        if windowIdentifier != nil, other.windowIdentifier != nil {
-            return true
-        }
-        return hasCorroboratingEvidence
-            && other.hasCorroboratingEvidence
-            && !ancestry.isEmpty
-            && !other.ancestry.isEmpty
-            && (role != nil || subrole != nil)
-            && (other.role != nil || other.subrole != nil)
+        return true
     }
 }
 
@@ -142,7 +131,8 @@ public struct InsertionTargetSnapshot: Equatable, Sendable {
 
     public var canBeSelectedForPaste: Bool {
         frontmostProcessIdentifier > 0
-            && (identity?.hasCorroboratingEvidence == true
+            && (captureToken != nil
+                || identity?.hasCorroboratingEvidence == true
                 || (focusedElementIdentifier != nil
                     && focusedElementIdentifier?.isEmpty == false
                     && focusedElementIdentifier?.hasPrefix("ax-") == false))
@@ -154,8 +144,11 @@ public struct InsertionTargetSnapshot: Equatable, Sendable {
               isSecureTextField == other.isSecureTextField else {
             return false
         }
+        if let captureToken, captureToken == other.captureToken {
+            return true
+        }
         if let identity, let otherIdentity = other.identity {
-            return identity == otherIdentity || identity.corroborates(with: otherIdentity)
+            return identity.corroborates(with: otherIdentity)
         }
         if identity != nil || other.identity != nil {
             return false
@@ -222,15 +215,10 @@ public enum TargetValidation: Equatable, Sendable {
             guard let currentIdentity else {
                 return .ambiguousTarget
             }
-            if identityMatch == false,
-               !expectedIdentity.corroborates(with: currentIdentity) {
+            if identityMatch == false {
                 return .focusedElementChanged
             }
-            if identityMatch != true,
-               !expectedIdentity.hasCorroboratingEvidence {
-                return .ambiguousTarget
-            }
-            guard expectedIdentity == currentIdentity
+            guard identityMatch == true
                     || expectedIdentity.corroborates(with: currentIdentity) else {
                 return .ambiguousTarget
             }

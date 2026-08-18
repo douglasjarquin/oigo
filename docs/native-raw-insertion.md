@@ -4,6 +4,8 @@ Oigo captures the frontmost process, bundle, focused Accessibility element, publ
 The captured Accessibility object is retained only as a main-actor-owned ephemeral reference for the active insertion and is discarded on every insertion terminal path.
 Identity uses public `CFEqual` semantics plus optional Accessibility identifier, owning-window identifier, role/subrole, and ancestry evidence.
 No hash is used as the sole identity contract.
+When optional identifiers are absent, History reuses an ephemeral token only after `CFEqual` confirms the same Accessibility element.
+If microphone permission was unknown before the request, Oigo treats a successful prompt as setup and requires a retry instead of recording with a pre-prompt target.
 
 After transcription finishes, the existing session store must have atomically persisted `raw.txt` before insertion reads it.
 The insertion service writes that canonical raw text to the general pasteboard and leaves it there for the user.

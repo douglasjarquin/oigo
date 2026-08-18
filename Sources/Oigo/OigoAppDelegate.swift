@@ -707,9 +707,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 let activeToggleTask = self.toggleTask
                 let activeCleanAgainTask = self.cleanAgainTask
+                let activePasteAgainTask = self.pasteAgainTask
                 let activeRetryTask = self.retryTask
                 activeToggleTask?.cancel()
                 activeCleanAgainTask?.cancel()
+                activePasteAgainTask?.cancel()
                 activeRetryTask?.cancel()
                 await self.coordinator.cancelActiveWork(reason: reason)
                 if let activeToggleTask {
@@ -717,6 +719,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 if let activeCleanAgainTask {
                     await activeCleanAgainTask.value
+                }
+                if let activePasteAgainTask {
+                    await activePasteAgainTask.value
                 }
                 if let activeRetryTask {
                     await activeRetryTask.value
@@ -1510,10 +1515,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             defer {
                 self.pasteAgainTask = nil
-                self.historyWindow?.showAndFocus()
-                if source == .clean {
-                    self.historyWindow?.showCleanTranscript()
-                }
                 self.updateSurface()
             }
             guard self.storageCapability.health.isReady else {
@@ -1573,6 +1574,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 },
                 discard: { target in
                     self.insertion.discardTarget(target)
+                },
+                restoreFocus: {
+                    self.historyWindow?.showAndFocus()
+                    if source == .clean {
+                        self.historyWindow?.showCleanTranscript()
+                    }
                 }
             )
         }
@@ -2179,6 +2186,23 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .failed:
             return "Paste Again failed: " + (result.reason ?? "the paste could not be completed")
         }
+    }
+
+    private static func cleanFallbackMessage(
+        result: InsertionResult,
+        reason: String
+    ) -> String {
+        let outcomeMessage: String = switch result.outcome {
+        case .pasted:
+            "Raw transcript inserted."
+        case .dispatched:
+            "Raw transcript paste attempted; clipboard retained."
+        case .copied, .secureRejected:
+            "Raw transcript copied."
+        case .failed:
+            "Raw transcript was not inserted."
+        }
+        return "Clean unavailable. " + outcomeMessage + " " + reason
     }
 
     private func microphonePermissionState() -> OigoPermissionState {

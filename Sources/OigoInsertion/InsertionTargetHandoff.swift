@@ -72,7 +72,8 @@ public final class InsertionPasteAgainFlow {
         paste: @escaping @MainActor (InsertionTargetSnapshot) -> InsertionResult,
         copyOnly: @escaping @MainActor (InsertionTargetHandoffResult) -> InsertionResult,
         recordOutcome: @escaping @MainActor (InsertionResult) -> Void,
-        discard: @escaping @MainActor (InsertionTargetSnapshot) -> Void = { _ in }
+        discard: @escaping @MainActor (InsertionTargetSnapshot) -> Void = { _ in },
+        restoreFocus: @escaping @MainActor () -> Void = {}
     ) async -> InsertionResult {
         let selection = await handoff.select(capture: capture, discard: discard)
         let result: InsertionResult
@@ -90,6 +91,7 @@ public final class InsertionPasteAgainFlow {
             }
         }
         recordOutcome(result)
+        restoreFocus()
         return result
     }
 }

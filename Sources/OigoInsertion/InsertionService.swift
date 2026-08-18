@@ -358,7 +358,13 @@ public final class AccessibilityTargetEnvironment: InsertionTargetEnvironment {
         let subrole = stringAttribute(kAXSubroleAttribute, from: focused)
         let identity = targetIdentity(for: focused, role: role, subrole: subrole)
         let capabilities = targetCapabilities(for: focused)
-        let token = UUID()
+        let token: UUID
+        if let capturedTarget,
+           CFEqual(capturedTarget.element, focused) {
+            token = capturedTarget.token
+        } else {
+            token = UUID()
+        }
         capturedTarget = CapturedTarget(token: token, element: focused)
         return InsertionTargetSnapshot(
             frontmostProcessIdentifier: processIdentifier,
