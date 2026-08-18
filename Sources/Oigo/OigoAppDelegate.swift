@@ -1,6 +1,7 @@
 import AppKit
 import AVFAudio
 import ApplicationServices
+import Darwin
 import Foundation
 import OigoCore
 import OigoCapture
@@ -143,7 +144,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let supportedLocales = await self.transcriptionService().supportedLocaleIdentifiers()
+            let supportedLocales = self.storageCapability.health.isReady
+                ? await self.transcriptionService().supportedLocaleIdentifiers()
+                : []
             self.presentSettings(supportedLocales: supportedLocales)
         }
     }
@@ -204,6 +207,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             storageHealth: storageCapability.health,
             loadSupportedLanguages: { [weak self] in
                 guard let self else { return [] }
+                guard self.storageCapability.health.isReady else { return [] }
                 let service = self.transcriptionService()
                 let identifiers = await service.supportedLocaleIdentifiers()
                 guard let closest = OigoSupportedLocaleResolver.closest(
@@ -217,6 +221,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             checkSpeechAssets: { [weak self] identifier in
                 guard let self else {
                     return .unavailable("Oigo is no longer available")
+                }
+                guard self.storageCapability.health.isReady else {
+                    return .unavailable("durable storage is unavailable")
                 }
                 let service = self.transcriptionService(for: identifier)
                 do {
@@ -437,7 +444,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func registerShortcut() {
-        guard storageCapability.health.isReady, !shortcutRegistered else {
+        guard storageCapability.health.isReady,
+              onboardingStore.load().isComplete,
+              !shortcutRegistered else {
             return
         }
         do {
@@ -606,14 +615,22 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     }
                 )
             case .recording:
+                guard storageCapability.health.isReady else {
+                    throw DurableSessionAccessError.storageUnavailable(
+                        storageCapability.health.failureCategory
+                    )
+                }
                 let terminalMode = transcriptCleanupMode(for: settings.defaultMode)
                 insertionDisplayStatus = .finalizing
                 updateSurface()
                 _ = try await coordinator.stopRecordingWithTranscription()
                 recordingStartedAt = nil
-                guard let snapshot = targetSnapshot,
+                guard storageCapability.health.isReady,
+                      let snapshot = targetSnapshot,
                       let store = sessionStore else {
-                    throw DictationCoordinatorError.recordingNotActive
+                    throw DurableSessionAccessError.storageUnavailable(
+                        storageCapability.health.failureCategory
+                    )
                 }
                 let insertionSession = try coordinator.beginInsertion(
                     using: store,
@@ -633,6 +650,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     _ = try coordinator.finishCleanup()
                 }
                 try Task.checkCancellation()
+                guard storageCapability.health.isReady else {
+                    throw DurableSessionAccessError.storageUnavailable(
+                        storageCapability.health.failureCategory
+                    )
+                }
                 insertionDisplayStatus = .pasting
                 updateSurface()
                 explainAccessibilityBeforePaste()
@@ -691,9 +713,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             if coordinator.hasActiveWork {
                 await coordinator.cancelActiveWork(reason: String(describing: error))
             }
-            if Self.isStorageFailure(error) {
-                storageCapability.markUnhealthy(.metadataRecoveryFailure)
-            }
+            markStorageUnhealthyIfNeeded(error)
             lastSession = coordinator.currentSession ?? lastSession
             targetSnapshot = nil
             recordingStartedAt = nil
@@ -739,7 +759,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func performRetry(for session: DictationSession) async {
-        guard let store = sessionStore,
+        guard storageCapability.health.isReady,
+              let store = sessionStore,
               [.failed, .interrupted].contains(session.metadata.state),
               FileManager.default.fileExists(atPath: session.audioURL.path) else {
             updateSurface()
@@ -756,6 +777,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             )
             historyWindow?.showMessage("Transcription retry completed.")
         } catch {
+            markStorageUnhealthyIfNeeded(error)
             lastSession = try? store.load(id: session.id)
             historyWindow?.showMessage(Self.friendlyError("Retry failed", error))
             NSLog("Oigo could not retry the saved transcription: %@", Self.friendlyError("Retry failed", error))
@@ -815,6 +837,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     for: session
                 )
             } catch {
+                if Self.storageFailureCategory(error) != nil {
+                    throw error
+                }
                 transcriptCleanupMetrics.record(.fallback)
                 decision = TranscriptCleanupDecision(
                     rawText: rawText,
@@ -866,7 +891,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func cleanAgain(for entry: SessionHistoryEntry) {
-        guard cleanAgainTask == nil,
+        guard storageCapability.health.isReady,
+              cleanAgainTask == nil,
               let store = sessionStore else {
             return
         }
@@ -891,6 +917,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         store: SessionStore
     ) async {
         do {
+            guard storageCapability.health.isReady else {
+                return
+            }
             let rawText = try store.readRawText(for: entry.session)
             let decision = await transcriptCleanup.resolve(
                 mode: .clean,
@@ -898,6 +927,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 deadlineNanoseconds: 4_000_000_000
             )
             try Task.checkCancellation()
+            guard storageCapability.health.isReady else {
+                return
+            }
             guard let cleanText = decision.cleanText else {
                 let fallbackReason = decision.fallbackReason?.description
                     ?? "cleanup did not complete"
@@ -922,6 +954,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 )
             } catch let error as SessionStoreError {
                 if case .rawTextChanged = error {
+                    throw error
+                }
+                if Self.storageFailureCategory(error) != nil {
                     throw error
                 }
                 let fallbackReason = TranscriptCleanupFallbackReason
@@ -961,23 +996,29 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 )
                 refreshHistory()
             } catch {
+                markStorageUnhealthyIfNeeded(error)
                 historyWindow?.showMessage(Self.friendlyError("Clean Again failed", error))
             }
         } catch is CancellationError {
             return
         } catch {
+            markStorageUnhealthyIfNeeded(error)
             historyWindow?.showMessage(Self.friendlyError("Clean Again failed", error))
         }
     }
 
     private func pasteCleanAgain(for entry: SessionHistoryEntry) {
-        guard let store = sessionStore else {
+        guard storageCapability.health.isReady,
+              let store = sessionStore else {
             return
         }
         historyWindow?.window?.orderOut(nil)
         NSApp.hide(nil)
         DispatchQueue.main.async { [weak self] in
             guard let self else {
+                return
+            }
+            guard self.storageCapability.health.isReady else {
                 return
             }
             defer {
@@ -1013,19 +1054,24 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 self.refreshHistory()
             } catch {
+                self.markStorageUnhealthyIfNeeded(error)
                 self.historyWindow?.showMessage(Self.friendlyError("Paste Clean Again failed", error))
             }
         }
     }
 
     private func pasteAgain(for entry: SessionHistoryEntry) {
-        guard let store = sessionStore else {
+        guard storageCapability.health.isReady,
+              let store = sessionStore else {
             return
         }
         historyWindow?.window?.orderOut(nil)
         NSApp.hide(nil)
         DispatchQueue.main.async { [weak self] in
             guard let self else {
+                return
+            }
+            guard self.storageCapability.health.isReady else {
                 return
             }
             defer {
@@ -1059,6 +1105,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 self.refreshHistory()
             } catch {
+                self.markStorageUnhealthyIfNeeded(error)
                 self.historyWindow?.showMessage(Self.friendlyError("Paste Again failed", error))
             }
         }
@@ -1104,7 +1151,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func delete(_ entry: SessionHistoryEntry) {
-        guard let store = sessionStore else {
+        guard storageCapability.health.isReady,
+              let store = sessionStore else {
             return
         }
         do {
@@ -1115,21 +1163,28 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             historyWindow?.showMessage("Session deleted.")
             refreshHistory()
         } catch {
+            markStorageUnhealthyIfNeeded(error)
             historyWindow?.showMessage(Self.friendlyError("Delete failed", error))
         }
         updateSurface()
     }
 
     private func refreshHistory() {
-        guard let store = sessionStore else {
+        guard storageCapability.health.isReady,
+              let store = sessionStore else {
             return
         }
         do {
-            let entries = try store.listHistory()
-            lastSession = entries.first?.session
-            historyWindow?.reload(entries: entries)
+            let report = try store.listHistoryReport()
+            lastSession = report.entries.first?.session
+            historyWindow?.reload(entries: report.entries)
         } catch {
-            historyWindow?.showMessage(Self.friendlyError("History unavailable", error))
+            markStorageUnhealthyIfNeeded(error)
+            historyWindow?.showMessage(
+                storageCapability.health.failureCategory == nil
+                    ? Self.friendlyError("History unavailable", error)
+                    : storageCapability.health.statusMessage
+            )
         }
         updateSurface()
     }
@@ -1147,7 +1202,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             updateSurface()
             return
         }
-        guard let store = sessionStore else {
+        guard storageCapability.health.isReady,
+              let store = sessionStore else {
             return
         }
         do {
@@ -1166,6 +1222,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     : "Idle maintenance removed \(removed) expired artifact set\(removed == 1 ? "" : "s")."
             )
         } catch {
+            markStorageUnhealthyIfNeeded(error)
             historyWindow?.showMessage(Self.friendlyError("Maintenance failed", error))
         }
     }
@@ -1204,7 +1261,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         cleanModeItem?.state = settings.defaultMode == .clean ? .on : .off
         modeMenuItem?.isEnabled = setupComplete && storageReady && !isRecording
         storageStatusItem?.title = storageCapability.health.statusMessage
-        retryStorageItem?.isEnabled = !storageReady
+        retryStorageItem?.isEnabled = !storageReady && storageCapability.health != .checking
         launchAtLoginItem?.state = launchAtLoginController.isEnabled ? .on : .off
         statusItem?.button?.title = "Oigo"
 
@@ -1292,25 +1349,30 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         updateSurface()
     }
 
-    private static func isStorageFailure(_ error: Error) -> Bool {
-        if error is DurableSessionAccessError {
-            return false
+    private func markStorageUnhealthyIfNeeded(_ error: Error) {
+        guard let category = Self.storageFailureCategory(error) else {
+            return
         }
+        storageCapability.markUnhealthy(category)
+    }
+
+    private static func storageFailureCategory(_ error: Error) -> DurableSessionFailureCategory? {
         guard let error = error as? SessionStoreError else {
-            return false
+            return nil
         }
         switch error {
-        case .applicationSupportUnavailable,
-             .invalidMetadata,
+        case .applicationSupportUnavailable:
+            return .unavailableParent
+        case .invalidMetadata,
              .invalidSessionDirectory:
-            return true
+            return .metadataRecoveryFailure
         case .missingSession,
              .transcriptTooLarge,
              .insertionAlreadyAttempted,
              .activeSession,
              .rawTextChanged,
              .deletionConfirmationRequired:
-            return false
+            return nil
         }
     }
 
@@ -1365,6 +1427,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func validateShortcut(_ candidate: ToggleShortcut) -> OigoShortcutValidation {
+        guard storageCapability.health.isReady else {
+            return .invalid("Storage unavailable. Retry storage before enabling a shortcut.")
+        }
         let basicValidation = OigoShortcutValidator.validate(candidate, occupied: [])
         guard basicValidation.isAvailable else {
             return basicValidation

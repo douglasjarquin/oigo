@@ -603,11 +603,11 @@ public final class SessionStore: @unchecked Sendable {
                 let values = try url.resourceValues(
                     forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
                 )
-                guard values.isDirectory == true else {
-                    continue
-                }
                 guard values.isSymbolicLink != true else {
                     malformedSessionCount += 1
+                    continue
+                }
+                guard values.isDirectory == true else {
                     continue
                 }
                 sessions.append(try readSession(at: url))
