@@ -12,7 +12,7 @@ The storage implementation source SHA for this handoff is `36fa836634aa79900dedc
 
 The final pull-request head and hosted verification receipt bind this handoff to the complete published commit, including this documentation-only binding commit.
 
-The exact Xcode Release artifact used for the bounded native launch was `/tmp/oigo-issue86-xcode-final-GzkixQ/Build/Products/Release/Oigo.app`.
+The exact Xcode Release artifact used for the bounded native launch was `/tmp/oigo-issue86-xcode-final7-LV4mDp/Build/Products/Release/Oigo.app`.
 
 That temporary artifact was removed after the probe, and the native UI probe remained `INCONCLUSIVE` because no usable AX or screenshot surface was available.
 
