@@ -39,9 +39,9 @@ public final class AudioRecordingCallbackGate: @unchecked Sendable {
         return true
     }
 
-    public func performExclusively<T>(_ action: () -> T) -> T {
+    public func performExclusively<T>(_ action: () throws -> T) rethrows -> T {
         lock.lock()
         defer { lock.unlock() }
-        return action()
+        return try action()
     }
 }

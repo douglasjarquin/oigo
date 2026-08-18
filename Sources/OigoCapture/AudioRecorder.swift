@@ -717,77 +717,82 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         lock.unlock()
 
         do {
-            inputNode.installTap(onBus: 0, bufferSize: 1_024, format: nil) { [weak self] buffer, _ in
-                self?.handle(buffer, generation: recordingGeneration)
-            }
-            let observer = NotificationCenter.default.addObserver(
-                forName: Notification.Name("AVAudioEngineConfigurationChangeNotification"),
-                object: engine,
-                queue: nil
-            ) { [weak self] _ in
-                self?.handleInterruption(
-                    "audio input configuration changed",
-                    generation: recordingGeneration
-                )
-            }
-            lock.lock()
-            configurationObserver = observer
-            lock.unlock()
-            deviceMonitor.start { [weak self] devices in
-                self?.handleDeviceChange(devices, generation: recordingGeneration)
-            }
-            let workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
-            let lifecycleNames = [
-                NSWorkspace.willSleepNotification,
-                NSWorkspace.sessionDidResignActiveNotification
-            ]
-            let lifecycleObservers = lifecycleNames.map { name in
-                workspaceNotificationCenter.addObserver(
-                    forName: name,
-                    object: nil,
+            let interruptedDuringStartup = try callbackDeliveryGate.performExclusively {
+                inputNode.installTap(onBus: 0, bufferSize: 1_024, format: nil) { [weak self] buffer, _ in
+                    self?.handle(buffer, generation: recordingGeneration)
+                }
+                let observer = NotificationCenter.default.addObserver(
+                    forName: Notification.Name("AVAudioEngineConfigurationChangeNotification"),
+                    object: engine,
                     queue: nil
-                ) { [weak self] notification in
-                    let reason = notification.name.rawValue.contains("Sleep")
-                        ? "system sleep interrupted recording"
-                        : "screen lock interrupted recording"
-                    self?.handleInterruption(reason, generation: recordingGeneration)
+                ) { [weak self] _ in
+                    self?.handleInterruption(
+                        "audio input configuration changed",
+                        generation: recordingGeneration
+                    )
                 }
-            }
-            lock.lock()
-            self.lifecycleObservers = lifecycleObservers
-            lock.unlock()
-            instrumentation.mark(.audioEngineStartBegin)
-            defer { instrumentation.mark(.audioEngineStartEnd) }
-            engine.prepare()
-            try engine.start()
-            lock.lock()
-            let startupInterruption = pendingInterruptionReason
-            pendingInterruptionReason = nil
-            let startupIsCurrent = starting
-                && recordingFence.accepts(recordingGeneration)
-                && startupInterruption == nil
-            if startupIsCurrent {
-                starting = false
-                recording = true
-            }
-            lock.unlock()
-            if let startupInterruption {
                 lock.lock()
-                let callback: (@Sendable (String) -> Void)? = onInterruption
+                configurationObserver = observer
                 lock.unlock()
-                guard let resources = beginTeardown(expectedGeneration: recordingGeneration) else {
-                    return
+                deviceMonitor.start { [weak self] devices in
+                    self?.handleDeviceChange(devices, generation: recordingGeneration)
                 }
-                finish(resources) {
-                    callback?(startupInterruption)
+                let workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
+                let lifecycleNames = [
+                    NSWorkspace.willSleepNotification,
+                    NSWorkspace.sessionDidResignActiveNotification
+                ]
+                let lifecycleObservers = lifecycleNames.map { name in
+                    workspaceNotificationCenter.addObserver(
+                        forName: name,
+                        object: nil,
+                        queue: nil
+                    ) { [weak self] notification in
+                        let reason = notification.name.rawValue.contains("Sleep")
+                            ? "system sleep interrupted recording"
+                            : "screen lock interrupted recording"
+                        self?.handleInterruption(reason, generation: recordingGeneration)
+                    }
                 }
-                startCompleted = true
-                return
-            }
-            guard startupIsCurrent else {
-                throw AudioRecorderError.inputDeviceUnavailable
+                lock.lock()
+                self.lifecycleObservers = lifecycleObservers
+                lock.unlock()
+                instrumentation.mark(.audioEngineStartBegin)
+                defer { instrumentation.mark(.audioEngineStartEnd) }
+                engine.prepare()
+                try engine.start()
+                lock.lock()
+                let startupInterruption = pendingInterruptionReason
+                pendingInterruptionReason = nil
+                let startupIsCurrent = starting
+                    && recordingFence.accepts(recordingGeneration)
+                    && startupInterruption == nil
+                if startupIsCurrent {
+                    starting = false
+                    recording = true
+                }
+                lock.unlock()
+                if let startupInterruption {
+                    lock.lock()
+                    let callback: (@Sendable (String) -> Void)? = onInterruption
+                    lock.unlock()
+                    guard let resources = beginTeardown(expectedGeneration: recordingGeneration) else {
+                        return true
+                    }
+                    finish(resources) {
+                        callback?(startupInterruption)
+                    }
+                    return true
+                }
+                guard startupIsCurrent else {
+                    throw AudioRecorderError.inputDeviceUnavailable
+                }
+                return false
             }
             startCompleted = true
+            if interruptedDuringStartup {
+                return
+            }
         } catch {
             cancel()
             throw AudioRecorderError.engineStartFailed(String(describing: error))
