@@ -469,6 +469,7 @@ public final class SessionStore: @unchecked Sendable {
         decoder.dateDecodingStrategy = .iso8601
         self.decoder = decoder
 
+        try verifyWriteCapability()
     }
 
     @_spi(Testing)
@@ -493,6 +494,7 @@ public final class SessionStore: @unchecked Sendable {
         decoder.dateDecodingStrategy = .iso8601
         self.decoder = decoder
 
+        try verifyWriteCapability()
     }
 
     deinit {
@@ -2176,6 +2178,65 @@ public final class SessionStore: @unchecked Sendable {
                 category: .rootIdentityViolation,
                 isFatal: true
             )
+        }
+    }
+
+    private func verifyWriteCapability() throws {
+        try ensureRootPathIdentity()
+        if faultInjector?.consume(.diskWriteFailure) == true {
+            throw DurableSessionBootstrapFailure(
+                category: .insufficientSpaceOrWriteFailure,
+                isFatal: false
+            )
+        }
+
+        let probeDirectoryName = ".storage-health-" + UUID().uuidString
+        let probeURL = rootDirectory.appendingPathComponent(
+            probeDirectoryName,
+            isDirectory: true
+        )
+        let created = probeDirectoryName.withCString { name in
+            Darwin.mkdirat(rootDirectoryFD, name, mode_t(0o700))
+        }
+        guard created == 0 else {
+            throw storageFailure(for: errno)
+        }
+
+        var probeFD: Int32 = -1
+        let probeFileName = "session.json"
+        defer {
+            if probeFD >= 0 {
+                _ = probeFileName.withCString { name in
+                    Darwin.unlinkat(probeFD, name, 0)
+                }
+                _ = Darwin.close(probeFD)
+            }
+            _ = probeDirectoryName.withCString { name in
+                Darwin.unlinkat(rootDirectoryFD, name, AT_REMOVEDIR)
+            }
+        }
+
+        let flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
+        probeFD = probeDirectoryName.withCString { name in
+            Darwin.openat(rootDirectoryFD, name, flags)
+        }
+        guard probeFD >= 0 else {
+            throw storageFailure(for: errno)
+        }
+
+        try atomicWrite(
+            Data("{}".utf8),
+            named: probeFileName,
+            in: probeFD,
+            at: probeURL.appendingPathComponent(probeFileName)
+        )
+        try removeEntry(
+            named: probeFileName,
+            in: probeFD,
+            at: probeURL.appendingPathComponent(probeFileName)
+        )
+        guard Darwin.fsync(probeFD) == 0 else {
+            throw storageFailure(for: errno)
         }
     }
 

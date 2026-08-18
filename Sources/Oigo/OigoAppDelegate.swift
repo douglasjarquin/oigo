@@ -593,36 +593,32 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         do {
             switch coordinator.state {
             case .idle, .complete, .failed, .cancelled, .interrupted:
-                guard storageCapability.health.isReady,
-                      let store = sessionStore else {
-                    throw DurableSessionAccessError.storageUnavailable(
-                        storageCapability.health.failureCategory
+                insertionDisplayStatus = nil
+                lastSession = try await storageCapability.withHealthyStore { [self] store in
+                    let persistedSession = try store.createSession()
+                    pendingSessionBoundary = persistedSession
+                    lastSession = persistedSession
+                    try await ensureMicrophonePermission()
+                    try Task.checkCancellation()
+                    targetSnapshot = insertion.captureTarget()
+                    let format = try recorder.captureFormat()
+                    try Task.checkCancellation()
+                    let service = transcriptionService()
+                    recordingStartedAt = Date()
+                    previewThrottle = OigoHUDPreviewThrottle()
+                    return try await coordinator.startPersistedRecordingWithTranscription(
+                        persistedSession,
+                        using: recorder,
+                        store: store,
+                        transcription: service,
+                        format: format,
+                        onUpdate: { [weak self] update in
+                            Task { @MainActor [weak self] in
+                                self?.applyTranscriptionUpdate(update)
+                            }
+                        }
                     )
                 }
-                insertionDisplayStatus = nil
-                let persistedSession = try store.createSession()
-                pendingSessionBoundary = persistedSession
-                lastSession = persistedSession
-                try await ensureMicrophonePermission()
-                try Task.checkCancellation()
-                targetSnapshot = insertion.captureTarget()
-                let format = try recorder.captureFormat()
-                try Task.checkCancellation()
-                let service = transcriptionService()
-                recordingStartedAt = Date()
-                previewThrottle = OigoHUDPreviewThrottle()
-                lastSession = try await coordinator.startPersistedRecordingWithTranscription(
-                    persistedSession,
-                    using: recorder,
-                    store: store,
-                    transcription: service,
-                    format: format,
-                    onUpdate: { [weak self] update in
-                        Task { @MainActor [weak self] in
-                            self?.applyTranscriptionUpdate(update)
-                        }
-                    }
-                )
                 pendingSessionBoundary = nil
             case .recording:
                 guard storageCapability.health.isReady else {

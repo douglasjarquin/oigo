@@ -154,6 +154,22 @@ public protocol DurableSessionBootstrapping: Sendable {
     func bootstrap() async throws -> DurableSessionBootstrapResult
 }
 
+private final class DurableSessionAttemptWaiter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+
+    func resume(_ continuation: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        guard !didResume else {
+            lock.unlock()
+            return
+        }
+        didResume = true
+        lock.unlock()
+        continuation.resume()
+    }
+}
+
 public struct DurableSessionBootstrapper: DurableSessionBootstrapping, @unchecked Sendable {
     public typealias RootPreparation = () throws -> URL
     public typealias StoreFactory = (URL) throws -> SessionStore
@@ -456,6 +472,8 @@ public struct DurableSessionBootstrapper: DurableSessionBootstrapping, @unchecke
 
 @MainActor
 public final class DurableSessionCapability {
+    private static let shutdownWaitNanoseconds: UInt64 = 2_000_000_000
+
     public private(set) var health: DurableSessionHealth = .checking
     public private(set) var store: SessionStore?
     public private(set) var history: [SessionHistoryEntry] = []
@@ -508,9 +526,25 @@ public final class DurableSessionCapability {
         if task == nil {
             pendingShutdownAttempts.removeAll(keepingCapacity: false)
         }
-        await task?.value
+        if let task {
+            await waitForAttempt(task)
+        }
         for attempt in pendingAttempts {
-            await attempt.value
+            await waitForAttempt(attempt)
+        }
+    }
+
+    private func waitForAttempt(_ attempt: Task<Void, Never>) async {
+        let waiter = DurableSessionAttemptWaiter()
+        await withCheckedContinuation { continuation in
+            Task.detached {
+                await attempt.value
+                waiter.resume(continuation)
+            }
+            Task.detached {
+                try? await Task.sleep(nanoseconds: Self.shutdownWaitNanoseconds)
+                waiter.resume(continuation)
+            }
         }
     }
 

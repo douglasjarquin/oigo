@@ -10,10 +10,12 @@ struct OigoIssue86ContractTests {
             try await storageGateDoesNotReachDictationDependenciesWhenUnhealthy()
             try await healthyStorageExposesThePersistedStore()
             try await failureMatrixExposesStableCategories()
+            try await bootstrapRejectsWriteFailureBeforeReady()
             try rootPathSwapIsRejectedWithoutTouchingThePinnedRoot()
             try malformedChildrenDoNotPoisonValidHistory()
             try await retryCoalescesAndFencesStaleCompletions()
             try await shutdownCancelsBootstrapBeforeRecoveryContinues()
+            try await shutdownWaitIsBounded()
             try await relaunchPreservesExistingSessionData()
             print("GREEN: all issue #86 contract scenarios")
         } catch {
@@ -323,6 +325,36 @@ struct OigoIssue86ContractTests {
         }
     }
 
+    private static func bootstrapRejectsWriteFailureBeforeReady() async throws {
+        let fileManager = FileManager.default
+        let root = symlinkSafeTemporaryDirectory(fileManager)
+            .appendingPathComponent("oigo-issue86-write-probe-" + UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+
+        let injector = DictationFaultInjector()
+        injector.arm(.diskWriteFailure)
+        let failure = try await bootstrapFailure(
+            using: DurableSessionBootstrapper(
+                rootPreparation: { root },
+                storeFactory: { try SessionStore(rootDirectory: $0, faultInjector: injector) },
+                recovery: { _ in 0 },
+                historyEnumeration: { _ in
+                    SessionHistoryEnumeration(entries: [], malformedSessionCount: 0)
+                }
+            )
+        )
+        guard failure.category == .insufficientSpaceOrWriteFailure else {
+            throw ContractFailure.bootstrapWriteFailureWasNotClassified
+        }
+        guard try fileManager.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil,
+            options: []
+        ).isEmpty else {
+            throw ContractFailure.bootstrapWriteProbeLeftArtifact
+        }
+    }
+
     private static func retryCoalescesAndFencesStaleCompletions() async throws {
         let fileManager = FileManager.default
         let firstRoot = fileManager.temporaryDirectory
@@ -483,6 +515,19 @@ struct OigoIssue86ContractTests {
         }
     }
 
+    private static func shutdownWaitIsBounded() async throws {
+        let capability = DurableSessionCapability(
+            bootstrapper: NeverEndingBootstrapper()
+        )
+        capability.start()
+        let startedAt = Date()
+        capability.shutdown()
+        await capability.waitForCurrentAttempt()
+        guard Date().timeIntervalSince(startedAt) < 2.5 else {
+            throw ContractFailure.shutdownWaitWasNotBounded
+        }
+    }
+
     private static func bootstrapFailure(
         using bootstrapper: any DurableSessionBootstrapping
     ) async throws -> DurableSessionBootstrapFailure {
@@ -514,6 +559,14 @@ private actor FailingBootstrapper: DurableSessionBootstrapping {
 
     func diagnosticsExport() -> String? {
         failure.diagnosticsExport()
+    }
+}
+
+private actor NeverEndingBootstrapper: DurableSessionBootstrapping {
+    func bootstrap() async throws -> DurableSessionBootstrapResult {
+        while true {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
     }
 }
 
@@ -668,6 +721,8 @@ private enum ContractFailure: Error, CustomStringConvertible {
     case rootSwapWasNotRejected
     case rootSwapTouchedPinnedRoot
     case rootSwapTouchedAlternateRoot
+    case bootstrapWriteFailureWasNotClassified
+    case bootstrapWriteProbeLeftArtifact
     case historyFailureWasNotClassified
     case malformedChildIsolationFailed
     case malformedCountWasNotReported
@@ -678,6 +733,7 @@ private enum ContractFailure: Error, CustomStringConvertible {
     case staleRetryOverwroteLatestResult
     case retryDidNotRecover
     case bootstrapRecoveryOutlivedShutdown
+    case shutdownWaitWasNotBounded
     case relaunchLostExistingHistory
     case relaunchDidNotRecoverUnfinishedSession
     case relaunchResetExistingSession
@@ -716,6 +772,10 @@ private enum ContractFailure: Error, CustomStringConvertible {
             "a rejected root path swap touched the pinned root"
         case .rootSwapTouchedAlternateRoot:
             "a rejected root path swap touched the alternate root"
+        case .bootstrapWriteFailureWasNotClassified:
+            "bootstrap write failure was not classified"
+        case .bootstrapWriteProbeLeftArtifact:
+            "bootstrap write probe left an artifact"
         case .historyFailureWasNotClassified:
             "history metadata failure was not classified as a metadata or recovery failure"
         case .malformedChildIsolationFailed:
@@ -736,6 +796,8 @@ private enum ContractFailure: Error, CustomStringConvertible {
             "explicit storage retry did not recover"
         case .bootstrapRecoveryOutlivedShutdown:
             "bootstrap recovery continued after shutdown cancellation"
+        case .shutdownWaitWasNotBounded:
+            "shutdown waited beyond its bounded storage policy"
         case .relaunchLostExistingHistory:
             "relaunch did not preserve existing history"
         case .relaunchDidNotRecoverUnfinishedSession:
