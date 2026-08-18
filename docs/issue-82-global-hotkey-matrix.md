@@ -38,11 +38,11 @@ The former shipped `49/0x900` value is retained only as an exact migration fixtu
 
 | Scenario | Result | Evidence | Exact limitation |
 | --- | --- | --- | --- |
-| Exact Release `Oigo.app` bundle build | PASS | `.omo/evidence/issue-82/task-8-xcode-release-build-final.log` | Xcode 26.6 on macOS 26.6.1 produced the exact unsigned Release bundle. |
-| macOS 26+ exact-bundle launch | PASS | `.omo/evidence/issue-82/task-8-native-launch-final.log` | The exact bundle launched with isolated defaults and was closed by the harness. |
-| Separate global key-down and key-up with another app frontmost | INCONCLUSIVE | `.omo/evidence/issue-82/task-8-native-prerequisites-final.log` | Computer Use Accessibility and Screen Recording permissions remained unavailable, so OS-level edge automation was not run. |
-| Microphone, Speech, and Input Monitoring acceptance | INCONCLUSIVE | `.omo/evidence/issue-82/task-8-native-prerequisites-final.log` | Permission-backed live capture was not attempted and no TCC or Accessibility state was changed. |
-| Focus preservation through recording and insertion | INCONCLUSIVE | `.omo/evidence/issue-82/task-8-native-prerequisites-final.log` | TextEdit was launched as a disposable frontmost target, but the exact bundle could not be driven through global edges without native permissions. |
+| Exact Release `Oigo.app` bundle build | PASS | `.omo/evidence/issue-82/task-12-xcode-release-build-final.log` | Xcode 26.6 on macOS 26.6.1 produced the exact unsigned Release bundle. |
+| macOS 26+ exact-bundle launch | PASS | `.omo/evidence/issue-82/task-12-native-launch-final.log` | The exact bundle launched with isolated defaults and was closed by the harness. |
+| Separate global key-down and key-up with another app frontmost | INCONCLUSIVE | `.omo/evidence/issue-82/task-12-native-prerequisites-final.log` | Computer Use Accessibility and Screen Recording permissions remained unavailable, so OS-level edge automation was not run. |
+| Microphone, Speech, and Input Monitoring acceptance | INCONCLUSIVE | `.omo/evidence/issue-82/task-12-native-prerequisites-final.log` | Permission-backed live capture was not attempted and no TCC or Accessibility state was changed. |
+| Focus preservation through recording and insertion | INCONCLUSIVE | `.omo/evidence/issue-82/task-12-native-prerequisites-final.log` | TextEdit was launched as a disposable frontmost target, but the exact bundle could not be driven through global edges without native permissions. |
 
 Unavailable native rows are not substituted with SwiftPM, direct callback, unsigned-binary, or frontmost-Oigo evidence.
 
