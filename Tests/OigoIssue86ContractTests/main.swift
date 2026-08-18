@@ -432,7 +432,7 @@ struct OigoIssue86ContractTests {
         capability.shutdown()
         gate.release()
         await gate.waitUntilObserved()
-        await capability.waitForShutdown()
+        await capability.waitForCurrentAttempt()
         guard gate.wasCancelled else {
             throw ContractFailure.bootstrapRecoveryOutlivedShutdown
         }

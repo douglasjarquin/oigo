@@ -91,6 +91,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
         unregisterShortcut()
+        let storageWasChecking = storageCapability.health == .checking
         storageCapability.shutdown()
         removeWorkspaceInterruptionObservers()
         statusSurface.hide()
@@ -99,7 +100,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         let activeCleanAgainTask = cleanAgainTask
         let activeRetryTask = retryTask
         let activeWorkspaceInterruptionTask = workspaceInterruptionTask
-        let activeStorageShutdown = storageCapability.hasPendingShutdown
         activeToggleTask?.cancel()
         activeCleanAgainTask?.cancel()
         if coordinator.hasActiveWork
@@ -107,7 +107,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             || activeCleanAgainTask != nil
             || activeRetryTask != nil
             || activeWorkspaceInterruptionTask != nil
-            || activeStorageShutdown {
+            || storageWasChecking {
             Task { @MainActor [weak self] in
                 if let activeToggleTask {
                     await activeToggleTask.value
@@ -126,7 +126,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 if let activeWorkspaceInterruptionTask {
                     await activeWorkspaceInterruptionTask.value
                 }
-                await self?.storageCapability.waitForShutdown()
+                await self?.storageCapability.waitForCurrentAttempt()
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
             return .terminateLater

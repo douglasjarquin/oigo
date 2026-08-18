@@ -489,18 +489,6 @@ public final class DurableSessionCapability {
         currentAttempt = nil
     }
 
-    public var hasPendingShutdown: Bool {
-        !pendingShutdownAttempts.isEmpty
-    }
-
-    public func waitForShutdown() async {
-        let attempts = pendingShutdownAttempts
-        pendingShutdownAttempts.removeAll(keepingCapacity: false)
-        for attempt in attempts {
-            await attempt.value
-        }
-    }
-
     public func markUnhealthy(
         _ category: DurableSessionFailureCategory,
         fatal: Bool = false
@@ -516,7 +504,14 @@ public final class DurableSessionCapability {
 
     public func waitForCurrentAttempt() async {
         let task = currentAttempt
+        let pendingAttempts = task == nil ? pendingShutdownAttempts : []
+        if task == nil {
+            pendingShutdownAttempts.removeAll(keepingCapacity: false)
+        }
         await task?.value
+        for attempt in pendingAttempts {
+            await attempt.value
+        }
     }
 
     public func withHealthyStore<T>(
