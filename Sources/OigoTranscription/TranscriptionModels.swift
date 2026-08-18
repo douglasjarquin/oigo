@@ -31,12 +31,20 @@ public enum TranscriptionError: Error, Equatable, Sendable, CustomStringConverti
     case recognitionUnavailable(String)
     case malformedAudio(URL, String)
     case cancelled
+    case timedOut(TranscriptionStage)
     case analysisFailed(String)
     case persistenceFailed(String)
     case notRunning
     case alreadyRunning
     case invalidCaptureFormat
     case invalidSessionState(DictationSessionState)
+
+    public var isTimedOut: Bool {
+        if case .timedOut = self {
+            return true
+        }
+        return false
+    }
 
     public var description: String {
         switch self {
@@ -54,6 +62,8 @@ public enum TranscriptionError: Error, Equatable, Sendable, CustomStringConverti
             return "saved audio is malformed at " + url.path + ": " + reason
         case .cancelled:
             return "speech transcription was cancelled"
+        case .timedOut(let stage):
+            return "speech transcription timed out during " + stage.rawValue
         case .analysisFailed(let reason):
             return "speech analysis failed: " + reason
         case .persistenceFailed(let reason):

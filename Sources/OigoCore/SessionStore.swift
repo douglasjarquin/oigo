@@ -75,6 +75,7 @@ public enum DictationFailureCode: String, Codable, CaseIterable, Equatable, Send
     case audioWriteFailed = "audio_write_failed"
     case microphonePermissionRevoked = "microphone_permission_revoked"
     case transcriptionFailed = "transcription_failed"
+    case transcriptionTimedOut = "transcription_timed_out"
     case cleanupTimedOut = "cleanup_timed_out"
     case targetLost = "target_lost"
     case cancelled
@@ -86,6 +87,15 @@ public enum DictationFailureCode: String, Codable, CaseIterable, Equatable, Send
         interruption: Bool = false
     ) -> DictationFailureCode {
         let normalized = reason.lowercased()
+        let timeoutReason = normalized.contains("timed out")
+            || normalized.contains("timeout")
+            || normalized.contains("deadline")
+        if normalized.contains("cleanup") && timeoutReason {
+            return .cleanupTimedOut
+        }
+        if timeoutReason {
+            return .transcriptionTimedOut
+        }
         if normalized.contains("shutdown") || normalized.contains("quit") {
             return .applicationQuit
         }
@@ -117,10 +127,6 @@ public enum DictationFailureCode: String, Codable, CaseIterable, Equatable, Send
             || normalized.contains("transcrib")
             || normalized.contains("analysis") {
             return .transcriptionFailed
-        }
-        if normalized.contains("cleanup")
-            && (normalized.contains("timeout") || normalized.contains("deadline")) {
-            return .cleanupTimedOut
         }
         if normalized.contains("target") {
             return .targetLost

@@ -52,7 +52,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var cleanAgainTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
     private var workspaceInterruptionTask: Task<Void, Never>?
+    private var workspaceInterruptionOperationID: UUID?
     private var workspaceObservers: [NSObjectProtocol] = []
+    private let lifecycleOperationRegistry = OperationTaskRegistry()
+    private let lifecycleOperationID = UUID()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
@@ -85,28 +88,33 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         let activeWorkspaceInterruptionTask = workspaceInterruptionTask
         activeToggleTask?.cancel()
         activeCleanAgainTask?.cancel()
+        activeRetryTask?.cancel()
+        activeWorkspaceInterruptionTask?.cancel()
         if coordinator.hasActiveWork
             || activeToggleTask != nil
             || activeCleanAgainTask != nil
             || activeRetryTask != nil
             || activeWorkspaceInterruptionTask != nil {
             Task { @MainActor [weak self] in
-                if let activeToggleTask {
-                    await activeToggleTask.value
+                guard let self else {
+                    NSApp.reply(toApplicationShouldTerminate: true)
+                    return
                 }
-                if let activeCleanAgainTask {
-                    await activeCleanAgainTask.value
-                }
-                if self?.coordinator.hasActiveTranscription == true {
-                    await self?.coordinator.shutdownWithTranscription()
-                } else {
-                    await self?.coordinator.shutdownAndWait()
-                }
-                if let activeRetryTask {
-                    await activeRetryTask.value
-                }
-                if let activeWorkspaceInterruptionTask {
-                    await activeWorkspaceInterruptionTask.value
+                _ = try? await BoundedOperation.run(
+                    operationID: self.lifecycleOperationID,
+                    stage: .shutdown,
+                    timeout: TranscriptionTimeoutPolicy.production.budget(for: .shutdown),
+                    registry: self.lifecycleOperationRegistry
+                ) { @MainActor [weak self] in
+                    guard let self else {
+                        return
+                    }
+                    await self.finishApplicationTermination(
+                        activeToggleTask: activeToggleTask,
+                        activeCleanAgainTask: activeCleanAgainTask,
+                        activeRetryTask: activeRetryTask,
+                        activeWorkspaceInterruptionTask: activeWorkspaceInterruptionTask
+                    )
                 }
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
@@ -114,6 +122,59 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         coordinator.shutdown()
         return .terminateNow
+    }
+
+    private func finishApplicationTermination(
+        activeToggleTask: Task<Void, Never>?,
+        activeCleanAgainTask: Task<Void, Never>?,
+        activeRetryTask: Task<Void, Never>?,
+        activeWorkspaceInterruptionTask: Task<Void, Never>?
+    ) async {
+        if let activeToggleTask {
+            _ = try? await BoundedOperation.run(
+                operationID: lifecycleOperationID,
+                stage: .shutdown,
+                timeout: TranscriptionTimeoutPolicy.production.budget(for: .shutdown),
+                registry: lifecycleOperationRegistry
+            ) {
+                await activeToggleTask.value
+            }
+        }
+        if let activeCleanAgainTask {
+            _ = try? await BoundedOperation.run(
+                operationID: lifecycleOperationID,
+                stage: .shutdown,
+                timeout: TranscriptionTimeoutPolicy.production.budget(for: .shutdown),
+                registry: lifecycleOperationRegistry
+            ) {
+                await activeCleanAgainTask.value
+            }
+        }
+        if coordinator.hasActiveTranscription {
+            await coordinator.shutdownWithTranscription()
+        } else {
+            await coordinator.shutdownAndWait()
+        }
+        if let activeRetryTask {
+            _ = try? await BoundedOperation.run(
+                operationID: lifecycleOperationID,
+                stage: .shutdown,
+                timeout: TranscriptionTimeoutPolicy.production.budget(for: .shutdown),
+                registry: lifecycleOperationRegistry
+            ) {
+                await activeRetryTask.value
+            }
+        }
+        if let activeWorkspaceInterruptionTask {
+            _ = try? await BoundedOperation.run(
+                operationID: lifecycleOperationID,
+                stage: .shutdown,
+                timeout: TranscriptionTimeoutPolicy.production.budget(for: .shutdown),
+                registry: lifecycleOperationRegistry
+            ) {
+                await activeWorkspaceInterruptionTask.value
+            }
+        }
     }
 
     @objc private func toggleDictation() {
@@ -429,31 +490,47 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleWorkspaceInterruption(_ reason: String) {
         workspaceInterruptionTask?.cancel()
+        let operationID = UUID()
+        workspaceInterruptionOperationID = operationID
         workspaceInterruptionTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            let activeToggleTask = toggleTask
-            let activeCleanAgainTask = cleanAgainTask
-            let activeRetryTask = retryTask
-            activeToggleTask?.cancel()
-            activeCleanAgainTask?.cancel()
-            activeRetryTask?.cancel()
-            await coordinator.cancelActiveWork(reason: reason)
-            if let activeToggleTask {
-                await activeToggleTask.value
+            _ = try? await BoundedOperation.run(
+                operationID: operationID,
+                stage: .interruption,
+                timeout: TranscriptionTimeoutPolicy.production.budget(for: .interruption),
+                registry: lifecycleOperationRegistry
+            ) { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+                let activeToggleTask = self.toggleTask
+                let activeCleanAgainTask = self.cleanAgainTask
+                let activeRetryTask = self.retryTask
+                activeToggleTask?.cancel()
+                activeCleanAgainTask?.cancel()
+                activeRetryTask?.cancel()
+                await self.coordinator.cancelActiveWork(reason: reason)
+                if let activeToggleTask {
+                    await activeToggleTask.value
+                }
+                if let activeCleanAgainTask {
+                    await activeCleanAgainTask.value
+                }
+                if let activeRetryTask {
+                    await activeRetryTask.value
+                }
+                self.lastSession = self.coordinator.currentSession ?? self.lastSession
+                self.recordingStartedAt = nil
+                self.targetSnapshot = nil
+                self.livePreview = ""
+                self.insertionDisplayStatus = nil
             }
-            if let activeCleanAgainTask {
-                await activeCleanAgainTask.value
+            guard self.workspaceInterruptionOperationID == operationID else {
+                return
             }
-            if let activeRetryTask {
-                await activeRetryTask.value
-            }
-            lastSession = coordinator.currentSession ?? lastSession
-            recordingStartedAt = nil
-            targetSnapshot = nil
-            livePreview = ""
-            insertionDisplayStatus = nil
-            updateSurface()
-            workspaceInterruptionTask = nil
+            self.updateSurface()
+            self.workspaceInterruptionTask = nil
+            self.workspaceInterruptionOperationID = nil
         }
     }
 

@@ -29,6 +29,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     }
 
     private struct Resources {
+        let operationID: UUID
         let analyzer: SpeechAnalyzer
         let inputContinuation: AsyncStream<AnalyzerInput>.Continuation
         let analysisTask: Task<Void, Never>
@@ -39,6 +40,8 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private let configuredLocale: Locale
     private let faultInjector: DictationFaultInjector?
     private let instrumentation: PerformanceInstrumentation
+    private let timeoutPolicy: TranscriptionTimeoutPolicy
+    private let operationRegistry = OperationTaskRegistry()
     private var lifecycle = Lifecycle.idle
     private var startWaiters: [CheckedContinuation<Void, Never>] = []
     private var cancellationRequested = false
@@ -61,25 +64,31 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private var updateHandler: (@Sendable (TranscriptionUpdate) -> Void)?
     private var analysisError: TranscriptionError?
     private var lastError: TranscriptionError?
+    private var operationID: UUID?
+    private var acceptsResults = false
 
     public init(
         locale: Locale = Locale(identifier: "en-US"),
-        instrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
+        instrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation(),
+        timeoutPolicy: TranscriptionTimeoutPolicy = .production
     ) {
         configuredLocale = locale
         faultInjector = nil
         self.instrumentation = instrumentation
+        self.timeoutPolicy = timeoutPolicy
     }
 
     @_spi(Testing)
     public init(
         locale: Locale = Locale(identifier: "en-US"),
         faultInjector: DictationFaultInjector?,
-        instrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
+        instrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation(),
+        timeoutPolicy: TranscriptionTimeoutPolicy = .production
     ) {
         configuredLocale = locale
         self.faultInjector = faultInjector
         self.instrumentation = instrumentation
+        self.timeoutPolicy = timeoutPolicy
     }
 
     @_spi(Testing)
@@ -127,7 +136,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         range: TranscriptionRange,
         text: String
     ) async throws -> TranscriptionSnapshot {
-        guard beginStarting() else {
+        guard let operationID = beginStarting() else {
             throw remember(.alreadyRunning)
         }
 
@@ -138,6 +147,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         }
 
         let gate = TranscriptionStartupGate()
+        let transcriptStore = TranscriptStore()
         let resultTask = Task { [weak self, startupStream = gate.resultStream] in
             for await _ in startupStream {
                 break
@@ -146,7 +156,9 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 range: range,
                 text: text,
                 isFinal: true,
-                persistCanonical: false
+                persistCanonical: false,
+                operationID: operationID,
+                transcriptStore: transcriptStore
             )
         }
         let published = publishStartingState(
@@ -159,7 +171,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             updateHandler: nil,
             resultTask: resultTask,
             analysisTask: nil,
-            transcriptStore: TranscriptStore(),
+            transcriptStore: transcriptStore,
             audioConverter: nil
         )
         guard published else {
@@ -202,6 +214,11 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         lock.lock()
         defer { lock.unlock() }
         return lastError
+    }
+
+    @_spi(Testing)
+    public var activeOwnedOperationCount: Int {
+        operationRegistry.activeCount
     }
 
     public func supportedLocaleIdentifiers() async -> [String] {
@@ -271,7 +288,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             throw remember(.invalidCaptureFormat)
         }
 
-        guard beginStarting() else {
+        guard let operationID = beginStarting() else {
             throw remember(.alreadyRunning)
         }
 
@@ -281,15 +298,27 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         var startupResultTask: Task<Void, Never>?
         var startupAnalysisTask: Task<Void, Never>?
         do {
-            let module = try await installedTranscriber()
+            let module = try await BoundedOperation.run(
+                operationID: operationID,
+                stage: .startup,
+                timeout: timeoutPolicy.budget(for: .startup),
+                registry: operationRegistry
+            ) {
+                try await self.installedTranscriber()
+            }
             try checkCancellationRequested()
+            let audioFormat = try await BoundedOperation.run(
+                operationID: operationID,
+                stage: .startup,
+                timeout: timeoutPolicy.budget(for: .startup),
+                registry: operationRegistry
+            ) {
+                await Self.analyzerAudioFormat(for: format, compatibleWith: module)
+            }
             guard let captureAudioFormat = AVAudioFormat(
                 standardFormatWithSampleRate: format.sampleRate,
                 channels: AVAudioChannelCount(format.channelCount)
-            ), let audioFormat = await Self.analyzerAudioFormat(
-                for: format,
-                compatibleWith: module
-            ), let audioConverter = AVAudioConverter(
+            ), let audioFormat, let audioConverter = AVAudioConverter(
                 from: captureAudioFormat,
                 to: audioFormat
             ) else {
@@ -308,7 +337,14 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             )
             preparedAnalyzer = analyzer
 
-            try await analyzer.prepareToAnalyze(in: audioFormat)
+            try await BoundedOperation.run(
+                operationID: operationID,
+                stage: .startup,
+                timeout: timeoutPolicy.budget(for: .startup),
+                registry: operationRegistry
+            ) {
+                try await analyzer.prepareToAnalyze(in: audioFormat)
+            }
             try checkCancellationRequested()
             do {
                 _ = try store.persistRawText("", for: session)
@@ -316,6 +352,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 throw TranscriptionError.persistenceFailed(String(describing: error))
             }
             let gate = TranscriptionStartupGate()
+            let transcriptStore = TranscriptStore()
             startupGate = gate
             let resultTask = Task { [weak self, module, startupStream = gate.resultStream] in
                 for await _ in startupStream {
@@ -324,7 +361,13 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 do {
                     for try await result in module.results {
                         try Task.checkCancellation()
-                        self?.consume(result)
+                        self?.consume(
+                            result,
+                            operationID: operationID,
+                            transcriptStore: transcriptStore,
+                            session: session,
+                            store: store
+                        )
                     }
                 } catch is CancellationError {
                 } catch {
@@ -355,7 +398,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 updateHandler: onUpdate,
                 resultTask: resultTask,
                 analysisTask: analysisTask,
-                transcriptStore: TranscriptStore(),
+                transcriptStore: transcriptStore,
                 audioConverter: audioConverter
             )
             guard published else {
@@ -370,14 +413,26 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             startupResultTask?.cancel()
             startupAnalysisTask?.cancel()
             if let startupResultTask {
-                _ = await startupResultTask.value
+                _ = await boundedAwait(
+                    startupResultTask,
+                    operationID: operationID,
+                    stage: .cancellation
+                )
             }
             if let startupAnalysisTask {
-                _ = await startupAnalysisTask.value
+                _ = await boundedAwait(
+                    startupAnalysisTask,
+                    operationID: operationID,
+                    stage: .cancellation
+                )
             }
             preparedInputContinuation?.finish()
             if let preparedAnalyzer {
-                await preparedAnalyzer.cancelAndFinishNow()
+                _ = await cancelAnalyzer(
+                    preparedAnalyzer,
+                    operationID: operationID,
+                    stage: .cancellation
+                )
             }
             finishStarting()
             await releaseResources()
@@ -417,14 +472,50 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         resources.inputContinuation.finish()
         var finalError: TranscriptionError?
         do {
-            try await resources.analyzer.finalizeAndFinishThroughEndOfInput()
+            try await BoundedOperation.run(
+                operationID: resources.operationID,
+                stage: .finalization,
+                timeout: timeoutPolicy.budget(for: .finalization),
+                registry: operationRegistry
+            ) {
+                try await resources.analyzer.finalizeAndFinishThroughEndOfInput()
+            }
         } catch {
             finalError = Self.map(error)
             record(error: finalError ?? .analysisFailed(String(describing: error)))
+            invalidateOperation()
+            _ = await cancelAnalyzer(
+                resources.analyzer,
+                operationID: resources.operationID,
+                stage: .cancellation
+            )
         }
-        _ = await resources.analysisTask.value
-        _ = await resources.resultTask.value
-        await finishPreviewTask()
+        if !(await boundedAwait(
+            resources.analysisTask,
+            operationID: resources.operationID,
+            stage: .finalization
+        )) {
+            finalError = finalError ?? .timedOut(.finalization)
+            record(error: finalError ?? .timedOut(.finalization))
+            invalidateOperation()
+        }
+        if !(await boundedAwait(
+            resources.resultTask,
+            operationID: resources.operationID,
+            stage: .finalization
+        )) {
+            finalError = finalError ?? .timedOut(.finalization)
+            record(error: finalError ?? .timedOut(.finalization))
+            invalidateOperation()
+        }
+        if !(await finishPreviewTask(
+            operationID: resources.operationID,
+            stage: .finalization
+        )) {
+            finalError = finalError ?? .timedOut(.finalization)
+            record(error: finalError ?? .timedOut(.finalization))
+            invalidateOperation()
+        }
 
         if finalError == nil {
             finalError = currentAnalysisError()
@@ -445,7 +536,9 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             finalizedText: finalizedText,
             rawTextByteCount: rawTextByteCount
         )
-        instrumentation.mark(.transcriptionFinalized)
+        if finalError == nil {
+            instrumentation.mark(.transcriptionFinalized)
+        }
         await releaseResources()
         if let finalError {
             throw finalError
@@ -454,19 +547,29 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     }
 
     public func cancel() async throws -> TranscriptionResult? {
-        let startingResources: (SpeechAnalyzer?, Task<Void, Never>?)? = withLock {
-            guard lifecycle == .starting else {
+        let startingResources: (UUID, SpeechAnalyzer?, Task<Void, Never>?, Task<Void, Never>?)? = withLock {
+            guard lifecycle == .starting, let operationID else {
                 return nil
             }
             cancellationRequested = true
-            return (analyzer, resultTask)
+            acceptsResults = false
+            return (operationID, analyzer, resultTask, analysisTask)
         }
         if let startingResources {
-            startingResources.1?.cancel()
-            if let analyzer = startingResources.0 {
-                await analyzer.cancelAndFinishNow()
+            startingResources.2?.cancel()
+            startingResources.3?.cancel()
+            if let analyzer = startingResources.1 {
+                _ = await cancelAnalyzer(
+                    analyzer,
+                    operationID: startingResources.0,
+                    stage: .cancellation
+                )
             }
-            await waitForStartToFinish()
+            _ = await boundedWaitForStartToFinish(
+                operationID: startingResources.0,
+                stage: .cancellation
+            )
+            invalidateOperation()
             return nil
         }
         guard let resources = takeResources() else {
@@ -476,10 +579,35 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         resources.inputContinuation.finish()
         resources.analysisTask.cancel()
         resources.resultTask.cancel()
-        await resources.analyzer.cancelAndFinishNow()
-        _ = await resources.analysisTask.value
-        _ = await resources.resultTask.value
-        await finishPreviewTask()
+        invalidateOperation()
+        var cancellationError: TranscriptionError?
+        if !(await cancelAnalyzer(
+            resources.analyzer,
+            operationID: resources.operationID,
+            stage: .cancellation
+        )) {
+            cancellationError = .timedOut(.cancellation)
+        }
+        if !(await boundedAwait(
+            resources.analysisTask,
+            operationID: resources.operationID,
+            stage: .cancellation
+        )) {
+            cancellationError = cancellationError ?? .timedOut(.cancellation)
+        }
+        if !(await boundedAwait(
+            resources.resultTask,
+            operationID: resources.operationID,
+            stage: .cancellation
+        )) {
+            cancellationError = cancellationError ?? .timedOut(.cancellation)
+        }
+        if !(await finishPreviewTask(
+            operationID: resources.operationID,
+            stage: .cancellation
+        )) {
+            cancellationError = cancellationError ?? .timedOut(.cancellation)
+        }
 
         let persisted: (text: String, rawTextByteCount: Int64)
         do {
@@ -493,6 +621,9 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             rawTextByteCount: persisted.rawTextByteCount
         )
         await releaseResources()
+        if let cancellationError {
+            throw cancellationError
+        }
         return result
     }
 
@@ -512,7 +643,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         store: SessionStore,
         liveFailure: Error = TranscriptionError.analysisFailed("live recognition failed")
     ) async throws -> TranscriptionResult {
-        guard beginStarting() else {
+        guard let operationID = beginStarting() else {
             throw remember(.alreadyRunning)
         }
         defer {
@@ -525,7 +656,14 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         }
 
         let url = session.audioURL
-        let module = try await installedTranscriber()
+        let module = try await BoundedOperation.run(
+            operationID: operationID,
+            stage: .retry,
+            timeout: timeoutPolicy.budget(for: .retry),
+            registry: operationRegistry
+        ) {
+            try await self.installedTranscriber()
+        }
         try checkCancellationRequested()
         let securedAudioFile: SecuredAudioFile
         do {
@@ -557,19 +695,30 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
 
         var createdAnalyzer: SpeechAnalyzer?
         do {
-            createdAnalyzer = try await SpeechAnalyzer(
-                inputAudioFile: audioFile,
-                modules: [module],
-                options: SpeechAnalyzer.Options(
-                    priority: .userInitiated,
-                    modelRetention: .whileInUse
-                ),
-                finishAfterFile: true
-            )
+            createdAnalyzer = try await BoundedOperation.run(
+                operationID: operationID,
+                stage: .retry,
+                timeout: timeoutPolicy.budget(for: .retry),
+                registry: operationRegistry
+            ) {
+                try await SpeechAnalyzer(
+                    inputAudioFile: audioFile,
+                    modules: [module],
+                    options: SpeechAnalyzer.Options(
+                        priority: .userInitiated,
+                        modelRetention: .whileInUse
+                    ),
+                    finishAfterFile: true
+                )
+            }
             try checkCancellationRequested()
         } catch {
             if let createdAnalyzer {
-                await createdAnalyzer.cancelAndFinishNow()
+                _ = await cancelAnalyzer(
+                    createdAnalyzer,
+                    operationID: operationID,
+                    stage: .cancellation
+                )
             }
             await SpeechModels.endRetention()
             throw remember(Self.map(error))
@@ -584,6 +733,9 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             do {
                 for try await result in module.results {
                     try Task.checkCancellation()
+                    guard self?.isCurrentOperation(operationID) == true else {
+                        continue
+                    }
                     let ingested = transcriptStore.ingestAndReport(result)
                     if let finalization = ingested.finalization {
                         try Self.applyStagedFinalization(finalization, staging: staging, for: session, store: store)
@@ -606,37 +758,84 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             sessionStore = store
             self.transcriptStore = transcriptStore
             analysisError = nil
+            acceptsResults = !cancellationRequested
             return !cancellationRequested
         }
         guard published else {
             resultTask.cancel()
-            await analyzer.cancelAndFinishNow()
-            _ = await resultTask.value
+            _ = await cancelAnalyzer(
+                analyzer,
+                operationID: operationID,
+                stage: .cancellation
+            )
+            _ = await boundedAwait(
+                resultTask,
+                operationID: operationID,
+                stage: .cancellation
+            )
             await SpeechModels.endRetention()
             throw remember(.cancelled)
         }
 
         do {
             try Task.checkCancellation()
-            try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+            try await BoundedOperation.run(
+                operationID: operationID,
+                stage: .retry,
+                timeout: timeoutPolicy.budget(for: .retry),
+                registry: operationRegistry
+            ) {
+                try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+            }
             try checkCancellationRequested()
-            try await analyzer.finalizeAndFinishThroughEndOfInput()
+            try await BoundedOperation.run(
+                operationID: operationID,
+                stage: .retry,
+                timeout: timeoutPolicy.budget(for: .retry),
+                registry: operationRegistry
+            ) {
+                try await analyzer.finalizeAndFinishThroughEndOfInput()
+            }
             try checkCancellationRequested()
-            _ = await resultTask.value
+            guard await boundedAwait(
+                resultTask,
+                operationID: operationID,
+                stage: .retry
+            ) else {
+                throw TranscriptionError.timedOut(.retry)
+            }
             if let analysisError = currentAnalysisError() {
                 throw analysisError
             }
             try checkCancellationRequested()
         } catch is CancellationError {
             resultTask.cancel()
-            await analyzer.cancelAndFinishNow()
-            _ = await resultTask.value
+            invalidateOperation()
+            _ = await cancelAnalyzer(
+                analyzer,
+                operationID: operationID,
+                stage: .cancellation
+            )
+            _ = await boundedAwait(
+                resultTask,
+                operationID: operationID,
+                stage: .cancellation
+            )
             await SpeechModels.endRetention()
             throw remember(.cancelled)
         } catch {
             resultTask.cancel()
-            await analyzer.cancelAndFinishNow()
-            _ = await resultTask.value
+            invalidateOperation()
+            _ = await cancelAnalyzer(
+                analyzer,
+                operationID: operationID,
+                stage: .cancellation
+            )
+            _ = await boundedAwait(
+                resultTask,
+                operationID: operationID,
+                stage: .cancellation
+            )
             await SpeechModels.endRetention()
             throw remember(Self.map(error))
         }
@@ -722,15 +921,18 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         lock.unlock()
     }
 
-    private func beginStarting() -> Bool {
+    private func beginStarting() -> UUID? {
         withLock {
-            guard lifecycle == .idle else {
-                return false
+            guard lifecycle == .idle, operationRegistry.activeCount == 0 else {
+                return nil
             }
+            let operationID = UUID()
             lifecycle = .starting
             cancellationRequested = false
             firstVolatileResultReported = false
-            return true
+            self.operationID = operationID
+            acceptsResults = false
+            return operationID
         }
     }
 
@@ -739,6 +941,8 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             if lifecycle == .starting {
                 lifecycle = .idle
             }
+            acceptsResults = false
+            operationID = nil
             cancellationRequested = false
         }
         resumeStartWaiters()
@@ -780,6 +984,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         lock.lock()
         defer { lock.unlock() }
         guard lifecycle == .running,
+              let operationID,
               let analyzer,
               let inputContinuation,
               let analysisTask,
@@ -792,6 +997,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         self.analysisTask = nil
         self.resultTask = nil
         return Resources(
+            operationID: operationID,
             analyzer: analyzer,
             inputContinuation: inputContinuation,
             analysisTask: analysisTask,
@@ -814,9 +1020,12 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             audioConverter = nil
             updateHandler = nil
             analysisError = nil
+            acceptsResults = false
+            operationID = nil
             cancellationRequested = false
             lifecycle = .idle
         }
+        resumeStartWaiters()
         await SpeechModels.endRetention()
         instrumentation.mark(.resourcesReleased)
     }
@@ -829,21 +1038,104 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             session = nil
             sessionStore = nil
             analysisError = nil
+            acceptsResults = false
+            operationID = nil
         }
     }
 
-    private func finishPreviewTask() async {
+    private func finishPreviewTask(
+        operationID: UUID,
+        stage: TranscriptionStage
+    ) async -> Bool {
         let previewTask = withLock {
             let task = self.previewTask
             self.previewTask = nil
             pendingPreview = nil
             return task
         }
-        previewTask?.cancel()
-        _ = await previewTask?.value
+        guard let previewTask else {
+            return true
+        }
+        previewTask.cancel()
+        return await boundedAwait(
+            previewTask,
+            operationID: operationID,
+            stage: stage
+        )
     }
 
-    private func consume(_ result: DictationTranscriber.Result) {
+    private func boundedAwait(
+        _ task: Task<Void, Never>,
+        operationID: UUID,
+        stage: TranscriptionStage
+    ) async -> Bool {
+        do {
+            _ = try await BoundedOperation.run(
+                operationID: operationID,
+                stage: stage,
+                timeout: timeoutPolicy.budget(for: stage),
+                registry: operationRegistry
+            ) {
+                await task.value
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func boundedWaitForStartToFinish(
+        operationID: UUID,
+        stage: TranscriptionStage
+    ) async -> Bool {
+        do {
+            _ = try await BoundedOperation.run(
+                operationID: operationID,
+                stage: stage,
+                timeout: timeoutPolicy.budget(for: stage),
+                registry: operationRegistry
+            ) {
+                await self.waitForStartToFinish()
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func cancelAnalyzer(
+        _ analyzer: SpeechAnalyzer,
+        operationID: UUID,
+        stage: TranscriptionStage
+    ) async -> Bool {
+        do {
+            _ = try await BoundedOperation.run(
+                operationID: operationID,
+                stage: stage,
+                timeout: timeoutPolicy.budget(for: stage),
+                registry: operationRegistry
+            ) {
+                await analyzer.cancelAndFinishNow()
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func invalidateOperation() {
+        withLock {
+            acceptsResults = false
+        }
+    }
+
+    private func consume(
+        _ result: DictationTranscriber.Result,
+        operationID: UUID,
+        transcriptStore: TranscriptStore,
+        session: DictationSession,
+        store: SessionStore
+    ) {
         let start = max(0, result.range.start.seconds)
         let end = max(start, result.range.end.seconds)
         consume(
@@ -853,7 +1145,11 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             ),
             text: String(result.text.characters),
             isFinal: result.isFinal,
-            persistCanonical: true
+            persistCanonical: true,
+            operationID: operationID,
+            transcriptStore: transcriptStore,
+            session: session,
+            store: store
         )
     }
 
@@ -861,8 +1157,15 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         range: TranscriptionRange,
         text: String,
         isFinal: Bool,
-        persistCanonical: Bool
+        persistCanonical: Bool,
+        operationID: UUID,
+        transcriptStore: TranscriptStore,
+        session: DictationSession? = nil,
+        store: SessionStore? = nil
     ) {
+        guard isCurrentOperation(operationID) else {
+            return
+        }
         let ingested = transcriptStore.ingestAndReport(
             range: range,
             text: text,
@@ -874,10 +1177,20 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             }
             if persistCanonical {
                 do {
-                    try applyCanonicalFinalization(finalization)
+                    guard try applyCanonicalFinalization(
+                        finalization,
+                        operationID: operationID,
+                        session: session,
+                        store: store
+                    ) else {
+                        return
+                    }
                 } catch {
                     record(error: Self.map(error))
                 }
+            }
+            guard isCurrentOperation(operationID) else {
+                return
             }
             let handler = currentUpdateHandler()
             handler?(TranscriptionUpdate(
@@ -887,7 +1200,9 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             ))
         } else {
             let shouldMark = withLock {
-                guard !firstVolatileResultReported else {
+                guard self.operationID == operationID,
+                      acceptsResults,
+                      !firstVolatileResultReported else {
                     return false
                 }
                 firstVolatileResultReported = true
@@ -896,7 +1211,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             if shouldMark {
                 instrumentation.mark(.firstVolatileResult)
             }
-            schedulePreview(text)
+            schedulePreview(text, operationID: operationID)
         }
     }
 
@@ -929,15 +1244,22 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             self.transcriptStore = transcriptStore
             analysisError = nil
             lastError = nil
+            acceptsResults = true
             self.resultTask = resultTask
             self.analysisTask = analysisTask
             return true
         }
     }
 
-    private func schedulePreview(_ text: String) {
+    private func schedulePreview(_ text: String, operationID: UUID) {
         let preview = String(text.prefix(Self.maxPreviewCharacters))
         lock.lock()
+        guard lifecycle == .running,
+              self.operationID == operationID,
+              acceptsResults else {
+            lock.unlock()
+            return
+        }
         pendingPreview = preview
         guard previewTask == nil else {
             lock.unlock()
@@ -951,16 +1273,21 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             if delay > 0 {
                 try? await Task.sleep(nanoseconds: delay)
             }
-            self?.flushPreview()
+            self?.flushPreview(operationID: operationID)
         }
         lock.unlock()
     }
 
-    private func flushPreview() {
+    private func flushPreview(operationID: UUID) {
         let payload: (String, (@Sendable (TranscriptionUpdate) -> Void)?)? = withLock {
-            guard lifecycle == .running, let text = pendingPreview else {
-                pendingPreview = nil
-                previewTask = nil
+            guard lifecycle == .running,
+                  self.operationID == operationID,
+                  acceptsResults,
+                  let text = pendingPreview else {
+                if self.operationID == operationID {
+                    pendingPreview = nil
+                    previewTask = nil
+                }
                 return nil
             }
             pendingPreview = nil
@@ -988,21 +1315,40 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         withLock { analysisError }
     }
 
+    private func isCurrentOperation(_ operationID: UUID) -> Bool {
+        withLock { self.operationID == operationID && acceptsResults }
+    }
+
     private func withLock<T>(_ body: () -> T) -> T {
         lock.lock()
         defer { lock.unlock() }
         return body()
     }
 
-    private func applyCanonicalFinalization(_ finalization: TranscriptFinalization) throws {
+    @discardableResult
+    private func applyCanonicalFinalization(
+        _ finalization: TranscriptFinalization,
+        operationID: UUID,
+        session: DictationSession?,
+        store: SessionStore?
+    ) throws -> Bool {
         lock.lock()
-        let session = self.session
-        let store = sessionStore
-        lock.unlock()
+        guard self.operationID == operationID, acceptsResults else {
+            lock.unlock()
+            return false
+        }
         guard let session, let store else {
+            lock.unlock()
             throw TranscriptionError.persistenceFailed("transcription session is no longer available")
         }
-        try applyCanonicalFinalization(finalization, for: session, store: store)
+        do {
+            try applyCanonicalFinalization(finalization, for: session, store: store)
+        } catch {
+            lock.unlock()
+            throw error
+        }
+        lock.unlock()
+        return true
     }
 
     private func applyCanonicalFinalization(
@@ -1088,6 +1434,9 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private static func map(_ error: Error) -> TranscriptionError {
         if let error = error as? TranscriptionError {
             return error
+        }
+        if let error = error as? BoundedOperationError {
+            return .timedOut(error.stage)
         }
         if error is CancellationError || Task.isCancelled {
             return .cancelled

@@ -272,10 +272,14 @@ public final class DictationCoordinator {
     private let faultInjector: DictationFaultInjector?
     private var pendingTranscriptionTerminalState: DictationSessionState?
     private var activeOperationID: UUID?
+    private var acceptsCallbacks = false
     private var activeCaptureFailureForTesting: (() -> Void)?
     private var staleCaptureFailureForTesting: (() -> Void)?
     private var terminalOperationInFlight = false
     private var terminalOperationWaiters: [CheckedContinuation<Void, Never>] = []
+    private let timeoutPolicy: TranscriptionTimeoutPolicy
+    private let operationRegistry = OperationTaskRegistry()
+    private var transcriptionReaperTask: Task<Void, Never>?
 
     public private(set) var transitionHistory: [DictationTransitionRecord] = []
     public private(set) var currentSession: DictationSession?
@@ -301,6 +305,11 @@ public final class DictationCoordinator {
         ].filter { $0 }.count
     }
 
+    @_spi(Testing)
+    public var activeOwnedOperationCount: Int {
+        operationRegistry.activeCount
+    }
+
     public var hasActiveTranscription: Bool {
         activeTranscription != nil
     }
@@ -309,27 +318,33 @@ public final class DictationCoordinator {
         activeCapture != nil
             || activeTranscription != nil
             || activeTask != nil
+            || transcriptionReaperTask != nil
+            || operationRegistry.activeCount > 0
             || [.preparing, .recording, .finalizing, .cleaning, .inserting].contains(state)
     }
 
     public init(
         initialState: DictationState = .idle,
-        diagnostics: DictationDiagnostics = DictationDiagnostics()
+        diagnostics: DictationDiagnostics = DictationDiagnostics(),
+        timeoutPolicy: TranscriptionTimeoutPolicy = .production
     ) {
         machine = DictationStateMachine(initialState: initialState)
         self.diagnostics = diagnostics
         self.faultInjector = nil
+        self.timeoutPolicy = timeoutPolicy
     }
 
     @_spi(Testing)
     public init(
         faultInjector: DictationFaultInjector,
         initialState: DictationState = .idle,
-        diagnostics: DictationDiagnostics = DictationDiagnostics()
+        diagnostics: DictationDiagnostics = DictationDiagnostics(),
+        timeoutPolicy: TranscriptionTimeoutPolicy = .production
     ) {
         machine = DictationStateMachine(initialState: initialState)
         self.diagnostics = diagnostics
         self.faultInjector = faultInjector
+        self.timeoutPolicy = timeoutPolicy
     }
 
     @discardableResult
@@ -349,6 +364,7 @@ public final class DictationCoordinator {
         now: Date = Date(),
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void = { _ in }
     ) throws -> DictationSession {
+        reapReleasedTranscription()
         guard activeCapture == nil else {
             throw DictationCoordinatorError.workAlreadyActive
         }
@@ -370,6 +386,7 @@ public final class DictationCoordinator {
             _ = try apply(.prepared)
             activeCapture = capture
             activeOperationID = operationID
+            acceptsCallbacks = true
             sessionStore = store
             currentSession = preparedSession
             activeCaptureFailureForTesting = { [weak self] in
@@ -435,7 +452,8 @@ public final class DictationCoordinator {
         now: Date = Date(),
         onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in }
     ) async throws -> DictationSession {
-        guard activeCapture == nil else {
+        reapReleasedTranscription()
+        guard activeCapture == nil, activeTranscription == nil else {
             throw DictationCoordinatorError.workAlreadyActive
         }
         guard [.idle, .complete, .failed, .cancelled, .interrupted].contains(state) else {
@@ -452,26 +470,39 @@ public final class DictationCoordinator {
             activeCapture = capture
             activeTranscription = transcription
             activeOperationID = operationID
+            acceptsCallbacks = true
             sessionStore = store
             currentSession = session
 
             try await withTaskCancellationHandler(operation: {
-                try await transcription.start(
-                    session: session,
-                    format: format,
-                    store: store,
-                    onUpdate: { [weak self] update in
-                        Task { @MainActor [weak self] in
-                            guard self?.activeOperationID == operationID else {
-                                return
+                try await BoundedOperation.run(
+                    operationID: operationID,
+                    stage: .startup,
+                    timeout: timeoutPolicy.budget(for: .startup),
+                    registry: operationRegistry
+                ) {
+                    try await transcription.start(
+                        session: session,
+                        format: format,
+                        store: store,
+                        onUpdate: { [weak self] update in
+                            Task { @MainActor [weak self] in
+                                guard self?.activeOperationID == operationID,
+                                      self?.acceptsCallbacks == true else {
+                                    return
+                                }
+                                onUpdate(update)
                             }
-                            onUpdate(update)
                         }
-                    }
-                )
+                    )
+                }
             }, onCancel: {
-                Task { @MainActor in
-                    _ = try? await transcription.cancel()
+                Task { @MainActor [weak self] in
+                    await self?.requestCancellation(
+                        transcription,
+                        operationID: operationID,
+                        stage: .cancellation
+                    )
                 }
             })
             try Task.checkCancellation()
@@ -519,7 +550,11 @@ public final class DictationCoordinator {
                 || [.cancelled, .interrupted].contains(state)
             let cancellationRequested = Task.isCancelled
             capture.cancel()
-            _ = try? await transcription.cancel()
+            await requestCancellation(
+                transcription,
+                operationID: operationID,
+                stage: .cancellation
+            )
             if terminalRequested {
                 currentSession = (try? store.load(id: preparedSession.id)) ?? preparedSession
                 releaseCapture()
@@ -565,7 +600,12 @@ public final class DictationCoordinator {
         using transcription: TranscriptionController,
         store: SessionStore
     ) async throws -> DictationSession {
-        await waitForTerminalOperationIfNeeded()
+        guard await waitForTerminalOperationIfNeeded(
+            operationID: activeOperationID ?? UUID(),
+            stage: .retry
+        ) else {
+            throw BoundedOperationError.timedOut(.retry)
+        }
         guard activeCapture == nil, activeTranscription == nil else {
             throw DictationCoordinatorError.workAlreadyActive
         }
@@ -582,6 +622,7 @@ public final class DictationCoordinator {
         currentSession = retryingSession
         let operationID = UUID()
         activeOperationID = operationID
+        acceptsCallbacks = true
         activeTranscription = transcription
         sessionStore = store
         defer {
@@ -591,8 +632,15 @@ public final class DictationCoordinator {
         }
 
         do {
-            let result = try await transcription.retrySavedAudio(for: retryingSession, store: store)
-            guard activeOperationID == operationID else {
+            let result = try await BoundedOperation.run(
+                operationID: operationID,
+                stage: .retry,
+                timeout: timeoutPolicy.budget(for: .retry),
+                registry: operationRegistry
+            ) {
+                try await transcription.retrySavedAudio(for: retryingSession, store: store)
+            }
+            guard activeOperationID == operationID, acceptsCallbacks else {
                 throw DictationCoordinatorError.recordingNotActive
             }
             let completedSession = try store.load(id: retryingSession.id)
@@ -607,6 +655,11 @@ public final class DictationCoordinator {
             return completedSession
         } catch {
             let reason = String(describing: error)
+            await requestCancellation(
+                transcription,
+                operationID: operationID,
+                stage: .cancellation
+            )
             let persistedSession = try? store.load(id: retryingSession.id)
             if terminalOperationInFlight
                 || pendingTranscriptionTerminalState == .interrupted
@@ -626,7 +679,7 @@ public final class DictationCoordinator {
                     in: store,
                     state: .failed,
                     reason: reason,
-                    failureCode: .transcriptionFailed
+                    failureCode: DictationFailureCode.infer(from: reason)
                 )
             }
             throw error
@@ -683,7 +736,12 @@ public final class DictationCoordinator {
     public func stopRecordingWithTranscription(
         at date: Date = Date()
     ) async throws -> DictationSession {
-        await waitForTerminalOperationIfNeeded()
+        guard await waitForTerminalOperationIfNeeded(
+            operationID: activeOperationID ?? UUID(),
+            stage: .finalization
+        ) else {
+            throw BoundedOperationError.timedOut(.finalization)
+        }
         guard beginTerminalOperation() else {
             throw DictationCoordinatorError.workAlreadyActive
         }
@@ -691,7 +749,8 @@ public final class DictationCoordinator {
         guard let capture = activeCapture,
               let transcription = activeTranscription,
               let store = sessionStore,
-              let session = currentSession else {
+              let session = currentSession,
+              let operationID = activeOperationID else {
             throw DictationCoordinatorError.recordingNotActive
         }
 
@@ -702,12 +761,26 @@ public final class DictationCoordinator {
             try capture.stop()
             diagnostics.mark(.recordingStopped)
             let result = try await withTaskCancellationHandler(operation: {
-                try await transcription.finish()
+                try await BoundedOperation.run(
+                    operationID: operationID,
+                    stage: .finalization,
+                    timeout: timeoutPolicy.budget(for: .finalization),
+                    registry: operationRegistry
+                ) {
+                    try await transcription.finish()
+                }
             }, onCancel: {
-                Task { @MainActor in
-                    _ = try? await transcription.cancel()
+                Task { @MainActor [weak self] in
+                    await self?.requestCancellation(
+                        transcription,
+                        operationID: operationID,
+                        stage: .cancellation
+                    )
                 }
             })
+            if pendingTranscriptionTerminalState != nil {
+                throw CancellationError()
+            }
             let completedSession = try store.update(
                 stoppingSession,
                 state: .completed,
@@ -721,8 +794,35 @@ public final class DictationCoordinator {
             diagnostics.record("audio capture and transcription stopped")
             return completedSession
         } catch {
-            _ = try? await transcription.cancel()
-            if Task.isCancelled || pendingTranscriptionTerminalState == .cancelled {
+            await requestCancellation(
+                transcription,
+                operationID: operationID,
+                stage: .cancellation
+            )
+            if let requestedState = pendingTranscriptionTerminalState {
+                let terminalEvent: DictationEvent = requestedState == .interrupted
+                    ? .interrupt
+                    : .cancel
+                let cancelledSession = persistTerminalState(
+                    stoppingSession,
+                    in: store,
+                    state: requestedState,
+                    reason: requestedState == .interrupted
+                        ? "recording was interrupted"
+                        : "dictation operation cancelled",
+                    failureCode: failureCode(
+                        for: requestedState,
+                        reason: requestedState == .interrupted
+                            ? "recording was interrupted"
+                            : "dictation operation cancelled"
+                    )
+                )
+                _ = try? apply(terminalEvent)
+                currentSession = cancelledSession
+                releaseCapture()
+                throw error
+            }
+            if Task.isCancelled {
                 let cancelledSession = persistTerminalState(
                     stoppingSession,
                     in: store,
@@ -879,9 +979,20 @@ public final class DictationCoordinator {
     public func cancelActiveWork(
         reason: String = "dictation operation cancelled"
     ) async {
-        if terminalOperationInFlight, let activeTranscription {
-            pendingTranscriptionTerminalState = .cancelled
-            _ = try? await activeTranscription.cancel()
+        if terminalOperationInFlight,
+           let activeTranscription,
+           let operationID = activeOperationID {
+            pendingTranscriptionTerminalState = reason == "dictation operation cancelled"
+                ? .cancelled
+                : .interrupted
+            _ = try? await BoundedOperation.run(
+                operationID: operationID,
+                stage: .cancellation,
+                timeout: timeoutPolicy.budget(for: .cancellation),
+                registry: operationRegistry
+            ) {
+                try await activeTranscription.cancel()
+            }
             return
         }
         if activeTranscription != nil {
@@ -950,7 +1061,13 @@ public final class DictationCoordinator {
         reason: String?,
         at date: Date
     ) async throws -> DictationSession {
-        await waitForTerminalOperationIfNeeded()
+        let waitStage: TranscriptionStage = state == .interrupted ? .interruption : .cancellation
+        guard await waitForTerminalOperationIfNeeded(
+            operationID: activeOperationID ?? UUID(),
+            stage: waitStage
+        ) else {
+            throw BoundedOperationError.timedOut(waitStage)
+        }
         guard beginTerminalOperation() else {
             throw DictationCoordinatorError.workAlreadyActive
         }
@@ -958,7 +1075,8 @@ public final class DictationCoordinator {
         guard let capture = activeCapture,
               let transcription = activeTranscription,
               let store = sessionStore,
-              let session = currentSession else {
+              let session = currentSession,
+              let operationID = activeOperationID else {
             throw DictationCoordinatorError.recordingNotActive
         }
 
@@ -966,22 +1084,34 @@ public final class DictationCoordinator {
         capture.cancel()
         let result: TranscriptionResult?
         do {
-            result = try await transcription.cancel()
+            let stage: TranscriptionStage = state == .interrupted ? .interruption : .cancellation
+            result = try await BoundedOperation.run(
+                operationID: operationID,
+                stage: stage,
+                timeout: timeoutPolicy.budget(for: stage),
+                registry: operationRegistry
+            ) {
+                try await transcription.cancel()
+            }
         } catch {
             let failureReason = String(describing: error)
+            let timedOut = error is BoundedOperationError
+                || DictationFailureCode.infer(from: failureReason) == .transcriptionTimedOut
+            let terminalState = timedOut ? state : .failed
+            let terminalEvent = timedOut ? event : .fail
             lastFailureReason = failureReason
-            let failedSession = persistTerminalState(
+            let terminalSession = persistTerminalState(
                 session,
                 in: store,
-                state: .failed,
+                state: terminalState,
                 reason: failureReason,
-                failureCode: .transcriptionFailed,
+                failureCode: failureCode(for: terminalState, reason: failureReason),
                 rawTextByteCount: nil
             )
             if [.preparing, .recording, .finalizing, .cleaning, .inserting].contains(self.state) {
-                _ = try? apply(.fail)
+                _ = try? apply(terminalEvent)
             }
-            currentSession = failedSession
+            currentSession = terminalSession
             releaseCapture()
             throw error
         }
@@ -1073,7 +1203,7 @@ public final class DictationCoordinator {
     }
 
     private func handleCaptureFailure(_ reason: String, operationID: UUID) {
-        guard activeOperationID == operationID else {
+        guard activeOperationID == operationID, acceptsCallbacks else {
             return
         }
         guard let capture = activeCapture,
@@ -1104,8 +1234,13 @@ public final class DictationCoordinator {
         _ reason: String,
         operationID: UUID
     ) async {
-        await waitForTerminalOperationIfNeeded()
-        guard activeOperationID == operationID else {
+        guard await waitForTerminalOperationIfNeeded(
+            operationID: operationID,
+            stage: .cancellation
+        ) else {
+            return
+        }
+        guard activeOperationID == operationID, acceptsCallbacks else {
             return
         }
         guard let capture = activeCapture,
@@ -1116,7 +1251,34 @@ public final class DictationCoordinator {
         }
 
         capture.cancel()
-        let result = try? await transcription.cancel()
+        let result: TranscriptionResult?
+        do {
+            result = try await BoundedOperation.run(
+                operationID: operationID,
+                stage: .cancellation,
+                timeout: timeoutPolicy.budget(for: .cancellation),
+                registry: operationRegistry
+            ) {
+                try await transcription.cancel()
+            }
+        } catch {
+            lastFailureReason = String(describing: error)
+            lastFailureCode = .transcriptionTimedOut
+            let timedOutSession = persistTerminalState(
+                session,
+                in: store,
+                state: .failed,
+                reason: "speech capture failure cancellation timed out",
+                failureCode: .transcriptionTimedOut
+            )
+            if [.preparing, .recording, .finalizing].contains(state) {
+                _ = try? apply(.fail)
+            }
+            currentSession = timedOutSession
+            releaseCapture()
+            diagnostics.record("audio capture failure cancellation timed out")
+            return
+        }
         lastFailureReason = reason
         lastFailureCode = DictationFailureCode.infer(from: reason)
         let failedSession = persistTerminalState(
@@ -1141,9 +1303,13 @@ public final class DictationCoordinator {
     ) -> DictationFailureCode? {
         switch state {
         case .cancelled:
-            .cancelled
+            reason?.lowercased().contains("timed out") == true
+                ? .transcriptionTimedOut
+                : .cancelled
         case .interrupted:
-            .infer(from: reason ?? "recording was interrupted", interruption: true)
+            reason?.lowercased().contains("timed out") == true
+                ? .transcriptionTimedOut
+                : .infer(from: reason ?? "recording was interrupted", interruption: true)
         case .failed:
             .infer(from: reason ?? "capture failed")
         default:
@@ -1239,23 +1405,84 @@ public final class DictationCoordinator {
         _ reason: String,
         operationID: UUID
     ) async {
-        guard activeOperationID == operationID else {
+        guard activeOperationID == operationID, acceptsCallbacks else {
             return
         }
         _ = try? await interruptRecordingWithTranscription(reason: reason)
     }
 
     private func releaseCapture() {
+        let operationID = activeOperationID
+        let keepTranscription = operationID.map {
+            operationRegistry.activeCount(for: $0) > 0
+        } ?? false
         if faultInjector?.consume(.cancellationRace) == true {
             staleCaptureFailureForTesting = activeCaptureFailureForTesting
         }
         activeCaptureFailureForTesting = nil
+        acceptsCallbacks = false
         activeCapture = nil
         activeAudioDescriptor = nil
+        pendingTranscriptionTerminalState = nil
+        if keepTranscription, let operationID {
+            transcriptionReaperTask?.cancel()
+            transcriptionReaperTask = Task { @MainActor [weak self] in
+                while let self,
+                      self.activeOperationID == operationID,
+                      self.activeCapture == nil,
+                      self.operationRegistry.activeCount(for: operationID) > 0 {
+                    do {
+                        try await Task.sleep(for: .milliseconds(10))
+                    } catch {
+                        return
+                    }
+                }
+                guard let self,
+                      self.activeOperationID == operationID else {
+                    return
+                }
+                self.reapReleasedTranscription()
+            }
+        } else {
+            transcriptionReaperTask?.cancel()
+            transcriptionReaperTask = nil
+            activeTranscription = nil
+            sessionStore = nil
+            activeOperationID = nil
+            diagnostics.mark(.resourcesReleased)
+        }
+    }
+
+    private func requestCancellation(
+        _ transcription: TranscriptionController,
+        operationID: UUID,
+        stage: TranscriptionStage
+    ) async {
+        guard activeOperationID == operationID else {
+            return
+        }
+        _ = try? await BoundedOperation.run(
+            operationID: operationID,
+            stage: stage,
+            timeout: timeoutPolicy.budget(for: stage),
+            registry: operationRegistry
+        ) {
+            _ = try await transcription.cancel()
+        }
+    }
+
+    private func reapReleasedTranscription() {
+        guard let operationID = activeOperationID,
+              activeCapture == nil,
+              operationRegistry.activeCount(for: operationID) == 0 else {
+            return
+        }
+        transcriptionReaperTask?.cancel()
+        transcriptionReaperTask = nil
         activeTranscription = nil
         sessionStore = nil
-        pendingTranscriptionTerminalState = nil
         activeOperationID = nil
+        acceptsCallbacks = false
         diagnostics.mark(.resourcesReleased)
     }
 
@@ -1276,7 +1503,29 @@ public final class DictationCoordinator {
         }
     }
 
-    private func waitForTerminalOperationIfNeeded() async {
+    private func waitForTerminalOperationIfNeeded(
+        operationID: UUID,
+        stage: TranscriptionStage
+    ) async -> Bool {
+        guard terminalOperationInFlight else {
+            return true
+        }
+        do {
+            _ = try await BoundedOperation.run(
+                operationID: operationID,
+                stage: stage,
+                timeout: timeoutPolicy.budget(for: stage),
+                registry: operationRegistry
+            ) {
+                await self.waitForTerminalOperation()
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func waitForTerminalOperation() async {
         await withCheckedContinuation { continuation in
             guard terminalOperationInFlight else {
                 continuation.resume()
@@ -1366,7 +1615,15 @@ public final class DictationCoordinator {
         activeTask = nil
         task?.cancel()
         if let task {
-            _ = await task.value
+            let operationID = activeOperationID ?? UUID()
+            _ = try? await BoundedOperation.run(
+                operationID: operationID,
+                stage: .shutdown,
+                timeout: timeoutPolicy.budget(for: .shutdown),
+                registry: operationRegistry
+            ) {
+                await task.value
+            }
         }
         if activeCapture == nil,
            [.preparing, .recording, .finalizing, .cleaning, .inserting].contains(state) {
@@ -1376,30 +1633,52 @@ public final class DictationCoordinator {
     }
 
     public func shutdownWithTranscription() async {
-        await waitForTerminalOperationIfNeeded()
+        guard await waitForTerminalOperationIfNeeded(
+            operationID: activeOperationID ?? UUID(),
+            stage: .shutdown
+        ) else {
+            return
+        }
         guard beginTerminalOperation() else {
             return
         }
         defer { finishTerminalOperation() }
         if let activeTranscription,
            let store = sessionStore,
-           let session = currentSession {
+           let session = currentSession,
+           let operationID = activeOperationID {
             pendingTranscriptionTerminalState = .interrupted
             activeCapture?.cancel()
             let result: TranscriptionResult?
             let terminalState: DictationSessionState
             let terminalEvent: DictationEvent
             let terminalReason: String
+            let terminalFailureCode: DictationFailureCode
             do {
-                result = try await activeTranscription.cancel()
+                result = try await BoundedOperation.run(
+                    operationID: operationID,
+                    stage: .shutdown,
+                    timeout: timeoutPolicy.budget(for: .shutdown),
+                    registry: operationRegistry
+                ) {
+                    try await activeTranscription.cancel()
+                }
                 terminalState = .interrupted
                 terminalEvent = .interrupt
                 terminalReason = "application shutdown"
+                terminalFailureCode = .applicationQuit
             } catch {
                 result = nil
                 terminalState = .failed
                 terminalEvent = .fail
-                terminalReason = String(describing: error)
+                if error is BoundedOperationError
+                    || DictationFailureCode.infer(from: String(describing: error)) == .transcriptionTimedOut {
+                    terminalReason = "application shutdown speech timeout"
+                    terminalFailureCode = .transcriptionTimedOut
+                } else {
+                    terminalReason = "application shutdown"
+                    terminalFailureCode = .applicationQuit
+                }
                 lastFailureReason = terminalReason
             }
             let interruptedSession = persistTerminalState(
@@ -1407,7 +1686,7 @@ public final class DictationCoordinator {
                 in: store,
                 state: terminalState,
                 reason: terminalReason,
-                failureCode: terminalState == .interrupted ? .applicationQuit : .transcriptionFailed,
+                failureCode: terminalFailureCode,
                 rawTextByteCount: result?.rawTextByteCount
             )
             _ = try? apply(terminalEvent)
@@ -1418,7 +1697,15 @@ public final class DictationCoordinator {
         activeTask = nil
         task?.cancel()
         if let task {
-            _ = await task.value
+            let operationID = activeOperationID ?? UUID()
+            _ = try? await BoundedOperation.run(
+                operationID: operationID,
+                stage: .shutdown,
+                timeout: timeoutPolicy.budget(for: .shutdown),
+                registry: operationRegistry
+            ) {
+                await task.value
+            }
         }
         diagnostics.record("coordinator shutdown")
     }
