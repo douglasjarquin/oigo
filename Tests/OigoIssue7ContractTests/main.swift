@@ -32,7 +32,8 @@ private struct OigoIssue7ContractTests {
             ("retry transition preserves durable audio", testRetryTransitionPreservesDurableAudio),
             ("retention boundaries are explicit and safe", testRetentionBoundaries),
             ("deletion removes all session artifacts", testDeletionRemovesAllSessionArtifacts),
-            ("paste again recovers a failed insertion", testPasteAgainRecoversFailedInsertion)
+            ("paste again recovers a failed insertion", testPasteAgainRecoversFailedInsertion),
+            ("relaunch recovery matches raw byte-count and first line", testRelaunchRecoveryMatchesRawMetadata)
         ]
 
         var failures = 0
@@ -649,6 +650,43 @@ private struct OigoIssue7ContractTests {
               sender.sendCalls == 1,
               persistedRecovery.metadata.insertionOutcome == .dispatched else {
             throw ContractFailure(message: "Paste Again did not recover the failed insertion without reopening automatic insertion")
+        }
+    }
+
+    private static func testRelaunchRecoveryMatchesRawMetadata() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        var session = try store.createSession(now: Date(timeIntervalSince1970: 14_000))
+        session = try store.update(
+            session,
+            state: .recording,
+            at: Date(timeIntervalSince1970: 14_001)
+        )
+        session = try store.appendRawText("first durable line", for: session)
+        session = try store.appendRawText("second durable line", for: session)
+        store.armRawTextPersistenceFaultForTesting(.afterFsync)
+        do {
+            _ = try store.appendRawText("third durable line", for: session)
+            throw ContractFailure(message: "post-fsync fault did not interrupt the third append")
+        } catch let error as ContractFailure {
+            throw error
+        } catch {
+            _ = error
+        }
+
+        let recovered = try store.recoverUnfinishedSessions(at: Date(timeIntervalSince1970: 14_100))
+        guard recovered.count == 1 else {
+            throw ContractFailure(message: "relaunch did not recover the unfinished recording")
+        }
+        let rawText = try store.readRawText(for: recovered[0])
+        let expected = "first durable line second durable line third durable line"
+        guard rawText == expected,
+              recovered[0].metadata.rawTextByteCount == Int64(rawText.utf8.count),
+              recovered[0].metadata.firstTranscriptLine == "first durable line",
+              recovered[0].metadata.state == .interrupted else {
+            throw ContractFailure(message: "relaunch recovery metadata did not match the durable raw transcript")
         }
     }
 

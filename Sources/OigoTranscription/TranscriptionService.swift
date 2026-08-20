@@ -1408,9 +1408,9 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         store: SessionStore
     ) throws -> (text: String, rawTextByteCount: Int64) {
         do {
-            let rawText = try store.readRawText(for: session)
-            _ = try store.persistRawText(rawText, for: session)
-            return (rawText, Int64(Data(rawText.utf8).count))
+            let checkpoint = try store.checkpointCanonicalRawText(for: session)
+            let rawText = try store.readRawText(for: checkpoint.session)
+            return (rawText, checkpoint.rawTextByteCount)
         } catch {
             throw TranscriptionError.persistenceFailed(String(describing: error))
         }

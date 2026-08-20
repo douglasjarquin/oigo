@@ -27,6 +27,7 @@ private struct OigoIssue10ContractTests {
             ("cancellation metadata failure retains terminal state", testCancellationMetadataFailureRetainsTerminalState),
             ("cancellation covers every active processing state", testCancellationCoversEveryActiveProcessingState),
             ("fault injection matrix is isolated", testFaultInjectionMatrix),
+            ("raw-text persistence faults recover one canonical ordering", testRawTextPersistenceFaultsRecoverOneCanonicalOrdering),
             ("shutdown waits for registered task", testShutdownWaitsForRegisteredTask),
             ("transcription shutdown waits for registered task", testTranscriptionShutdownWaitsForRegisteredTask),
             ("transcription shutdown cancels active transcription", testTranscriptionShutdownCancelsActiveTranscription)
@@ -383,6 +384,75 @@ private struct OigoIssue10ContractTests {
 
         guard DictationFailureCode.infer(from: "automatic cleanup exceeded its deadline") == .cleanupTimedOut else {
             throw ContractFailure(message: "cleanup deadline did not map to a stable failure code")
+        }
+    }
+
+    private static func testRawTextPersistenceFaultsRecoverOneCanonicalOrdering() throws {
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let faults: [RawTextPersistenceFault] = [
+            .beforeAppend,
+            .afterTextWrite,
+            .afterFsync,
+            .beforeMetadataCommit,
+            .afterMetadataCommit,
+            .shortWrite,
+            .duringTailRevision,
+            .beforeTailRevision,
+            .duringFinalCheckpoint
+        ]
+        for fault in faults {
+            let store = try SessionStore(
+                rootDirectory: root.appendingPathComponent(fault.rawValue)
+            )
+            var session = try store.createSession()
+            session = try store.appendRawText("canonical", for: session)
+            store.armRawTextPersistenceFaultForTesting(fault)
+            switch fault {
+            case .duringTailRevision, .beforeTailRevision:
+                do {
+                    _ = try store.replaceRawTextTail(
+                        "canonical",
+                        with: "revised",
+                        for: session
+                    )
+                    throw ContractFailure(message: "tail revision fault did not fire")
+                } catch let error as ContractFailure {
+                    throw error
+                } catch {
+                    _ = error
+                }
+            case .duringFinalCheckpoint:
+                let checkpoint = try store.checkpointCanonicalRawText(for: session)
+                guard checkpoint.metadataOutcome == .recoverableFailure else {
+                    throw ContractFailure(message: "final checkpoint fault was not recoverable")
+                }
+            case .shortWrite, .beforeAppend, .afterTextWrite, .afterFsync, .beforeMetadataCommit, .afterMetadataCommit:
+                do {
+                    _ = try store.appendRawText("next", for: session)
+                    throw ContractFailure(message: fault.rawValue + " did not fire")
+                } catch let error as ContractFailure {
+                    throw error
+                } catch {
+                    _ = error
+                }
+            }
+            let recovered = try store.load(id: session.id)
+            let rawText = try store.readRawText(for: recovered)
+            let expectsAppended: Set<RawTextPersistenceFault> = [
+                .afterTextWrite,
+                .afterFsync,
+                .beforeMetadataCommit,
+                .afterMetadataCommit
+            ]
+            let expectedText = expectsAppended.contains(fault) ? "canonical next" : "canonical"
+            guard rawText == expectedText,
+                  recovered.metadata.rawTextByteCount == Int64(rawText.utf8.count),
+                  recovered.metadata.firstTranscriptLine == "canonical" else {
+                throw ContractFailure(
+                    message: fault.rawValue + " recovery did not preserve a single canonical ordering"
+                )
+            }
         }
     }
 

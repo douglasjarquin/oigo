@@ -31,7 +31,17 @@ private struct OigoIssue5ContractTests {
             ("saved-file retry", testSavedFileRetry),
             ("bounded retry staging preservation", testBoundedRetryStagingPreservation),
             ("persistence recovery fault window", testPersistenceRecoveryFaultWindow),
-            ("canonical final replacement", testCanonicalFinalReplacement)
+            ("canonical final replacement", testCanonicalFinalReplacement),
+            ("append-only persistence is incremental", testAppendOnlyPersistenceIsIncremental),
+            ("unchanged final checkpoint does not rewrite", testUnchangedFinalCheckpointDoesNotRewrite),
+            ("raw-text crash recovery keeps one canonical ordering", testRawTextCrashRecoveryKeepsOneCanonicalOrdering),
+            ("short write recovers the durable prefix", testShortWriteRecoversDurablePrefix),
+            ("final checkpoint metadata failure retains transcript", testFinalCheckpointMetadataFailureRetainsTranscript),
+            ("tail revision is bounded and suffix-verified", testTailRevisionIsBoundedAndSuffixVerified),
+            ("same-length tail revision interrupted before truncate", testSameLengthTailRevisionInterruptedBeforeTruncate),
+            ("longer rewrite short-write restores previous suffix", testLongerRewriteShortWriteRestoresPreviousSuffix),
+            ("newline-prefixed first segment then second append", testNewlinePrefixedFirstSegmentThenSecondAppend),
+            ("missing raw.txt with stale byte count does not checkpoint empty", testMissingRawTextWithStaleByteCountDoesNotCheckpointEmpty)
         ]
 
         var failures = 0
@@ -869,6 +879,391 @@ private struct OigoIssue5ContractTests {
         )
         guard try store.readRawText(for: compactedSession) == "segment-0 segment-1 segment-2 segment-3 segment-4 segment-5 segment-6 segment-7 segment-8 segment-9 segment-10 segment-11 revised" else {
             throw ContractFailure(message: "a final after rejected compacted-history correction failed or duplicated canonical text")
+        }
+    }
+
+    @MainActor
+    private static func testAppendOnlyPersistenceIsIncremental() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-append-amplification-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        var session = try store.createSession()
+        store.resetRawTextPersistenceMetricsForTesting()
+        for index in 0..<64 {
+            session = try store.appendRawText("segment-" + String(index), for: session)
+        }
+        let metrics = store.rawTextPersistenceMetricsForTesting()
+        let rawText = try store.readRawText(for: session)
+        let expected = (0..<64).map { "segment-" + String($0) }.joined(separator: " ")
+        guard rawText == expected,
+              session.metadata.rawTextByteCount == Int64(rawText.utf8.count),
+              session.metadata.firstTranscriptLine == "segment-0",
+              session.metadata.rawTextRevision == 64 else {
+            throw ContractFailure(message: "append-only transcript lost ordering or metadata")
+        }
+        guard metrics.transcriptBytesRead == 0,
+              metrics.transcriptBytesRewritten == 0,
+              metrics.appendCount == 64,
+              metrics.transcriptBytesWritten == Int64(rawText.utf8.count),
+              metrics.lastResultCode == "append" else {
+            throw ContractFailure(
+                message: "append-only persistence reread or rewrote the transcript: read="
+                    + String(metrics.transcriptBytesRead)
+                    + " rewritten="
+                    + String(metrics.transcriptBytesRewritten)
+                    + " written="
+                    + String(metrics.transcriptBytesWritten)
+                    + " appends="
+                    + String(metrics.appendCount)
+            )
+        }
+    }
+
+    @MainActor
+    private static func testUnchangedFinalCheckpointDoesNotRewrite() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-checkpoint-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        var session = try store.createSession()
+        session = try store.appendRawText("durable canonical", for: session)
+        session = try store.persistCleanText("Durable Canonical.", for: session)
+        let revision = session.metadata.rawTextRevision
+        store.resetRawTextPersistenceMetricsForTesting()
+        let checkpoint = try store.checkpointCanonicalRawText(for: session)
+        let metrics = store.rawTextPersistenceMetricsForTesting()
+        let reloaded = try store.load(id: session.id)
+        guard checkpoint.contentUnchanged,
+              checkpoint.metadataOutcome == .consistent,
+              checkpoint.rawTextByteCount == Int64("durable canonical".utf8.count),
+              checkpoint.session.metadata.rawTextRevision == revision,
+              reloaded.metadata.rawTextRevision == revision,
+              try store.readRawText(for: reloaded) == "durable canonical",
+              try store.readCleanText(for: reloaded) == "Durable Canonical.",
+              metrics.transcriptBytesRewritten == 0,
+              metrics.checkpointCount == 1,
+              metrics.lastResultCode == "checkpoint-consistent" else {
+            throw ContractFailure(message: "unchanged final checkpoint rewrote raw.txt or bumped the revision")
+        }
+    }
+
+    @MainActor
+    private static func testRawTextCrashRecoveryKeepsOneCanonicalOrdering() throws {
+        let cases: [(RawTextPersistenceFault, String, UInt64)] = [
+            (.beforeAppend, "one", 1),
+            (.afterTextWrite, "one two", 2),
+            (.afterFsync, "one two", 2),
+            (.beforeMetadataCommit, "one two", 2),
+            (.afterMetadataCommit, "one two", 2)
+        ]
+        for (fault, expectedText, expectedRevision) in cases {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "oigo-issue5-raw-crash-" + fault.rawValue + "-" + UUID().uuidString,
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            let store = try SessionStore(rootDirectory: root)
+            var session = try store.createSession()
+            session = try store.appendRawText("one", for: session)
+            store.armRawTextPersistenceFaultForTesting(fault)
+            do {
+                _ = try store.appendRawText("two", for: session)
+                throw ContractFailure(message: fault.rawValue + " did not interrupt append")
+            } catch let error as ContractFailure {
+                throw error
+            } catch {
+                _ = error
+            }
+            let recovered = try store.load(id: session.id)
+            let rawText = try store.readRawText(for: recovered)
+            guard rawText == expectedText,
+                  recovered.metadata.rawTextByteCount == Int64(rawText.utf8.count),
+                  recovered.metadata.firstTranscriptLine == "one",
+                  recovered.metadata.rawTextRevision == expectedRevision,
+                  !FileManager.default.fileExists(
+                      atPath: recovered.directoryURL.appendingPathComponent(".raw-persistence.json").path
+                  ) else {
+                throw ContractFailure(
+                    message: fault.rawValue
+                        + " recovery produced byteCount="
+                        + String(recovered.metadata.rawTextByteCount ?? -1)
+                        + " revision="
+                        + String(recovered.metadata.rawTextRevision)
+                        + " textMatch="
+                        + String(rawText == expectedText)
+                )
+            }
+        }
+
+        let revisionRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-revise-crash-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: revisionRoot) }
+        let revisionStore = try SessionStore(rootDirectory: revisionRoot)
+        var revisionSession = try revisionStore.createSession()
+        revisionSession = try revisionStore.appendRawText("hello world", for: revisionSession)
+        revisionStore.armRawTextPersistenceFaultForTesting(.duringTailRevision)
+        do {
+            _ = try revisionStore.replaceRawTextTail(
+                "hello world",
+                with: "hello word",
+                for: revisionSession
+            )
+            throw ContractFailure(message: "tail revision fault did not interrupt replacement")
+        } catch let error as ContractFailure {
+            throw error
+        } catch {
+            _ = error
+        }
+        let recoveredRevision = try revisionStore.load(id: revisionSession.id)
+        guard try revisionStore.readRawText(for: recoveredRevision) == "hello world",
+              recoveredRevision.metadata.rawTextByteCount == Int64("hello world".utf8.count),
+              recoveredRevision.metadata.rawTextRevision == 1 else {
+            throw ContractFailure(message: "interrupted tail revision did not restore the prior canonical suffix")
+        }
+    }
+
+    @MainActor
+    private static func testShortWriteRecoversDurablePrefix() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-short-write-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        var session = try store.createSession()
+        session = try store.appendRawText("durable prefix", for: session)
+        store.armRawTextPersistenceFaultForTesting(.shortWrite)
+        do {
+            _ = try store.appendRawText("should not commit", for: session)
+            throw ContractFailure(message: "short write did not fail the append")
+        } catch let error as ContractFailure {
+            throw error
+        } catch {
+            _ = error
+        }
+        let recovered = try store.load(id: session.id)
+        let rawText = try store.readRawText(for: recovered)
+        guard rawText == "durable prefix",
+              recovered.metadata.rawTextByteCount == Int64(rawText.utf8.count),
+              recovered.metadata.firstTranscriptLine == "durable prefix",
+              recovered.metadata.rawTextRevision == 1 else {
+            throw ContractFailure(message: "short write left unrecovered partial canonical bytes")
+        }
+    }
+
+    @MainActor
+    private static func testFinalCheckpointMetadataFailureRetainsTranscript() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-checkpoint-metadata-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        var session = try store.createSession()
+        session = try store.appendRawText("already durable speech", for: session)
+        let revision = session.metadata.rawTextRevision
+        store.armRawTextPersistenceFaultForTesting(.duringFinalCheckpoint)
+        let checkpoint = try store.checkpointCanonicalRawText(for: session)
+        let reloaded = try store.load(id: session.id)
+        guard checkpoint.metadataOutcome == .recoverableFailure,
+              checkpoint.contentUnchanged,
+              checkpoint.rawTextByteCount == Int64("already durable speech".utf8.count),
+              try store.readRawText(for: reloaded) == "already durable speech",
+              reloaded.metadata.rawTextRevision == revision,
+              reloaded.metadata.firstTranscriptLine == "already durable speech" else {
+            throw ContractFailure(message: "final checkpoint metadata failure claimed the durable transcript was lost")
+        }
+
+        var stale = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: session.metadataURL)
+        ) as? [String: Any]
+        stale?["rawTextByteCount"] = 1
+        try JSONSerialization.data(withJSONObject: stale ?? [:], options: [.sortedKeys])
+            .write(to: session.metadataURL, options: [.atomic])
+        store.failNextMetadataWriteForTesting()
+        let reconciled = try store.checkpointCanonicalRawText(for: session)
+        guard reconciled.metadataOutcome == .recoverableFailure,
+              try store.readRawText(for: session) == "already durable speech" else {
+            throw ContractFailure(message: "metadata reconcile failure hid the durable raw transcript")
+        }
+        guard store.rawTextPersistenceMetricsForTesting().lastResultCode == "checkpoint-metadata-failure" else {
+            throw ContractFailure(message: "checkpoint metadata failure used an imprecise result code")
+        }
+    }
+
+    @MainActor
+    private static func testTailRevisionIsBoundedAndSuffixVerified() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-bounded-revision-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        var session = try store.createSession()
+        let prefix = Array(repeating: "alpha", count: 1_024).joined(separator: " ")
+        session = try store.appendRawText(prefix, for: session)
+        session = try store.appendRawText("omega", for: session)
+        store.resetRawTextPersistenceMetricsForTesting()
+        session = try store.replaceRawTextTail("omega", with: "omega revised", for: session)
+        let metrics = store.rawTextPersistenceMetricsForTesting()
+        let expected = prefix + " omega revised"
+        let suffixReadBound = Int64("omega".utf8.count + 1)
+        guard try store.readRawText(for: session) == expected,
+              session.metadata.rawTextByteCount == Int64(expected.utf8.count),
+              session.metadata.firstTranscriptLine == String(prefix.prefix(512)),
+              metrics.revisionCount == 1,
+              metrics.transcriptBytesRead <= suffixReadBound,
+              metrics.transcriptBytesRewritten == 0,
+              metrics.lastResultCode == "revise" else {
+            throw ContractFailure(
+                message: "tail revision reread or rewrote more than the bounded suffix: read="
+                    + String(metrics.transcriptBytesRead)
+                    + " rewritten="
+                    + String(metrics.transcriptBytesRewritten)
+            )
+        }
+
+        do {
+            _ = try store.replaceRawTextTail("missing suffix", with: "nope", for: session)
+            throw ContractFailure(message: "mismatched tail revision was accepted")
+        } catch let error as ContractFailure {
+            throw error
+        } catch let error as SessionStoreError {
+            guard case .invalidMetadata = error else {
+                throw ContractFailure(message: "mismatched tail revision returned the wrong error")
+            }
+        }
+        guard try store.readRawText(for: session) == expected else {
+            throw ContractFailure(message: "rejected tail revision mutated canonical raw.txt")
+        }
+
+        store.resetRawTextPersistenceMetricsForTesting()
+        let unchanged = try store.replaceRawTextTail(
+            "omega revised",
+            with: "omega revised",
+            for: session
+        )
+        guard unchanged.metadata.rawTextRevision == session.metadata.rawTextRevision,
+              store.rawTextPersistenceMetricsForTesting().lastResultCode == "revise-unchanged" else {
+            throw ContractFailure(message: "identical tail revision bumped rawTextRevision")
+        }
+    }
+
+    @MainActor
+    private static func testSameLengthTailRevisionInterruptedBeforeTruncate() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-same-length-revise-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        var session = try store.createSession()
+        session = try store.appendRawText("hello", for: session)
+        let revision = session.metadata.rawTextRevision
+        store.armRawTextPersistenceFaultForTesting(.beforeTailRevision)
+        do {
+            _ = try store.replaceRawTextTail("hello", with: "world", for: session)
+            throw ContractFailure(message: "same-length revision fault did not fire before truncate")
+        } catch let error as ContractFailure {
+            throw error
+        } catch {
+            _ = error
+        }
+        let recovered = try store.load(id: session.id)
+        let rawText = try store.readRawText(for: recovered)
+        guard rawText == "hello",
+              recovered.metadata.rawTextByteCount == Int64(rawText.utf8.count),
+              recovered.metadata.firstTranscriptLine == "hello",
+              recovered.metadata.rawTextRevision == revision else {
+            throw ContractFailure(message: "same-length interrupt-before-truncate published the replacement suffix")
+        }
+    }
+
+    @MainActor
+    private static func testLongerRewriteShortWriteRestoresPreviousSuffix() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-revise-short-write-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        var session = try store.createSession()
+        session = try store.appendRawText("abc", for: session)
+        let revision = session.metadata.rawTextRevision
+        store.armRawTextPersistenceFaultForTesting(.shortWrite)
+        do {
+            _ = try store.replaceRawTextTail("abc", with: "xyz extra", for: session)
+            throw ContractFailure(message: "longer rewrite short write did not fail")
+        } catch let error as ContractFailure {
+            throw error
+        } catch {
+            _ = error
+        }
+        let recovered = try store.load(id: session.id)
+        let rawText = try store.readRawText(for: recovered)
+        guard rawText == "abc",
+              recovered.metadata.rawTextByteCount == Int64(rawText.utf8.count),
+              recovered.metadata.firstTranscriptLine == "abc",
+              recovered.metadata.rawTextRevision == revision else {
+            throw ContractFailure(message: "longer rewrite short write at the old size kept a replacement prefix")
+        }
+    }
+
+    @MainActor
+    private static func testNewlinePrefixedFirstSegmentThenSecondAppend() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-newline-prefix-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        var session = try store.createSession()
+        session = try store.appendRawText("\nhello", for: session)
+        guard session.metadata.firstTranscriptLine == nil else {
+            throw ContractFailure(message: "newline-prefixed first segment should leave firstTranscriptLine unset")
+        }
+        store.resetRawTextPersistenceMetricsForTesting()
+        session = try store.appendRawText("world", for: session)
+        let metrics = store.rawTextPersistenceMetricsForTesting()
+        let rawText = try store.readRawText(for: session)
+        guard rawText == "\nhello world",
+              session.metadata.rawTextByteCount == Int64(rawText.utf8.count),
+              metrics.lastResultCode == "append",
+              metrics.transcriptBytesRead > 0,
+              metrics.transcriptBytesRead <= 4_096,
+              metrics.transcriptBytesRewritten == 0 else {
+            throw ContractFailure(message: "second append after a newline-prefixed first segment failed or reread unbounded bytes")
+        }
+    }
+
+    @MainActor
+    private static func testMissingRawTextWithStaleByteCountDoesNotCheckpointEmpty() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-missing-raw-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        var session = try store.createSession()
+        session = try store.appendRawText("already durable speech", for: session)
+        try FileManager.default.removeItem(at: session.rawTextURL)
+        do {
+            let checkpoint = try store.checkpointCanonicalRawText(for: session)
+            throw ContractFailure(
+                message: "missing raw.txt checkpointed as empty+nonzero outcome="
+                    + checkpoint.metadataOutcome.rawValue
+                    + " byteCount="
+                    + String(checkpoint.rawTextByteCount)
+            )
+        } catch let error as ContractFailure {
+            throw error
+        } catch let error as SessionStoreError {
+            guard case .invalidSessionDirectory = error else {
+                throw ContractFailure(message: "missing raw.txt with stale byte count returned the wrong error")
+            }
+        }
+        let reloaded = try store.load(id: session.id)
+        guard reloaded.metadata.rawTextByteCount == Int64("already durable speech".utf8.count),
+              try store.readRawText(for: reloaded).isEmpty else {
+            throw ContractFailure(message: "missing raw.txt changed stale metadata instead of failing the checkpoint")
         }
     }
 
