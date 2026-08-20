@@ -530,9 +530,20 @@ public enum OigoOnboardingTestOutcome: String, Equatable, Sendable {
     case pending
     case passed
     case skipped
+    case copyOnlyAccepted
+    case failed
 
     public var allowsContinue: Bool {
-        self != .pending
+        switch self {
+        case .passed, .skipped, .copyOnlyAccepted:
+            true
+        case .pending, .failed:
+            false
+        }
+    }
+
+    public var isAutomaticPasteSuccess: Bool {
+        self == .passed
     }
 }
 

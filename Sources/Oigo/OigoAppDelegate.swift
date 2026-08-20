@@ -114,6 +114,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     )
     private lazy var pasteAgainFlow = InsertionPasteAgainFlow(handoff: insertionTargetHandoff)
     private var onboardingWindow: OnboardingWindowController?
+    private var onboardingSourceProbe: OnboardingSourceProbe?
     private var recordingStartedAt: Date?
     private var previewThrottle = OigoHUDPreviewThrottle()
     private let operationGate = AppOperationGate()
@@ -292,6 +293,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             globalShortcut: settings.globalShortcut,
             inputDevices: currentInputDevices(),
             selectedInput: settings.selectedInput,
+            selectedInputChannel: settings.selectedInputChannel,
             committedLocaleIdentifier: settings.localeIdentifier,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
@@ -330,19 +332,19 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             saveStep: { [weak self] step in
                 self?.onboardingStore.save(OigoOnboardingState(step: step))
             },
-            saveInputSelection: { [weak self] selection in
+            saveInputSelection: { [weak self] selection, channel in
                 guard let self else { return }
-                let updatedSettings = self.settings.with(selectedInput: selection)
+                let updatedSettings = self.settings.with(
+                    selectedInput: selection,
+                    selectedInputChannel: channel
+                )
                 do {
                     try self.settingsStore.save(updatedSettings)
                     self.settings = updatedSettings
                     if NextDictationSettingsPolicy.mayReplaceOwnedCapture(
                         isOperationActive: self.coordinator.hasActiveWork
                     ) {
-                        self.recorder.setInputSelection(
-                            selection,
-                            channel: self.settings.selectedInputChannel
-                        )
+                        self.recorder.setInputSelection(selection, channel: channel)
                     }
                 } catch {
                     self.showSettingsPersistenceFailure(error)
@@ -379,14 +381,25 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             openDataLocation: { [weak self] in
                 self?.openDataFolder()
             },
+            startSourceProbe: { [weak self] selection, channel, generation in
+                self?.startOnboardingSourceProbe(
+                    selection: selection,
+                    channel: channel,
+                    generation: generation
+                )
+            },
+            stopSourceProbe: { [weak self] in
+                self?.stopOnboardingSourceProbe()
+            },
             startTest: { [weak self] in
                 self?.onboardingWindow?.focusTestField()
-                self?.handleMouseToggle(allowBeforeSetup: true)
+                _ = self?.shortcutBridge.receive(.pressed)
             },
             stopTest: { [weak self] in
-                self?.finishTestDictation()
+                _ = self?.shortcutBridge.receive(.released)
             },
             cancelTest: { [weak self] in
+                self?.shortcutBridge.reset()
                 self?.cancelTestDictation()
             },
             openHistory: { [weak self] in
@@ -394,6 +407,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             onComplete: { [weak self] in
                 guard let self else { return }
+                self.stopOnboardingSourceProbe()
+                self.shortcutBridge.reset()
                 guard self.storageCapability.health.isReady else {
                     self.updateSurface()
                     return
@@ -411,6 +426,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 self.updateSurface()
             },
             onClose: { [weak self] in
+                self?.stopOnboardingSourceProbe()
+                self?.shortcutBridge.reset()
                 self?.onboardingWindow = nil
             }
         )
@@ -654,6 +671,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         guard storageCapability.health.isReady else {
+            reportOnboardingTestFailure()
             updateSurface()
             return
         }
@@ -680,11 +698,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startKeyboardDictation() {
-        guard onboardingStore.load().isComplete else {
+        let onboardingAllowsTest = onboardingWindow?.isDrivingProductionTest == true
+        guard onboardingStore.load().isComplete || onboardingAllowsTest else {
             shortcutBridge.reset()
             return
         }
-        startDictation()
+        startDictation(kind: onboardingAllowsTest ? .onboardingTest : .dictation)
     }
 
     private func requestKeyboardStop() {
@@ -698,6 +717,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func startDictation(kind: AppOperationKind = .dictation) {
         guard storageCapability.health.isReady else {
+            reportOnboardingTestFailure()
             updateSurface()
             return
         }
@@ -929,11 +949,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     insertionSource: decision.insertionSource,
                     cleanupFallbackReason: decision.fallbackReason?.description
                 )
-                let rawText = (try? store.readRawText(for: insertionSession)) ?? ""
-                onboardingWindow?.setTestResult(
-                    transcript: rawText,
-                    mode: configuration.processingMode,
-                    copied: result.outcome.clipboardOutputAvailable
+                reportOnboardingTest(
+                    session: lastSession,
+                    store: store,
+                    result: result,
+                    insertionSource: decision.insertionSource
                 )
                 if let fallbackReason = decision.fallbackReason {
                     historyWindow?.showMessage(
@@ -984,11 +1004,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                [.failed, .interrupted].contains(session.metadata.state) {
                 lastSession = session
             }
-            onboardingWindow?.setTestResult(
-                transcript: "",
-                mode: frozenConfiguration().processingMode,
-                copied: false
-            )
+            reportOnboardingTestFailure()
             NSLog("Oigo rejected the dictation start command: %@", failureReason)
             updateSurface()
         }
@@ -1060,11 +1076,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 insertionSource: decision.insertionSource,
                 cleanupFallbackReason: decision.fallbackReason?.description
             )
-            let rawText = (try? store.readRawText(for: insertionSession)) ?? ""
-            onboardingWindow?.setTestResult(
-                transcript: rawText,
-                mode: configuration.processingMode,
-                copied: result.outcome.clipboardOutputAvailable
+            reportOnboardingTest(
+                session: lastSession,
+                store: store,
+                result: result,
+                insertionSource: decision.insertionSource
             )
             if let fallbackReason = decision.fallbackReason {
                 historyWindow?.showMessage(
@@ -1102,11 +1118,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                [.failed, .interrupted].contains(session.metadata.state) {
                 lastSession = session
             }
-            onboardingWindow?.setTestResult(
-                transcript: "",
-                mode: frozenConfiguration().processingMode,
-                copied: false
-            )
+            reportOnboardingTestFailure()
             NSLog("Oigo rejected the dictation finish command: %@", failureReason)
             updateSurface()
         }
@@ -2098,6 +2110,103 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func currentInputDevices() -> [OigoInputDevice] {
         (try? deviceInventoryMonitor.currentDevices()) ?? []
+    }
+
+    private func startOnboardingSourceProbe(
+        selection: OigoInputSelection,
+        channel: Int,
+        generation: UInt64
+    ) {
+        stopOnboardingSourceProbe()
+        let probe = OnboardingSourceProbe()
+        onboardingSourceProbe = probe
+        probe.start(
+            selection: selection,
+            channel: channel,
+            generation: generation
+        ) { [weak self] update in
+            Task { @MainActor [weak self] in
+                self?.onboardingWindow?.applySourceProbeUpdate(update)
+            }
+        }
+    }
+
+    private func stopOnboardingSourceProbe() {
+        onboardingSourceProbe?.stop()
+        onboardingSourceProbe = nil
+    }
+
+    private func reportOnboardingTest(
+        session: DictationSession?,
+        store: SessionStore,
+        result: InsertionResult,
+        insertionSource: TranscriptInsertionSource
+    ) {
+        guard let onboardingWindow else {
+            return
+        }
+        shortcutBridge.reset()
+        let bound = recorder.currentSelection()
+        let selectedText: String
+        if let session {
+            switch insertionSource {
+            case .clean:
+                selectedText = (try? store.readCleanText(for: session)) ?? ""
+            case .raw:
+                selectedText = (try? store.readRawText(for: session)) ?? ""
+            }
+        } else {
+            selectedText = ""
+        }
+        let cafExists = session.map { FileManager.default.fileExists(atPath: $0.audioURL.path) } ?? false
+        let speechFinalized = session.map { ($0.metadata.rawTextByteCount ?? 0) > 0 } ?? false
+        let report = OigoOnboardingProductionReport(
+            usedInput: bound.input,
+            usedChannel: bound.channel,
+            sessionCreated: session != nil,
+            cafInitialized: cafExists,
+            speechFinalized: speechFinalized,
+            transcriptNonempty: !selectedText.isEmpty,
+            clipboardWritten: result.outcome.clipboardOutputAvailable,
+            targetValidationSucceeded: result.outcome == .pasted || result.outcome == .dispatched,
+            insertionOutcome: result.outcome,
+            insertionPath: .production,
+            insertionInvoked: true,
+            recoverableArtifactsRetained: cafExists || speechFinalized
+        )
+        onboardingWindow.applyTestCompletion(
+            report: report,
+            selectedInsertionText: selectedText
+        )
+    }
+
+    private func reportOnboardingTestFailure() {
+        guard let onboardingWindow else {
+            return
+        }
+        shortcutBridge.reset()
+        let bound = recorder.currentSelection()
+        let session = lastSession ?? coordinator.currentSession
+        let cafExists = session.map { FileManager.default.fileExists(atPath: $0.audioURL.path) } ?? false
+        let speechFinalized = session.map { ($0.metadata.rawTextByteCount ?? 0) > 0 } ?? false
+        let report = OigoOnboardingProductionReport(
+            usedInput: bound.input,
+            usedChannel: bound.channel,
+            sessionCreated: session != nil,
+            cafInitialized: cafExists,
+            speechFinalized: speechFinalized,
+            transcriptNonempty: false,
+            clipboardWritten: false,
+            targetValidationSucceeded: false,
+            insertionOutcome: .failed,
+            insertionPath: .production,
+            insertionInvoked: false,
+            recoverableArtifactsRetained: cafExists || speechFinalized
+        )
+        onboardingWindow.applyTestCompletion(
+            report: report,
+            selectedInsertionText: ""
+        )
     }
 
     private func startInputDeviceInventoryMonitor() {

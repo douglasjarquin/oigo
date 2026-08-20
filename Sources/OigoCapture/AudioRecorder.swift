@@ -580,6 +580,12 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         lock.unlock()
     }
 
+    public func currentSelection() -> (input: OigoInputSelection, channel: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (activeSelection ?? selectedInput, selectedChannel)
+    }
+
     public func captureFormat() throws -> AudioCaptureFormat {
         guard Bundle.main.bundleIdentifier != nil else {
             throw AudioRecorderError.missingApplicationBundle
