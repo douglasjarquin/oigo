@@ -200,6 +200,8 @@ private struct OigoIssue9ContractTests {
         try testEmptySupportedListLeavesPreviousLocale()
         try testSettingsUnrelatedSaveDoesNotChangeLanguage()
         try testInstallFailureLeavesPreviousLocale()
+        try testCloseDuringSaveGenerationFence()
+        try testLoadSupportedInvalidatesInFlightResult()
     }
 
     private static func testLocaleDisplayNames() throws {
@@ -525,6 +527,57 @@ private struct OigoIssue9ContractTests {
               settings.selectedIdentifier == "en-US",
               settingsPersistLocale(from: settings) == "en-US" else {
             throw ContractFailure(message: "a Settings install failure replaced the previous locale")
+        }
+    }
+
+    private static func testCloseDuringSaveGenerationFence() throws {
+        var state = OigoLocaleSelectionState(
+            committedIdentifier: "en-US",
+            role: .settings,
+            displayLocale: Locale(identifier: "en_US")
+        )
+        state.loadSupported(["en-US", "fr-FR"])
+        state.select("fr-FR")
+        guard let request = state.beginAssetRequest(status: .installing) else {
+            throw ContractFailure(message: "Settings save did not start a fenced install")
+        }
+        let saveGeneration = request.generation
+        state.abandonUncommitted()
+        guard !state.applyAssetResult(
+            localeIdentifier: request.localeIdentifier,
+            generation: request.generation,
+            status: .ready
+        ),
+              state.generation != saveGeneration,
+              !state.canConfirm,
+              state.confirm() == nil,
+              state.committedIdentifier == "en-US",
+              settingsPersistLocale(from: state) == "en-US" else {
+            throw ContractFailure(message: "closing Settings during save allowed a late ready result to persist")
+        }
+    }
+
+    private static func testLoadSupportedInvalidatesInFlightResult() throws {
+        var state = OigoLocaleSelectionState(
+            committedIdentifier: "en-US",
+            role: .settings,
+            displayLocale: Locale(identifier: "en_US")
+        )
+        state.loadSupported(["en-US", "fr-FR"])
+        guard let request = state.beginAssetRequest(status: .checking) else {
+            throw ContractFailure(message: "asset check did not start")
+        }
+        state.loadSupported(["en-US", "fr-FR"])
+        guard state.selectedIdentifier == "en-US",
+              state.generation != request.generation,
+              !state.applyAssetResult(
+                localeIdentifier: request.localeIdentifier,
+                generation: request.generation,
+                status: .ready
+              ),
+              !state.canConfirm,
+              state.committedIdentifier == "en-US" else {
+            throw ContractFailure(message: "reloading supported locales resurrected a stale ready result")
         }
     }
 

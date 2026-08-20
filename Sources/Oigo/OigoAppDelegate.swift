@@ -92,6 +92,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var reportedMalformedSessionCount = 0
     private var livePreview = ""
     private var settingsWindow: SettingsWindowController?
+    private var settingsSessionID: UUID?
     private var historyWindow: HistoryWindowController?
     private var statusItem: NSStatusItem?
     private var toggleItem: NSMenuItem?
@@ -300,6 +301,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func presentSettings(supportedLocales: [String]) {
+        let sessionID = UUID()
         let window = SettingsWindowController(
             settings: settings,
             inputDevices: currentInputDevices(),
@@ -345,8 +347,19 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             deleteAllHistory: { [weak self] in
                 self?.deleteAllHistory()
+            },
+            isPresented: { [weak self] in
+                self?.settingsSessionID == sessionID
+            },
+            onClose: { [weak self] in
+                guard self?.settingsSessionID == sessionID else {
+                    return
+                }
+                self?.settingsSessionID = nil
+                self?.settingsWindow = nil
             }
         )
+        settingsSessionID = sessionID
         settingsWindow = window
         window.showWindow(nil)
         window.window?.center()
@@ -1971,10 +1984,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func speechAssetService(for identifier: String) -> TranscriptionService {
-        if let transcription, transcription.configuredLocaleIdentifier == identifier {
-            return transcription
-        }
-        return TranscriptionService(
+        TranscriptionService(
             locale: Locale(identifier: identifier),
             instrumentation: performanceInstrumentation
         )

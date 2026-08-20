@@ -215,7 +215,7 @@ public struct OigoLocaleSelectionState: Equatable, Sendable {
             displayLocale: displayLocale
         )
         let nextSelection = preselectedIdentifier(from: identifiers)
-        replaceSelection(nextSelection, incrementGeneration: selectedIdentifier != nextSelection || generation == 0)
+        replaceSelection(nextSelection, incrementGeneration: true)
     }
 
     public mutating func select(_ identifier: String) {
