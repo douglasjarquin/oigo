@@ -29,7 +29,8 @@ private struct OigoIssue9ContractTests {
             ("settings", testSettings),
             ("locale", testLocaleSelection),
             ("hud", testHUD),
-            ("history", testHistory)
+            ("history", testHistory),
+            ("frozen-config", testFrozenConfiguration)
         ]
         let selected = suites.filter { suite == nil || suite == $0.0 }
         guard !selected.isEmpty else {
@@ -687,6 +688,47 @@ private struct OigoIssue9ContractTests {
         guard (try? store.load(id: completed.id)) == nil,
               FileManager.default.fileExists(atPath: customDictionary.path) else {
             throw ContractFailure(message: "Delete All History crossed the session/dictionary boundary")
+        }
+    }
+
+    private static func testFrozenConfiguration() throws {
+        let snapshot = DictationConfigurationSnapshot.resolve(
+            settings: OigoSettings.default.with(localeIdentifier: "en-US", defaultMode: .instant),
+            resolvedLocaleIdentifier: "en-US",
+            resolvedDeviceUID: "mic-1",
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        let later = DictationConfigurationSnapshot.resolve(
+            settings: OigoSettings.default.with(localeIdentifier: "fr-FR", defaultMode: .clean),
+            resolvedLocaleIdentifier: "fr-FR",
+            resolvedDeviceUID: "mic-2",
+            format: AudioCaptureFormat(sampleRate: 48_000, channelCount: 1)
+        )
+        guard snapshot.processingMode == .instant,
+              later.processingMode == .clean,
+              snapshot != later,
+              NextDictationSettingsPolicy.appliesToNextDictation(isOperationActive: true),
+              NextDictationSettingsPolicy.nextDictationCopy.contains("next dictation") else {
+            throw ContractFailure(message: "settings changes were not isolated to the next dictation")
+        }
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue9-config-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(rootDirectory: root)
+        let session = try store.createSession()
+        guard session.metadata.configurationIdentity == .unknown else {
+            throw ContractFailure(message: "new sessions without a snapshot were not unknown")
+        }
+        let recorded = try store.update(
+            session,
+            state: .recording,
+            configurationSnapshot: snapshot
+        )
+        let loaded = try store.load(id: recorded.id)
+        guard loaded.metadata.configurationSnapshot?.processingMode == .instant,
+              loaded.metadata.configurationIdentity.historyLabel.contains("Instant") else {
+            throw ContractFailure(message: "history could not reconstruct the frozen configuration identity")
         }
     }
 

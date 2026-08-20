@@ -43,6 +43,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var isSaving = false
     private var isDismissed = false
     private var saveTask: Task<Void, Never>?
+    private let nextDictationNotice = NSTextField(
+        wrappingLabelWithString: NextDictationSettingsPolicy.nextDictationCopy
+    )
 
     init(
         settings: OigoSettings,
@@ -166,6 +169,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             wrappingLabelWithString: "Changes apply immediately after Save. Oigo only checks permissions when this window becomes active or when you refresh them."
         )
         description.textColor = .secondaryLabelColor
+        nextDictationNotice.textColor = .secondaryLabelColor
+        nextDictationNotice.isHidden = true
 
         let shortcutTitle = NSTextField(labelWithString: "Global shortcut")
         let shortcutHelp = NSTextField(
@@ -232,6 +237,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let stack = NSStackView(views: [
             title,
             description,
+            nextDictationNotice,
             shortcutRow,
             shortcutHelp,
             shortcutStatus,
@@ -260,6 +266,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -24),
             description.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            nextDictationNotice.widthAnchor.constraint(equalTo: stack.widthAnchor),
             shortcutHelp.widthAnchor.constraint(equalTo: stack.widthAnchor),
             modeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             localeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -367,6 +374,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     ) {
         microphoneStatus.stringValue = "Microphone: " + microphone.rawValue.capitalized
         accessibilityStatus.stringValue = "Accessibility: " + accessibility.rawValue.capitalized + " (Copy and History remain available)"
+    }
+
+    func setAppliesToNextDictation(_ applies: Bool) {
+        nextDictationNotice.isHidden = !applies
     }
 
     func setStorageHealth(_ health: DurableSessionHealth) {

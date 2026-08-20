@@ -213,6 +213,8 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         case audioFileName
         case rawTextFileName
         case cleanTextFileName
+        case configurationSnapshot
+        case retryOverrideSnapshot
     }
 
     public let id: UUID
@@ -238,6 +240,15 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
     public let audioFileName: String
     public let rawTextFileName: String
     public let cleanTextFileName: String
+    public var configurationSnapshot: DictationConfigurationSnapshot?
+    public var retryOverrideSnapshot: DictationConfigurationSnapshot?
+
+    public var configurationIdentity: DictationConfigurationIdentity {
+        if let configurationSnapshot {
+            return .known(configurationSnapshot)
+        }
+        return .unknown
+    }
 
     public init(
         id: UUID,
@@ -262,7 +273,9 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         transcriptionAttemptCount: Int = 0,
         audioFileName: String = "audio.caf",
         rawTextFileName: String = "raw.txt",
-        cleanTextFileName: String = "clean.txt"
+        cleanTextFileName: String = "clean.txt",
+        configurationSnapshot: DictationConfigurationSnapshot? = nil,
+        retryOverrideSnapshot: DictationConfigurationSnapshot? = nil
     ) {
         self.id = id
         self.directoryName = directoryName
@@ -287,6 +300,8 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         self.audioFileName = audioFileName
         self.rawTextFileName = rawTextFileName
         self.cleanTextFileName = cleanTextFileName
+        self.configurationSnapshot = configurationSnapshot
+        self.retryOverrideSnapshot = retryOverrideSnapshot
     }
 
     public init(from decoder: Decoder) throws {
@@ -314,7 +329,15 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
             transcriptionAttemptCount: container.decodeIfPresent(Int.self, forKey: .transcriptionAttemptCount) ?? 0,
             audioFileName: container.decode(String.self, forKey: .audioFileName),
             rawTextFileName: container.decode(String.self, forKey: .rawTextFileName),
-            cleanTextFileName: container.decode(String.self, forKey: .cleanTextFileName)
+            cleanTextFileName: container.decode(String.self, forKey: .cleanTextFileName),
+            configurationSnapshot: container.decodeIfPresent(
+                DictationConfigurationSnapshot.self,
+                forKey: .configurationSnapshot
+            ),
+            retryOverrideSnapshot: container.decodeIfPresent(
+                DictationConfigurationSnapshot.self,
+                forKey: .retryOverrideSnapshot
+            )
         )
     }
 }
@@ -765,6 +788,8 @@ public final class SessionStore: @unchecked Sendable {
         insertionFailureReason: String? = nil,
         insertionTextSource: TranscriptInsertionSource? = nil,
         cleanupFallbackReason: String? = nil,
+        configurationSnapshot: DictationConfigurationSnapshot? = nil,
+        retryOverrideSnapshot: DictationConfigurationSnapshot? = nil,
         expectedState: DictationSessionState? = nil
     ) throws -> DictationSession {
         lock.lock()
@@ -819,6 +844,12 @@ public final class SessionStore: @unchecked Sendable {
             if let insertionOutcome {
                 metadata.insertionOutcome = insertionOutcome
                 metadata.insertionFailureReason = insertionFailureReason
+            }
+            if let configurationSnapshot {
+                metadata.configurationSnapshot = configurationSnapshot
+            }
+            if let retryOverrideSnapshot {
+                metadata.retryOverrideSnapshot = retryOverrideSnapshot
             }
 
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)

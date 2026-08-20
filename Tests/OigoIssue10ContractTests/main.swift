@@ -31,7 +31,8 @@ private struct OigoIssue10ContractTests {
             ("raw-text persistence faults recover one canonical ordering", testRawTextPersistenceFaultsRecoverOneCanonicalOrdering),
             ("shutdown waits for registered task", testShutdownWaitsForRegisteredTask),
             ("transcription shutdown waits for registered task", testTranscriptionShutdownWaitsForRegisteredTask),
-            ("transcription shutdown cancels active transcription", testTranscriptionShutdownCancelsActiveTranscription)
+            ("transcription shutdown cancels active transcription", testTranscriptionShutdownCancelsActiveTranscription),
+            ("insertion terminal paths release store references", testInsertionTerminalPathsReleaseStoreReferences)
         ]
 
         var failures = 0
@@ -920,6 +921,48 @@ private struct OigoIssue10ContractTests {
               coordinator.state == .interrupted,
               !coordinator.hasActiveWork else {
             throw ContractFailure(message: "transcription shutdown did not cancel active transcription and release coordinator work")
+        }
+    }
+
+    private static func testInsertionTerminalPathsReleaseStoreReferences() async throws {
+        let successRoot = try temporaryDirectory()
+        defer { cleanup(successRoot) }
+        let successStore = try SessionStore(rootDirectory: successRoot)
+        let successCapture = ScriptedAudioCapture()
+        let successCoordinator = DictationCoordinator()
+        let successTranscription = ProcessingTranscriptionController()
+        _ = try await successCoordinator.startRecordingWithTranscription(
+            using: successCapture,
+            store: successStore,
+            transcription: successTranscription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        _ = try await successCoordinator.stopRecordingWithTranscription()
+        _ = try successCoordinator.beginInsertion(using: successStore)
+        _ = try successCoordinator.finishInsertion(outcome: .copied)
+        guard successCoordinator.activeResourceCount == 0,
+              !successCoordinator.hasActiveWork else {
+            throw ContractFailure(message: "successful insertion leaked operation-only store references")
+        }
+
+        let failureRoot = try temporaryDirectory()
+        defer { cleanup(failureRoot) }
+        let failureStore = try SessionStore(rootDirectory: failureRoot)
+        let failureCapture = ScriptedAudioCapture()
+        let failureCoordinator = DictationCoordinator()
+        let failureTranscription = ProcessingTranscriptionController()
+        _ = try await failureCoordinator.startRecordingWithTranscription(
+            using: failureCapture,
+            store: failureStore,
+            transcription: failureTranscription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        _ = try await failureCoordinator.stopRecordingWithTranscription()
+        _ = try failureCoordinator.beginInsertion(using: failureStore)
+        _ = failureCoordinator.failInsertion(reason: "paste failed")
+        guard failureCoordinator.activeResourceCount == 0,
+              !failureCoordinator.hasActiveWork else {
+            throw ContractFailure(message: "failed insertion leaked operation-only store references")
         }
     }
 

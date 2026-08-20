@@ -73,6 +73,8 @@
         A00000010000000000000044 /* TranscriptionOperationLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000038 /* TranscriptionOperationLifecycle.swift */; };
         A00000010000000000000045 /* DurableSessionBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000039 /* DurableSessionBootstrap.swift */; };
         A0000001000000000000004E /* LocaleSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000041 /* LocaleSelection.swift */; };
+        A0000001000000000000004F /* DictationConfigurationSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000042 /* DictationConfigurationSnapshot.swift */; };
+        A00000010000000000000050 /* AppOperationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000043 /* AppOperationGate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -201,6 +203,8 @@
         B0000001000000000000003F /* DescriptorFileIO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DescriptorFileIO.swift; sourceTree = "<group>"; };
         B00000010000000000000040 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
         B00000010000000000000041 /* LocaleSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocaleSelection.swift; sourceTree = "<group>"; };
+        B00000010000000000000042 /* DictationConfigurationSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationConfigurationSnapshot.swift; sourceTree = "<group>"; };
+        B00000010000000000000043 /* AppOperationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppOperationGate.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -334,6 +338,8 @@
                 B00000010000000000000038 /* TranscriptionOperationLifecycle.swift */,
                 B00000010000000000000039 /* DurableSessionBootstrap.swift */,
                 B00000010000000000000041 /* LocaleSelection.swift */,
+                B00000010000000000000042 /* DictationConfigurationSnapshot.swift */,
+                B00000010000000000000043 /* AppOperationGate.swift */,
             );
             path = Sources/OigoCore;
             sourceTree = "<group>";
@@ -622,6 +628,8 @@
                 A00000010000000000000044 /* TranscriptionOperationLifecycle.swift in Sources */,
                 A00000010000000000000045 /* DurableSessionBootstrap.swift in Sources */,
                 A0000001000000000000004E /* LocaleSelection.swift in Sources */,
+                A0000001000000000000004F /* DictationConfigurationSnapshot.swift in Sources */,
+                A00000010000000000000050 /* AppOperationGate.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
