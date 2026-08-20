@@ -602,7 +602,7 @@ private struct OigoIssue90ContractTests {
 
     private static func testRecorderStopAfterOverflow() throws {
         let writer = ScriptedWriter()
-        writer.blockWrites = true
+        writer.blockClose = true
         let recorder = AudioRecorder(
             deviceMonitor: EmptyDeviceMonitor(),
             inputRouter: FailingInputRouter()
@@ -624,7 +624,9 @@ private struct OigoIssue90ContractTests {
                 writer.failures.append(reason)
                 recorder.testNotifyFailure(reason, generation: generation)
             },
-            teardownHandler: {},
+            teardownHandler: {
+                recorder.testBeginEngineTeardown()
+            },
             onTerminalized: {
                 recorder.testNotifyTerminalized(generation: generation)
             }
@@ -637,25 +639,31 @@ private struct OigoIssue90ContractTests {
                 overflowed = true
             }
         }
-        writer.unblock()
+        guard overflowed else {
+            writer.unblockClose()
+            throw ContractFailure(message: "overflow was not produced")
+        }
+        guard writer.waitUntilCloseStarted(timeout: 1) else {
+            writer.unblockClose()
+            throw ContractFailure(message: "overflow teardown did not reach writer close")
+        }
+        do {
+            try recorder.stop()
+            writer.unblockClose()
+            throw ContractFailure(message: "stop during overflow teardown succeeded and could mark the session complete")
+        } catch let error as AudioRecorderError {
+            writer.unblockClose()
+            guard case .captureFailed(let reason) = error,
+                  reason == CapturePipelineFailure.overflow.rawValue else {
+                throw ContractFailure(message: "stop during overflow teardown did not report audio_pipeline_overflow")
+            }
+        }
         let deadline = Date().addingTimeInterval(1)
         while !pipeline.isFinalized && Date() < deadline {
             Thread.sleep(forTimeInterval: 0.01)
         }
-        guard overflowed else {
-            throw ContractFailure(message: "overflow was not produced")
-        }
-        do {
-            try recorder.stop()
-            throw ContractFailure(message: "stop after overflow succeeded and could mark the session complete")
-        } catch let error as AudioRecorderError {
-            guard case .captureFailed(let reason) = error,
-                  reason == CapturePipelineFailure.overflow.rawValue else {
-                throw ContractFailure(message: "stop after overflow did not report audio_pipeline_overflow")
-            }
-        }
-        guard !recorder.isRecording, !recorder.testIsFinishing else {
-            throw ContractFailure(message: "overflow left the recorder active")
+        guard !recorder.isRecording else {
+            throw ContractFailure(message: "overflow left the recorder recording")
         }
     }
 
@@ -866,7 +874,10 @@ private struct OigoIssue90ContractTests {
 private final class ScriptedWriter: CanonicalAudioWriting, @unchecked Sendable {
     private let lock = NSLock()
     private var gate = DispatchSemaphore(value: 0)
+    private let closeStarted = DispatchSemaphore(value: 0)
+    private let closeGate = DispatchSemaphore(value: 0)
     var blockWrites = false
+    var blockClose = false
     var failOnWrite: Int?
     private(set) var writeCount = 0
     private(set) var samples: [[Float]] = []
@@ -898,9 +909,30 @@ private final class ScriptedWriter: CanonicalAudioWriting, @unchecked Sendable {
     }
 
     func close() {
+        let shouldBlock: Bool = {
+            lock.lock()
+            defer { lock.unlock() }
+            return blockClose
+        }()
+        if shouldBlock {
+            closeStarted.signal()
+            closeGate.wait()
+        }
         lock.lock()
         closed = true
         lock.unlock()
+    }
+
+    func waitUntilCloseStarted(timeout: TimeInterval) -> Bool {
+        closeStarted.wait(timeout: .now() + timeout) == .success
+    }
+
+    func unblockClose() {
+        lock.lock()
+        blockClose = false
+        lock.unlock()
+        closeGate.signal()
+        closeGate.signal()
     }
 
     func unblock() {

@@ -326,20 +326,24 @@ public final class CapturePipeline: @unchecked Sendable {
         lock.unlock()
 
         discarded.forEach(recycle)
+        switch kind {
+        case .overflow:
+            onFailure?(CapturePipelineFailure.overflow.rawValue)
+        case .failure(let reason):
+            onFailure?(reason)
+        case .interrupt(let reason):
+            onInterruption?(reason)
+        case .none, .userStop, .cancel:
+            break
+        }
         teardownHandler?()
         writer.close()
         switch kind {
         case .userStop, .cancel:
             speechQueue.sync(flags: .barrier) {}
             onFinish?()
-        case .none:
+        case .none, .interrupt, .overflow, .failure:
             break
-        case .interrupt(let reason):
-            onInterruption?(reason)
-        case .overflow:
-            onFailure?(CapturePipelineFailure.overflow.rawValue)
-        case .failure(let reason):
-            onFailure?(reason)
         }
         onTerminalized?()
         finishedGroup.leave()

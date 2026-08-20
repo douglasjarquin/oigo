@@ -960,15 +960,12 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     }
 
     public func stop() throws {
-        terminalize(.userStop, generation: nil)
-        lock.lock()
-        let latched = latchedTerminal
-        lock.unlock()
-        switch latched {
-        case .failure(let reason), .interrupt(let reason):
+        if let reason = latchedFailureReason() {
             throw AudioRecorderError.captureFailed(reason)
-        case .none:
-            break
+        }
+        terminalize(.userStop, generation: nil)
+        if let reason = latchedFailureReason() {
+            throw AudioRecorderError.captureFailed(reason)
         }
     }
 
@@ -986,7 +983,20 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             return
         }
         lock.unlock()
-        _ = pipeline.tryAccept(buffer, generation: generation)
+        switch pipeline.tryAccept(buffer, generation: generation) {
+        case .overflow:
+            latchTerminal(
+                .failure(CapturePipelineFailure.overflow.rawValue),
+                generation: generation
+            )
+        case .conversionFailed:
+            latchTerminal(
+                .failure("microphone input could not be converted to canonical mono"),
+                generation: generation
+            )
+        case .accepted, .ignored:
+            break
+        }
     }
 
     private struct InputConfiguration {
@@ -1047,6 +1057,17 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             recording = true
         }
         return reason
+    }
+
+    private func latchedFailureReason() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        switch latchedTerminal {
+        case .failure(let reason), .interrupt(let reason):
+            return reason
+        case .none:
+            return nil
+        }
     }
 
     private func latchTerminal(_ terminal: LatchedTerminal, generation: UInt64) {
@@ -1244,6 +1265,11 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     @_spi(Testing)
     public func testNotifyFailure(_ reason: String, generation: UInt64) {
         latchTerminal(.failure(reason), generation: generation)
+    }
+
+    @_spi(Testing)
+    public func testBeginEngineTeardown() {
+        beginEngineTeardown()
     }
 
     @_spi(Testing)
