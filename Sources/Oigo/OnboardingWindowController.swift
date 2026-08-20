@@ -10,7 +10,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let checkSpeechAssets: (String) async -> OigoLocaleAssetStatus
     private let saveLanguage: (String) -> Void
     private let saveStep: (OigoOnboardingStep) -> Void
-    private let saveInputSelection: (OigoInputSelection) -> Void
+    private let saveInputSelection: (OigoInputSelection, Int) -> Void
     private let requestMicrophone: () async -> OigoPermissionState
     private let openMicrophoneSettings: () -> Void
     private let registrationStatus: () -> GlobalShortcutRegistrationStatus
@@ -21,7 +21,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let openAccessibilitySettings: () -> Void
     private let retryStorage: () -> Void
     private let openDataLocation: () -> Void
-    private let startTest: () -> Void
+    private let startSourceProbe: (OigoInputSelection, Int, UInt64) -> Void
+    private let stopSourceProbe: () -> Void
+    private let startTest: (UInt64) -> Void
     private let stopTest: () -> Void
     private let cancelTest: () -> Void
     private let openHistory: () -> Void
@@ -35,14 +37,16 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var microphoneState: OigoPermissionState
     private var accessibilityState: OigoPermissionState
     private var accessibilityRequestAttempted = false
-    private var testOutcome: OigoOnboardingTestOutcome = .pending
-    private var testRunning = false
+    private var evidence = OigoOnboardingEvidenceMachine()
+    private var activeTestGeneration: UInt64?
     private var commandAvailability: AppCommandAvailability?
     private var completed = false
     private var storageHealth: DurableSessionHealth
     private var committedShortcut: ToggleShortcut
     private var inputMenuSelections: [OigoInputSelection] = []
     private var selectedInput: OigoInputSelection
+    private var selectedInputChannel: Int
+    private var inputDevices: [OigoInputDevice]
 
     private let progressLabel = NSTextField(labelWithString: "")
     private let titleLabel = NSTextField(labelWithString: "")
@@ -52,6 +56,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let inputPopup = NSPopUpButton()
     private let inputLabel = NSTextField(labelWithString: "Microphone input")
     private let inputRow = NSStackView()
+    private let channelPopup = NSPopUpButton()
+    private let channelLabel = NSTextField(labelWithString: "Input channel")
+    private let channelRow = NSStackView()
+    private let meter = NSLevelIndicator()
+    private let quietOverrideButton = NSButton(title: "Continue with quiet environment", target: nil, action: nil)
+    private let copyOnlyButton = NSButton(title: "Continue with copy-only", target: nil, action: nil)
     private let languagePopup = NSPopUpButton()
     private let shortcutRecorder: ShortcutRecorderControl
     private let testField = NSTextField(string: "")
@@ -69,6 +79,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         globalShortcut: ToggleShortcut,
         inputDevices: [OigoInputDevice],
         selectedInput: OigoInputSelection,
+        selectedInputChannel: Int,
         committedLocaleIdentifier: String,
         microphoneState: OigoPermissionState,
         accessibilityState: OigoPermissionState,
@@ -77,7 +88,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         checkSpeechAssets: @escaping (String) async -> OigoLocaleAssetStatus,
         saveLanguage: @escaping (String) -> Void,
         saveStep: @escaping (OigoOnboardingStep) -> Void,
-        saveInputSelection: @escaping (OigoInputSelection) -> Void,
+        saveInputSelection: @escaping (OigoInputSelection, Int) -> Void,
         requestMicrophone: @escaping () async -> OigoPermissionState,
         openMicrophoneSettings: @escaping () -> Void,
         registrationStatus: @escaping () -> GlobalShortcutRegistrationStatus,
@@ -88,7 +99,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         openAccessibilitySettings: @escaping () -> Void,
         retryStorage: @escaping () -> Void,
         openDataLocation: @escaping () -> Void,
-        startTest: @escaping () -> Void,
+        startSourceProbe: @escaping (OigoInputSelection, Int, UInt64) -> Void,
+        stopSourceProbe: @escaping () -> Void,
+        startTest: @escaping (UInt64) -> Void,
         stopTest: @escaping () -> Void,
         cancelTest: @escaping () -> Void,
         openHistory: @escaping () -> Void,
@@ -98,6 +111,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.support = support
         self.currentStep = initialStep
         self.selectedInput = selectedInput
+        self.selectedInputChannel = OigoInputChannelPolicy.sanitized(selectedInputChannel)
+        self.inputDevices = inputDevices
         localeSelection = OigoLocaleSelectionState(
             committedIdentifier: committedLocaleIdentifier,
             role: .onboarding,
@@ -108,6 +123,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.saveLanguage = saveLanguage
         self.saveStep = saveStep
         self.saveInputSelection = saveInputSelection
+        self.startSourceProbe = startSourceProbe
+        self.stopSourceProbe = stopSourceProbe
         self.requestMicrophone = requestMicrophone
         self.openMicrophoneSettings = openMicrophoneSettings
         self.registrationStatus = registrationStatus
@@ -131,7 +148,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         shortcutRecorder = ShortcutRecorderControl(shortcut: globalShortcut)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 560),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -140,7 +157,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        evidence.setStorageHealth(storageHealth)
+        evidence.setSelectedSource(input: selectedInput, channel: selectedInputChannel)
         configureInputMenu(devices: inputDevices, selected: selectedInput)
+        configureChannelMenu()
         configureWindow()
         render()
     }
@@ -150,15 +170,20 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
+    var isDrivingProductionTest: Bool {
+        evidence.testRunning
+    }
+
+    func focusTestField() {
+        window?.makeFirstResponder(testField)
+    }
+
     func windowWillClose(_ notification: Notification) {
         _ = notification
         discardShortcutCandidate()
-        if onboardingTestAvailability.isOnboardingTestActive {
-            testRunning = false
-            cancelTest()
-        }
+        releaseOnboardingResources(cancelActiveTest: true)
         if support.isSupported, !completed {
-            saveInputSelection(selectedInputFromMenu())
+            saveInputSelection(selectedInputFromMenu(), selectedChannelFromMenu())
             saveStep(currentStep)
         }
         onClose()
@@ -175,31 +200,71 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        if currentStep == .microphone, microphoneState == .granted, !evidence.probeActive {
+            restartSourceProbe()
+        }
     }
 
     func updateInputDevices(_ devices: [OigoInputDevice]) {
         selectedInput = selectedInputFromMenu()
+        selectedInputChannel = selectedChannelFromMenu()
+        inputDevices = devices
         configureInputMenu(devices: devices, selected: selectedInput)
+        configureChannelMenu()
+        applyCurrentSourceSelection()
+        if currentStep == .microphone {
+            restartSourceProbe()
+        }
+        renderButtons()
     }
 
-    func focusTestField() {
-        guard currentStep == .testDictation,
-              let window else {
+    func applySourceProbeUpdate(_ update: OigoOnboardingSourceProbeUpdate) {
+        guard evidence.recordSourceProbe(update) else {
             return
         }
-        window.makeFirstResponder(testField)
+        meter.doubleValue = Double(update.meterLevel)
+        renderButtons()
+        if currentStep == .microphone {
+            statusLabel.stringValue = microphoneStatusMessage()
+        }
     }
 
-    func setTestResult(transcript: String, mode: OigoProcessingMode, copied: Bool) {
-        testOutcome = transcript.isEmpty ? .pending : .passed
-        testRunning = false
-        testField.stringValue = transcript
-        let clipboardStatus = copied ? "ready" : "not available"
-        statusLabel.stringValue = testOutcome == .passed
-            ? "Recording and transcription succeeded in " + mode.displayName + " mode. Clipboard output: " + clipboardStatus + "."
-            : "The test did not produce a transcript. Try again or skip the test."
-        actionButton.title = "Start test dictation"
-        renderButtons()
+    func bindTestSession(_ sessionID: UUID) {
+        guard let generation = activeTestGeneration else {
+            return
+        }
+        _ = evidence.bindSession(generation: generation, sessionID: sessionID)
+    }
+
+    func applyTestCompletion(
+        generation: UInt64,
+        sessionID: UUID?,
+        report: OigoOnboardingProductionReport,
+        selectedInsertionText: String
+    ) {
+        guard generation == activeTestGeneration else {
+            return
+        }
+        var report = report
+        if report.sessionID == nil {
+            report.sessionID = sessionID
+        } else if let sessionID, report.sessionID != sessionID {
+            return
+        }
+        guard evidence.recordProductionPath(generation: generation, report: report) else {
+            return
+        }
+        if report.insertionPath == .production,
+           report.insertionOutcome == .pasted || report.insertionOutcome == .dispatched,
+           evidence.outcome != .failed {
+            verifyDestinationAfterPaste(
+                generation: generation,
+                selectedInsertionText: selectedInsertionText
+            )
+            return
+        }
+        activeTestGeneration = nil
+        render()
     }
 
     private func configureWindow() {
@@ -214,12 +279,24 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         bodyLabel.maximumNumberOfLines = 8
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.maximumNumberOfLines = 4
-        testField.placeholderString = "Your test transcript appears here"
-        testField.isEditable = false
+        testField.placeholderString = "Speak after Start. This field must receive the paste."
+        testField.isEditable = true
         testField.isSelectable = true
+        testField.isEnabled = true
+        testField.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.test-field")
+        meter.minValue = 0
+        meter.maxValue = 1
+        meter.warningValue = 0.85
+        meter.criticalValue = 0.98
+        meter.levelIndicatorStyle = .continuousCapacity
+        meter.heightAnchor.constraint(equalToConstant: 18).isActive = true
         shortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
         languagePopup.target = self
         languagePopup.action = #selector(languageSelectionChanged)
+        inputPopup.target = self
+        inputPopup.action = #selector(inputSelectionChanged)
+        channelPopup.target = self
+        channelPopup.action = #selector(inputSelectionChanged)
         historyButton.target = self
         historyButton.action = #selector(openHistoryAction)
         retryStorageButton.target = self
@@ -230,6 +307,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         actionButton.action = #selector(performAction)
         skipButton.target = self
         skipButton.action = #selector(skipTestAction)
+        copyOnlyButton.target = self
+        copyOnlyButton.action = #selector(acceptCopyOnlyAction)
+        quietOverrideButton.target = self
+        quietOverrideButton.action = #selector(acceptQuietOverrideAction)
         backButton.target = self
         backButton.action = #selector(goBack)
         nextButton.target = self
@@ -241,11 +322,20 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         inputRow.alignment = .centerY
         inputRow.spacing = 8
         inputLabel.setContentHuggingPriority(.required, for: .horizontal)
+        channelRow.addArrangedSubview(channelLabel)
+        channelRow.addArrangedSubview(channelPopup)
+        channelRow.orientation = .horizontal
+        channelRow.alignment = .centerY
+        channelRow.spacing = 8
+        channelLabel.setContentHuggingPriority(.required, for: .horizontal)
         let stack = NSStackView(views: [
             progressLabel,
             titleLabel,
             bodyLabel,
             inputRow,
+            channelRow,
+            meter,
+            quietOverrideButton,
             languagePopup,
             shortcutRecorder,
             testField,
@@ -256,6 +346,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             historyButton,
             actionButton,
             skipButton,
+            copyOnlyButton,
             NSView(),
             NSStackView(views: [backButton, nextButton])
         ])
@@ -276,9 +367,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             storageStatusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             inputRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            channelRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            meter.widthAnchor.constraint(equalTo: stack.widthAnchor),
             languagePopup.widthAnchor.constraint(equalToConstant: 280),
             shortcutRecorder.widthAnchor.constraint(equalToConstant: 280),
             inputPopup.widthAnchor.constraint(equalToConstant: 280),
+            channelPopup.widthAnchor.constraint(equalToConstant: 280),
             testField.widthAnchor.constraint(equalTo: stack.widthAnchor),
             actionButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
             historyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140),
@@ -296,12 +390,19 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         languagePopup.isHidden = currentStep != .language
         shortcutRecorder.isHidden = currentStep != .shortcut
         inputRow.isHidden = currentStep != .microphone
+        channelRow.isHidden = currentStep != .microphone
+        meter.isHidden = currentStep != .microphone
+        quietOverrideButton.isHidden = currentStep != .microphone
+            || evidence.signalHealth != .silent
+            || !evidence.acceptedCanonicalBuffer
         testField.isHidden = !isSupported || currentStep != .testDictation
         historyButton.isHidden = currentStep != .recovery
+            && !(currentStep == .testDictation && evidence.recoveryActions.contains(.openHistory))
         storageStatusLabel.isHidden = storageHealth.isReady
         retryStorageButton.isHidden = storageHealth.isReady
         openDataLocationButton.isHidden = storageHealth.isReady
         skipButton.isHidden = currentStep != .testDictation
+        copyOnlyButton.isHidden = currentStep != .testDictation || !evidence.canAcceptCopyOnly
         statusLabel.stringValue = status(for: currentStep)
         storageStatusLabel.stringValue = storageHealth.statusMessage
         storageStatusLabel.textColor = storageHealth.isReady ? .secondaryLabelColor : .systemOrange
@@ -338,27 +439,29 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         if currentStep == .language {
             nextButton.isEnabled = localeSelection.canConfirm
         }
+        if currentStep == .microphone {
+            nextButton.isEnabled = microphoneState == .granted && evidence.microphoneCanAdvance
+        }
         if currentStep == .testDictation {
-            nextButton.isEnabled = storageHealth.isReady
-                && testOutcome.allowsContinue
+            nextButton.isEnabled = evidence.canFinishReady
                 && !onboardingTestAvailability.isOnboardingTestActive
             actionButton.isEnabled = storageHealth.isReady
                 && onboardingTestAvailability.canUseOnboardingTestAction
             skipButton.isEnabled = true
         }
         if currentStep == .recovery {
-            nextButton.isEnabled = storageHealth.isReady && registrationStatus().isActive
+            nextButton.isEnabled = evidence.canFinishReady && registrationStatus().isActive
         }
     }
 
     func setStorageHealth(_ health: DurableSessionHealth) {
         storageHealth = health
+        evidence.setStorageHealth(health)
         render()
     }
 
     func setCommandAvailability(_ availability: AppCommandAvailability) {
         commandAvailability = availability
-        testRunning = availability.isOnboardingTestActive
         if currentStep == .testDictation {
             render()
         }
@@ -366,8 +469,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     private var onboardingTestAvailability: AppCommandAvailability {
         commandAvailability ?? AppCommandAvailability.evaluate(
-            coordinatorState: testRunning ? .recording : .idle,
-            occupiedKind: testRunning ? .onboardingTest : nil,
+            coordinatorState: evidence.testRunning ? .recording : .idle,
+            occupiedKind: evidence.testRunning ? .onboardingTest : nil,
             acceptingCommands: true,
             setupComplete: false,
             storageReady: storageHealth.isReady
@@ -381,13 +484,13 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         case .language:
             "Choose a language supported by Oigo's on-device speech module. Oigo picks the closest supported system locale and checks speech assets before your first valuable dictation."
         case .microphone:
-            "Oigo records audio so every dictation can be retried from History. We ask for microphone access only after this explanation."
+            "Choose the microphone and channel Oigo will record. A local meter confirms the selected source produces a usable buffer. We ask for microphone access only after this explanation."
         case .shortcut:
             "Choose a readable global shortcut. The shipped default is \(ToggleShortcut.default.displayName), and Oigo keeps the previous working choice when registration fails."
         case .insertion:
             "Accessibility lets Oigo paste one completed transcript into the field you were using. If you decline, Copy and History still work."
         case .testDictation:
-            "Use the Oigo-owned field below to verify recording, transcription, the selected mode, and clipboard output."
+            "Focus the editable field below, then start and stop a real dictation. Setup passes only when that field receives the inserted transcript."
         case .recovery:
             "History is available from the Oigo menu bar item. It keeps saved recordings and lets you retry a failed transcription."
         case .complete:
@@ -398,7 +501,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private func status(for step: OigoOnboardingStep) -> String {
         switch step {
         case .microphone:
-            return "Current microphone state: " + microphoneState.rawValue.capitalized
+            return microphoneStatusMessage()
         case .insertion:
             return "Current Accessibility state: " + accessibilityState.rawValue.capitalized
         case .shortcut:
@@ -409,12 +512,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             case .inactive(let message):
                 return "Global shortcut inactive: " + (registrationError() ?? message)
             }
-        case .testDictation where testOutcome == .passed:
-            return "Test complete."
+        case .testDictation:
+            return evidence.statusMessage
         case .language:
             return localeSelection.statusMessage
-        case .testDictation where testOutcome == .skipped:
-            return "Test skipped. You can run it later from Settings."
         default:
             return ""
         }
@@ -424,16 +525,28 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         guard currentStep == .testDictation else {
             return
         }
-        if onboardingTestAvailability.isOnboardingTestActive {
-            testRunning = false
-            cancelTest()
-        }
-        testOutcome = .skipped
+        releaseOnboardingResources(cancelActiveTest: true)
+        activeTestGeneration = nil
+        evidence.skip()
         guard let next = nextStep(after: currentStep) else {
             return
         }
         currentStep = next
         saveStep(next)
+        render()
+    }
+
+    @objc private func acceptCopyOnlyAction() {
+        guard currentStep == .testDictation, evidence.acceptCopyOnly() else {
+            return
+        }
+        render()
+    }
+
+    @objc private func acceptQuietOverrideAction() {
+        guard currentStep == .microphone, evidence.acceptQuietOverride() else {
+            return
+        }
         render()
     }
 
@@ -493,6 +606,24 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         if let selectedIndex = items.firstIndex(where: { $0.selection == selected }) {
             inputPopup.selectItem(at: selectedIndex)
         }
+        applyCurrentSourceSelection(unavailable: items.contains { $0.selection == selected && $0.isUnavailable })
+    }
+
+    private func configureChannelMenu() {
+        let channelCount = OigoInputChannelPolicy.channelCount(
+            for: selectedInput,
+            devices: inputDevices
+        )
+        if !OigoInputChannelPolicy.isValid(selectedInputChannel, channelCount: channelCount) {
+            selectedInputChannel = OigoInputChannelPolicy.defaultIndex
+        }
+        channelPopup.removeAllItems()
+        channelPopup.addItems(
+            withTitles: (0..<channelCount).map(OigoInputChannelPolicy.displayTitle(for:))
+        )
+        if selectedInputChannel < channelCount {
+            channelPopup.selectItem(at: selectedInputChannel)
+        }
     }
 
     private func selectedInputFromMenu() -> OigoInputSelection {
@@ -501,6 +632,22 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             return .systemDefault
         }
         return inputMenuSelections[index]
+    }
+
+    private func selectedChannelFromMenu() -> Int {
+        max(OigoInputChannelPolicy.defaultIndex, channelPopup.indexOfSelectedItem)
+    }
+
+    @objc private func inputSelectionChanged() {
+        selectedInput = selectedInputFromMenu()
+        selectedInputChannel = selectedChannelFromMenu()
+        configureChannelMenu()
+        applyCurrentSourceSelection()
+        saveInputSelection(selectedInput, selectedInputChannel)
+        if currentStep == .microphone, microphoneState == .granted {
+            restartSourceProbe()
+        }
+        render()
     }
 
     @objc private func performAction() {
@@ -535,11 +682,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     microphoneState = await requestMicrophone()
-                    statusLabel.stringValue = microphoneState == .granted
-                        ? "Microphone access is ready."
-                        : "Microphone access was denied. Open System Settings to recover."
-                    renderButtons()
-                    if microphoneState == .denied { actionButton.title = "Open Microphone Settings" }
+                    if microphoneState == .granted {
+                        restartSourceProbe()
+                    }
+                    statusLabel.stringValue = microphoneStatusMessage()
+                    render()
                 }
             }
         case .insertion:
@@ -557,12 +704,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
                 renderButtons()
             }
         case .testDictation:
-            guard storageHealth.isReady else {
-                statusLabel.stringValue = "Storage unavailable. Retry storage before starting a test dictation."
-                return
-            }
             let availability = onboardingTestAvailability
-            if availability.isOnboardingTestActive {
+            if evidence.testRunning || availability.isOnboardingTestActive {
                 guard availability.canStopDictation || availability.canCancelOnboardingTest else {
                     statusLabel.stringValue = availability.busyReason?.userMessage
                         ?? "Stop test dictation is unavailable."
@@ -570,14 +713,32 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
                     return
                 }
                 stopTest()
-            } else if availability.canRunOnboardingTest {
-                startTest()
-            } else {
+                render()
+                return
+            }
+            guard availability.canRunOnboardingTest else {
                 statusLabel.stringValue = availability.busyReason?.userMessage
                     ?? "Start test dictation is unavailable."
                 render()
                 return
             }
+            guard storageHealth.isReady else {
+                statusLabel.stringValue = OigoOnboardingEvidenceMachine.statusMessage(for: .storage)
+                return
+            }
+            testField.stringValue = ""
+            guard let generation = evidence.beginTest(
+                destinationEditable: testField.isEditable && testField.isEnabled
+            ) else {
+                activeTestGeneration = nil
+                statusLabel.stringValue = evidence.statusMessage
+                render()
+                return
+            }
+            activeTestGeneration = generation
+            _ = evidence.markDestinationCleared(generation: generation)
+            window?.makeFirstResponder(testField)
+            startTest(generation)
             render()
         default:
             break
@@ -618,37 +779,41 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             }
             saveLanguage(locale)
         }
-        if currentStep == .recovery, !storageHealth.isReady {
-            statusLabel.stringValue = "Storage unavailable. Retry storage before finishing setup."
+        if currentStep == .recovery, !evidence.canFinishReady {
+            statusLabel.stringValue = storageHealth.isReady
+                ? evidence.statusMessage
+                : OigoOnboardingEvidenceMachine.statusMessage(for: .storage)
+            return
+        }
+        if currentStep == .testDictation, !evidence.canFinishReady {
+            statusLabel.stringValue = evidence.statusMessage
+            renderButtons()
             return
         }
         if currentStep == .microphone {
+            guard microphoneState == .granted, evidence.microphoneCanAdvance else {
+                statusLabel.stringValue = microphoneStatusMessage()
+                renderButtons()
+                return
+            }
             selectedInput = selectedInputFromMenu()
-            saveInputSelection(selectedInput)
+            selectedInputChannel = selectedChannelFromMenu()
+            saveInputSelection(selectedInput, selectedInputChannel)
         }
         guard let next = nextStep(after: currentStep) else {
             completed = true
+            releaseOnboardingResources(cancelActiveTest: false)
             onComplete()
             window?.close()
             return
         }
-        currentStep = next
-        if currentStep == .language {
-            localeSelection.revalidate()
-        }
-        saveStep(next)
-        render()
+        moveToStep(next)
     }
 
     @objc private func goBack() {
         discardShortcutCandidate()
         guard let previous = previousStep(before: currentStep) else { return }
-        currentStep = previous
-        if currentStep == .language {
-            localeSelection.revalidate()
-        }
-        saveStep(previous)
-        render()
+        moveToStep(previous)
     }
 
     @objc private func openHistoryAction() {
@@ -690,6 +855,168 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private func discardShortcutCandidate() {
         shortcutRecorder.cancelRecording()
         shortcutRecorder.restoreCandidate(committedShortcut)
+    }
+
+    private func moveToStep(_ step: OigoOnboardingStep) {
+        let leavingMicrophone = currentStep == .microphone && step != .microphone
+        let leavingTest = currentStep == .testDictation && step != .testDictation
+        if leavingMicrophone || leavingTest {
+            releaseOnboardingResources(cancelActiveTest: leavingTest)
+        }
+        currentStep = step
+        if currentStep == .language {
+            localeSelection.revalidate()
+        }
+        if currentStep == .microphone, microphoneState == .granted {
+            restartSourceProbe()
+        }
+        if currentStep == .testDictation {
+            testField.stringValue = ""
+        }
+        saveStep(step)
+        render()
+    }
+
+    private func applyCurrentSourceSelection(unavailable: Bool? = nil) {
+        let items = OigoInputMenu.items(devices: inputDevices, selected: selectedInput)
+        let isUnavailable = unavailable ?? items.contains {
+            $0.selection == selectedInput && $0.isUnavailable
+        }
+        evidence.setSelectedSource(
+            input: selectedInput,
+            channel: selectedInputChannel,
+            unavailable: isUnavailable
+        )
+    }
+
+    private func restartSourceProbe() {
+        meter.doubleValue = 0
+        let generation = evidence.beginSourceProbe()
+        startSourceProbe(selectedInput, selectedInputChannel, generation)
+    }
+
+    private func releaseOnboardingResources(cancelActiveTest: Bool) {
+        evidence.leaveMicrophoneStep()
+        stopSourceProbe()
+        meter.doubleValue = 0
+        if cancelActiveTest {
+            activeTestGeneration = nil
+            if evidence.testRunning {
+                cancelTest()
+            }
+        }
+    }
+
+    private func microphoneStatusMessage() -> String {
+        if microphoneState != .granted {
+            return "Current microphone state: " + microphoneState.rawValue.capitalized
+        }
+        if let failedStage = evidence.failedStage,
+           failedStage == .selectedSource || failedStage == .canonicalBuffer {
+            return OigoOnboardingEvidenceMachine.statusMessage(for: failedStage)
+        }
+        if evidence.microphoneCanAdvance {
+            return "Selected source produced a usable buffer."
+        }
+        if evidence.acceptedCanonicalBuffer, evidence.signalHealth == .silent {
+            return "The selected source is unusually quiet. Retry or continue with a quiet environment."
+        }
+        if evidence.acceptedCanonicalBuffer, evidence.signalHealth == .clipped {
+            return "The selected source looks clipped. Retry after lowering the input level."
+        }
+        return "Waiting for a usable buffer from the selected source."
+    }
+
+    private func verifyDestinationAfterPaste(
+        generation: UInt64,
+        selectedInsertionText: String
+    ) {
+        let deadline = Date().addingTimeInterval(0.25)
+        while Date() < deadline {
+            guard generation == activeTestGeneration, generation == evidence.generation else {
+                return
+            }
+            if !isTestFieldStillSelected() {
+                finishDestinationVerification(
+                    generation: generation,
+                    selectedInsertionText: selectedInsertionText,
+                    eventBoundaryCompleted: false,
+                    failure: .targetChanged
+                )
+                return
+            }
+            if fieldMatchesDurableText(selectedInsertionText) {
+                finishDestinationVerification(
+                    generation: generation,
+                    selectedInsertionText: selectedInsertionText,
+                    eventBoundaryCompleted: true
+                )
+                return
+            }
+            pumpPostedAppKitEvents(until: min(Date().addingTimeInterval(0.01), deadline))
+        }
+        guard generation == activeTestGeneration, generation == evidence.generation else {
+            return
+        }
+        if fieldMatchesDurableText(selectedInsertionText) {
+            finishDestinationVerification(
+                generation: generation,
+                selectedInsertionText: selectedInsertionText,
+                eventBoundaryCompleted: true
+            )
+            return
+        }
+        let hasOtherText = !testField.stringValue.isEmpty
+        finishDestinationVerification(
+            generation: generation,
+            selectedInsertionText: selectedInsertionText,
+            eventBoundaryCompleted: hasOtherText,
+            failure: hasOtherText ? .mismatch : .timeout
+        )
+    }
+
+    private func isTestFieldStillSelected() -> Bool {
+        OigoOnboardingDestinationFocus.isStillSelected(
+            firstResponder: window?.firstResponder.map(ObjectIdentifier.init),
+            field: ObjectIdentifier(testField),
+            fieldEditor: testField.currentEditor().map(ObjectIdentifier.init)
+        )
+    }
+
+    private func fieldMatchesDurableText(_ selectedInsertionText: String) -> Bool {
+        !selectedInsertionText.isEmpty && testField.stringValue == selectedInsertionText
+    }
+
+    private func pumpPostedAppKitEvents(until deadline: Date) {
+        while Date() < deadline {
+            guard let event = NSApp.nextEvent(
+                matching: .any,
+                until: deadline,
+                inMode: .default,
+                dequeue: true
+            ) else {
+                _ = CFRunLoopRunInMode(CFRunLoopMode.defaultMode, 0.01, true)
+                return
+            }
+            NSApp.sendEvent(event)
+        }
+    }
+
+    private func finishDestinationVerification(
+        generation: UInt64,
+        selectedInsertionText: String,
+        eventBoundaryCompleted: Bool,
+        failure: OigoOnboardingDestinationFailure? = nil
+    ) {
+        let matches = fieldMatchesDurableText(selectedInsertionText)
+        _ = evidence.completeDestinationVerification(
+            generation: generation,
+            fieldMatchesDurableSelectedText: matches,
+            eventBoundaryCompleted: eventBoundaryCompleted,
+            failure: failure
+        )
+        activeTestGeneration = nil
+        render()
     }
 
     private static func validationMessage(_ validation: OigoShortcutValidation) -> String {

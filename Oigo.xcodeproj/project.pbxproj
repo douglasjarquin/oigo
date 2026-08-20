@@ -75,6 +75,8 @@
         A0000001000000000000004E /* LocaleSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000041 /* LocaleSelection.swift */; };
         A0000001000000000000004F /* DictationConfigurationSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000042 /* DictationConfigurationSnapshot.swift */; };
         A00000010000000000000050 /* AppOperationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000043 /* AppOperationGate.swift */; };
+        A00000010000000000000051 /* OnboardingEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000044 /* OnboardingEvidence.swift */; };
+        A00000010000000000000052 /* OnboardingSourceProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000045 /* OnboardingSourceProbe.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -205,6 +207,8 @@
         B00000010000000000000041 /* LocaleSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocaleSelection.swift; sourceTree = "<group>"; };
         B00000010000000000000042 /* DictationConfigurationSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationConfigurationSnapshot.swift; sourceTree = "<group>"; };
         B00000010000000000000043 /* AppOperationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppOperationGate.swift; sourceTree = "<group>"; };
+        B00000010000000000000044 /* OnboardingEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingEvidence.swift; sourceTree = "<group>"; };
+        B00000010000000000000045 /* OnboardingSourceProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSourceProbe.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -340,6 +344,7 @@
                 B00000010000000000000041 /* LocaleSelection.swift */,
                 B00000010000000000000042 /* DictationConfigurationSnapshot.swift */,
                 B00000010000000000000043 /* AppOperationGate.swift */,
+                B00000010000000000000044 /* OnboardingEvidence.swift */,
             );
             path = Sources/OigoCore;
             sourceTree = "<group>";
@@ -348,6 +353,7 @@
             isa = PBXGroup;
             children = (
                 B0000001000000000000000F /* AudioRecorder.swift */,
+                B00000010000000000000045 /* OnboardingSourceProbe.swift */,
                 B00000010000000000000036 /* AudioRecordingOperationFence.swift */,
                 B00000010000000000000010 /* AudioPlayback.swift */,
                 B0000001000000000000003B /* CAFWriter.swift */,
@@ -630,6 +636,7 @@
                 A0000001000000000000004E /* LocaleSelection.swift in Sources */,
                 A0000001000000000000004F /* DictationConfigurationSnapshot.swift in Sources */,
                 A00000010000000000000050 /* AppOperationGate.swift in Sources */,
+                A00000010000000000000051 /* OnboardingEvidence.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -638,6 +645,7 @@
             buildActionMask = 2147483647;
             files = (
                 A0000001000000000000000C /* AudioRecorder.swift in Sources */,
+                A00000010000000000000052 /* OnboardingSourceProbe.swift in Sources */,
                 A00000010000000000000042 /* AudioRecordingOperationFence.swift in Sources */,
                 A0000001000000000000000D /* AudioPlayback.swift in Sources */,
                 A00000010000000000000047 /* CAFWriter.swift in Sources */,

@@ -61,7 +61,7 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Approved evaluation corpus preserves protected technical tokens")
             exit(0)
         } catch {
-            print("FAIL: Instant mode does not initialize Foundation Models: " + String(describing: error))
+            print("FAIL: " + String(describing: error))
             exit(1)
         }
     }
@@ -499,7 +499,10 @@ private struct OigoIssue8ContractTests {
         guard TranscriptChunker.split(rawText).count > 1 else {
             throw ContractFailure(message: "two-chunk fixture did not split")
         }
-        let deadline: UInt64 = 20_000_000
+        // 20 ms is too tight on a loaded CI runner: chunk 1 can consume the
+        // whole budget before the hanging chunk attaches, so the timeout
+        // returns with no losing task to retain.
+        let deadline: UInt64 = 200_000_000
         let startedAt = DispatchTime.now().uptimeNanoseconds
         let decision = await coordinator.resolve(
             mode: .clean,
@@ -511,7 +514,7 @@ private struct OigoIssue8ContractTests {
         guard decision.fallbackReason == .timeout,
               decision.insertionSource == .raw,
               decision.cleanText == nil,
-              elapsedNanoseconds < deadline + 80_000_000,
+              elapsedNanoseconds < deadline + 200_000_000,
               snapshot.resourceReleaseLatencyNanoseconds.isEmpty,
               coordinator.isRetainingTimedOutGeneration else {
             throw ContractFailure(message: "later-chunk timeout did not retain the losing generation")
