@@ -1,22 +1,21 @@
 import Darwin
 import AVFAudio
 import Foundation
+import OigoCapture
 import OigoCore
 
 @available(macOS 26.0, *)
 final class SecuredAudioFile: @unchecked Sendable {
-    let file: AVAudioFile
+    let reader: CAFReader
     let byteCount: Int64
-    private let fileDescriptor: AudioFileDescriptor
 
-    init(file: AVAudioFile, byteCount: Int64, fileDescriptor: AudioFileDescriptor) {
-        self.file = file
+    init(reader: CAFReader, byteCount: Int64) {
+        self.reader = reader
         self.byteCount = byteCount
-        self.fileDescriptor = fileDescriptor
     }
 
     deinit {
-        fileDescriptor.close()
+        reader.close()
     }
 }
 
@@ -54,12 +53,10 @@ public enum SavedAudioRetry {
             )
         }
         do {
-            let descriptorURL = URL(fileURLWithPath: "/dev/fd/\(fileDescriptor.rawValue)")
-            let file = try AVAudioFile(forReading: descriptorURL)
+            let reader = try CAFReader(descriptor: fileDescriptor, ownsDescriptor: true)
             return SecuredAudioFile(
-                file: file,
-                byteCount: Int64(fileInfo.st_size),
-                fileDescriptor: fileDescriptor
+                reader: reader,
+                byteCount: Int64(fileInfo.st_size)
             )
         } catch {
             fileDescriptor.close()

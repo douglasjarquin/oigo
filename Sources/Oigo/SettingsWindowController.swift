@@ -6,6 +6,7 @@ import OigoHotKey
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let shortcutRecorder: ShortcutRecorderControl
     private let inputPopup = NSPopUpButton()
+    private let channelPopup = NSPopUpButton()
     private let localePopup = NSPopUpButton()
     private let modePopup = NSPopUpButton()
     private let retentionPopup = NSPopUpButton()
@@ -35,6 +36,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var committedShortcut: ToggleShortcut
     private var inputMenuSelections: [OigoInputSelection] = []
     private var selectedInput: OigoInputSelection
+    private var selectedInputChannel: Int
+    private var inputDevices: [OigoInputDevice]
     private var localeSelection: OigoLocaleSelectionState
     private var localeMenuIdentifiers: [String] = []
     private var isSaving = false
@@ -66,6 +69,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.registrationStatus = registrationStatus
         self.registrationError = registrationError
         selectedInput = settings.selectedInput
+        selectedInputChannel = settings.selectedInputChannel
+        self.inputDevices = inputDevices
         self.save = save
         self.checkSpeechAssets = checkSpeechAssets
         self.refreshPermissions = refreshPermissions
@@ -97,6 +102,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
         window.delegate = self
         configureInputMenu(devices: inputDevices, selected: selectedInput)
+        configureChannelMenu()
         localePopup.autoenablesItems = false
         localeSelection.loadSupported(supportedLocales)
         syncLocalePopup()
@@ -140,7 +146,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func updateInputDevices(_ devices: [OigoInputDevice]) {
         selectedInput = selectedInputFromMenu()
+        selectedInputChannel = selectedChannelFromMenu()
+        inputDevices = devices
         configureInputMenu(devices: devices, selected: selectedInput)
+        configureChannelMenu()
     }
 
     private func configureWindow() {
@@ -167,6 +176,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let localeLabel = NSTextField(labelWithString: "Dictation language")
         let retentionLabel = NSTextField(labelWithString: "Audio retention")
         let inputLabel = NSTextField(labelWithString: "Microphone input")
+        let channelLabel = NSTextField(labelWithString: "Input channel")
 
         let refreshButton = NSButton(title: "Refresh permission states", target: self, action: #selector(refreshPermissionStates))
         let microphoneSettingsButton = NSButton(title: "Open Microphone Settings", target: self, action: #selector(openMicrophoneSettingsAction))
@@ -199,6 +209,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let localeRow = row(label: localeLabel, control: localePopup)
         let retentionRow = row(label: retentionLabel, control: retentionPopup)
         let inputRow = row(label: inputLabel, control: inputPopup)
+        let channelRow = row(label: channelLabel, control: channelPopup)
+        inputPopup.target = self
+        inputPopup.action = #selector(inputSelectionChanged)
         let permissionsTitle = NSTextField(labelWithString: "Permissions")
         permissionsTitle.font = .boldSystemFont(ofSize: 13)
         let permissionStack = NSStackView(views: [microphoneStatus, microphoneSettingsButton, accessibilityStatus, accessibilitySettingsButton, refreshButton])
@@ -223,6 +236,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             shortcutHelp,
             shortcutStatus,
             inputRow,
+            channelRow,
             modeRow,
             localeRow,
             retentionRow,
@@ -251,9 +265,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             localeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             retentionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             inputRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            channelRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             saveButton.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
             localePopup.widthAnchor.constraint(equalToConstant: 260),
-            inputPopup.widthAnchor.constraint(equalTo: localePopup.widthAnchor)
+            inputPopup.widthAnchor.constraint(equalTo: localePopup.widthAnchor),
+            channelPopup.widthAnchor.constraint(equalTo: localePopup.widthAnchor)
         ])
         updateShortcutStatus()
     }
@@ -271,12 +287,39 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    private func configureChannelMenu() {
+        let channelCount = OigoInputChannelPolicy.channelCount(
+            for: selectedInput,
+            devices: inputDevices
+        )
+        if !OigoInputChannelPolicy.isValid(selectedInputChannel, channelCount: channelCount) {
+            selectedInputChannel = OigoInputChannelPolicy.defaultIndex
+        }
+        channelPopup.removeAllItems()
+        channelPopup.addItems(
+            withTitles: (0..<channelCount).map(OigoInputChannelPolicy.displayTitle(for:))
+        )
+        if selectedInputChannel < channelCount {
+            channelPopup.selectItem(at: selectedInputChannel)
+        }
+    }
+
     private func selectedInputFromMenu() -> OigoInputSelection {
         let index = inputPopup.indexOfSelectedItem
         guard inputMenuSelections.indices.contains(index) else {
             return .systemDefault
         }
         return inputMenuSelections[index]
+    }
+
+    private func selectedChannelFromMenu() -> Int {
+        max(OigoInputChannelPolicy.defaultIndex, channelPopup.indexOfSelectedItem)
+    }
+
+    @objc private func inputSelectionChanged() {
+        selectedInput = selectedInputFromMenu()
+        selectedInputChannel = selectedChannelFromMenu()
+        configureChannelMenu()
     }
 
     private func syncLocalePopup() {
@@ -414,7 +457,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             audioRetention: retention,
             keepSuccessfulAudioIndefinitely: keepAudioCheckbox.state == .on,
             launchAtLogin: launchAtLoginCheckbox.state == .on,
-            selectedInput: selectedInputFromMenu()
+            selectedInput: selectedInputFromMenu(),
+            selectedInputChannel: selectedChannelFromMenu()
         )
         guard localeSelection.requiresVerificationToCommit else {
             _ = finishSave(draft, languageUnappliedMessage: nil)
