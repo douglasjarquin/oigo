@@ -204,6 +204,8 @@ public final class InsertionService {
         switch source {
         case .raw:
             try store.readRawText(for: session)
+        case .normalized:
+            try store.readNormalizedText(for: session)
         case .clean:
             try store.readCleanText(for: session)
         }

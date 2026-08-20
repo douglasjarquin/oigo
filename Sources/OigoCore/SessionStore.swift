@@ -162,11 +162,13 @@ public enum InsertionOutcome: String, Codable, CaseIterable, Equatable, Sendable
 
 public enum SessionTextSource: String, Codable, CaseIterable, Equatable, Sendable {
     case raw
+    case normalized
     case processed
 }
 
 public enum TranscriptInsertionSource: String, Codable, CaseIterable, Equatable, Sendable {
     case raw
+    case normalized
     case clean
 }
 
@@ -217,6 +219,9 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         case audioByteCount
         case rawTextByteCount
         case rawTextRevision
+        case normalizedTextRevision
+        case normalizedFromRawRevision
+        case cleanFromNormalizedRevision
         case insertionOutcome
         case insertionFailureReason
         case insertionTextSource
@@ -227,6 +232,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         case audioFileName
         case rawTextFileName
         case cleanTextFileName
+        case normalizedTextFileName
         case configurationSnapshot
         case retryOverrideSnapshot
     }
@@ -244,6 +250,9 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
     public var audioByteCount: Int64?
     public var rawTextByteCount: Int64?
     public var rawTextRevision: UInt64
+    public var normalizedTextRevision: UInt64
+    public var normalizedFromRawRevision: UInt64?
+    public var cleanFromNormalizedRevision: UInt64?
     public var insertionOutcome: InsertionOutcome?
     public var insertionFailureReason: String?
     public var insertionTextSource: TranscriptInsertionSource?
@@ -254,6 +263,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
     public let audioFileName: String
     public let rawTextFileName: String
     public let cleanTextFileName: String
+    public let normalizedTextFileName: String
     public var configurationSnapshot: DictationConfigurationSnapshot?
     public var retryOverrideSnapshot: DictationConfigurationSnapshot?
 
@@ -278,6 +288,9 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         audioByteCount: Int64? = nil,
         rawTextByteCount: Int64? = nil,
         rawTextRevision: UInt64 = 0,
+        normalizedTextRevision: UInt64 = 0,
+        normalizedFromRawRevision: UInt64? = nil,
+        cleanFromNormalizedRevision: UInt64? = nil,
         insertionOutcome: InsertionOutcome? = nil,
         insertionFailureReason: String? = nil,
         insertionTextSource: TranscriptInsertionSource? = nil,
@@ -288,6 +301,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         audioFileName: String = "audio.caf",
         rawTextFileName: String = "raw.txt",
         cleanTextFileName: String = "clean.txt",
+        normalizedTextFileName: String = "normalized.txt",
         configurationSnapshot: DictationConfigurationSnapshot? = nil,
         retryOverrideSnapshot: DictationConfigurationSnapshot? = nil
     ) {
@@ -304,6 +318,9 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         self.audioByteCount = audioByteCount
         self.rawTextByteCount = rawTextByteCount
         self.rawTextRevision = rawTextRevision
+        self.normalizedTextRevision = normalizedTextRevision
+        self.normalizedFromRawRevision = normalizedFromRawRevision
+        self.cleanFromNormalizedRevision = cleanFromNormalizedRevision
         self.insertionOutcome = insertionOutcome
         self.insertionFailureReason = insertionFailureReason
         self.insertionTextSource = insertionTextSource
@@ -314,6 +331,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         self.audioFileName = audioFileName
         self.rawTextFileName = rawTextFileName
         self.cleanTextFileName = cleanTextFileName
+        self.normalizedTextFileName = normalizedTextFileName
         self.configurationSnapshot = configurationSnapshot
         self.retryOverrideSnapshot = retryOverrideSnapshot
     }
@@ -334,6 +352,9 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
             audioByteCount: container.decodeIfPresent(Int64.self, forKey: .audioByteCount),
             rawTextByteCount: container.decodeIfPresent(Int64.self, forKey: .rawTextByteCount),
             rawTextRevision: container.decodeIfPresent(UInt64.self, forKey: .rawTextRevision) ?? 0,
+            normalizedTextRevision: container.decodeIfPresent(UInt64.self, forKey: .normalizedTextRevision) ?? 0,
+            normalizedFromRawRevision: container.decodeIfPresent(UInt64.self, forKey: .normalizedFromRawRevision),
+            cleanFromNormalizedRevision: container.decodeIfPresent(UInt64.self, forKey: .cleanFromNormalizedRevision),
             insertionOutcome: container.decodeIfPresent(InsertionOutcome.self, forKey: .insertionOutcome),
             insertionFailureReason: container.decodeIfPresent(String.self, forKey: .insertionFailureReason),
             insertionTextSource: container.decodeIfPresent(TranscriptInsertionSource.self, forKey: .insertionTextSource),
@@ -344,6 +365,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
             audioFileName: container.decode(String.self, forKey: .audioFileName),
             rawTextFileName: container.decode(String.self, forKey: .rawTextFileName),
             cleanTextFileName: container.decode(String.self, forKey: .cleanTextFileName),
+            normalizedTextFileName: container.decodeIfPresent(String.self, forKey: .normalizedTextFileName) ?? "normalized.txt",
             configurationSnapshot: container.decodeIfPresent(
                 DictationConfigurationSnapshot.self,
                 forKey: .configurationSnapshot
@@ -378,6 +400,10 @@ public struct DictationSession: Equatable, Identifiable, Sendable {
 
     public var cleanTextURL: URL {
         directoryURL.appendingPathComponent("clean.txt")
+    }
+
+    public var normalizedTextURL: URL {
+        directoryURL.appendingPathComponent("normalized.txt")
     }
 
     public init(metadata: SessionMetadata, directoryURL: URL) {
@@ -497,6 +523,7 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
     case insertionAlreadyAttempted(UUID)
     case activeSession(UUID)
     case rawTextChanged(URL)
+    case normalizedTextChanged(URL)
     case deletionConfirmationRequired
 
     public var description: String {
@@ -519,6 +546,8 @@ public enum SessionStoreError: Error, Equatable, CustomStringConvertible, Sendab
             "dictation session is active and cannot be deleted"
         case .rawTextChanged:
             "raw transcript changed while derived text was pending"
+        case .normalizedTextChanged:
+            "normalized transcript changed while derived text was pending"
         case .deletionConfirmationRequired:
             "Delete All History requires deliberate confirmation"
         }
@@ -591,6 +620,7 @@ public final class SessionStore: @unchecked Sendable {
         let metadata: SessionMetadata
         let rawTombstoneName: String?
         let cleanTombstoneName: String?
+        let normalizedTombstoneName: String?
     }
 
     private static let pendingRawPersistenceName = ".raw-persistence.json"
@@ -816,11 +846,22 @@ public final class SessionStore: @unchecked Sendable {
             let hasCleanText = (try? withSessionDirectory(at: session.directoryURL) { directoryFD in
                 entryExists(named: "clean.txt", in: directoryFD)
             }) ?? false
+            let hasNormalizedText = (try? withSessionDirectory(at: session.directoryURL) { directoryFD in
+                entryExists(named: "normalized.txt", in: directoryFD)
+            }) ?? false
+            let textSource: SessionTextSource
+            if hasCleanText {
+                textSource = .processed
+            } else if hasNormalizedText {
+                textSource = .normalized
+            } else {
+                textSource = .raw
+            }
             entries.append(
                 SessionHistoryEntry(
                     session: session,
                     firstTranscriptLine: firstLine,
-                    textSource: hasCleanText ? .processed : .raw
+                    textSource: textSource
                 )
             )
             if entries.count == limit {
@@ -989,6 +1030,7 @@ public final class SessionStore: @unchecked Sendable {
             metadata.updatedAt = date
             metadata.rawTextByteCount = Int64(data.count)
             metadata.rawTextRevision += 1
+            Self.resetDerivedTranscriptMetadata(&metadata)
             metadata.firstTranscriptLine = Self.firstTranscriptLine(from: rawText)
 
             let temporaryName = try prepareAtomicWrite(
@@ -1021,7 +1063,7 @@ public final class SessionStore: @unchecked Sendable {
                 in: directoryFD,
                 at: current.rawTextURL
             )
-            try invalidateCleanText(for: current, in: directoryFD)
+            try invalidateDerivedTranscripts(for: current, in: directoryFD)
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
             try removePendingPersistence(in: directoryFD, at: current.directoryURL)
             persistenceMetrics.transcriptBytesWritten += Int64(data.count)
@@ -1074,6 +1116,7 @@ public final class SessionStore: @unchecked Sendable {
             metadata.updatedAt = date
             metadata.rawTextByteCount = targetRawTextByteCount
             metadata.rawTextRevision += 1
+            Self.resetDerivedTranscriptMetadata(&metadata)
             if metadata.firstTranscriptLine == nil {
                 if previousRawTextByteCount == 0 {
                     metadata.firstTranscriptLine = Self.firstTranscriptLine(from: rawText)
@@ -1144,7 +1187,7 @@ public final class SessionStore: @unchecked Sendable {
                 }
                 throw error
             }
-            try invalidateCleanText(for: current, in: directoryFD)
+            try invalidateDerivedTranscripts(for: current, in: directoryFD)
             if consumeRawTextFault(.beforeMetadataCommit) {
                 persistenceMetrics.lastResultCode = "append-before-metadata"
                 throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
@@ -1246,6 +1289,7 @@ public final class SessionStore: @unchecked Sendable {
             metadata.updatedAt = date
             metadata.rawTextByteCount = targetRawTextByteCount
             metadata.rawTextRevision += 1
+            Self.resetDerivedTranscriptMetadata(&metadata)
             if prefixLength == 0 {
                 metadata.firstTranscriptLine = Self.firstTranscriptLine(from: replacement)
             } else if metadata.firstTranscriptLine == nil {
@@ -1320,7 +1364,7 @@ public final class SessionStore: @unchecked Sendable {
                 throw error
             }
 
-            try invalidateCleanText(for: current, in: directoryFD)
+            try invalidateDerivedTranscripts(for: current, in: directoryFD)
             if consumeRawTextFault(.beforeMetadataCommit) {
                 persistenceMetrics.lastResultCode = "revise-before-metadata"
                 throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
@@ -1623,6 +1667,7 @@ public final class SessionStore: @unchecked Sendable {
             }
             metadata.rawTextByteCount = Int64(fileInfo.st_size)
             metadata.rawTextRevision += 1
+            Self.resetDerivedTranscriptMetadata(&metadata)
             metadata.firstTranscriptLine = try readFirstTranscriptLine(
                 from: stagingFD,
                 at: stagingURL
@@ -1648,7 +1693,7 @@ public final class SessionStore: @unchecked Sendable {
                 in: directoryFD,
                 at: current.rawTextURL
             )
-            try invalidateCleanText(for: current, in: directoryFD)
+            try invalidateDerivedTranscripts(for: current, in: directoryFD)
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
             try removePendingPersistence(in: directoryFD, at: current.directoryURL)
             return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
@@ -1716,6 +1761,9 @@ public final class SessionStore: @unchecked Sendable {
             guard session.metadata.rawTextRevision == current.metadata.rawTextRevision else {
                 throw SessionStoreError.rawTextChanged(current.rawTextURL)
             }
+            guard session.metadata.normalizedTextRevision == current.metadata.normalizedTextRevision else {
+                throw SessionStoreError.normalizedTextChanged(current.normalizedTextURL)
+            }
             let data = Data(cleanText.utf8)
             guard data.count <= Self.maxTranscriptBytes else {
                 throw SessionStoreError.transcriptTooLarge(current.cleanTextURL)
@@ -1728,6 +1776,7 @@ public final class SessionStore: @unchecked Sendable {
             )
             var metadata = current.metadata
             metadata.updatedAt = date
+            metadata.cleanFromNormalizedRevision = current.metadata.normalizedTextRevision
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
             do {
                 try atomicWrite(
@@ -1768,6 +1817,79 @@ public final class SessionStore: @unchecked Sendable {
                 throw SessionStoreError.invalidMetadata(current.cleanTextURL)
             }
             return cleanText
+        }
+    }
+
+    @discardableResult
+    public func persistNormalizedText(
+        _ normalizedText: String,
+        for session: DictationSession,
+        at date: Date = Date()
+    ) throws -> DictationSession {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            guard session.metadata.rawTextRevision == current.metadata.rawTextRevision else {
+                throw SessionStoreError.rawTextChanged(current.rawTextURL)
+            }
+            let data = Data(normalizedText.utf8)
+            guard data.count <= Self.maxTranscriptBytes else {
+                throw SessionStoreError.transcriptTooLarge(current.normalizedTextURL)
+            }
+            try rejectSymlink(
+                named: "normalized.txt",
+                in: directoryFD,
+                at: current.normalizedTextURL,
+                allowMissing: true
+            )
+            try invalidateCleanText(for: current, in: directoryFD)
+            var metadata = current.metadata
+            metadata.updatedAt = date
+            metadata.normalizedTextRevision += 1
+            metadata.normalizedFromRawRevision = current.metadata.rawTextRevision
+            metadata.cleanFromNormalizedRevision = nil
+            try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
+            do {
+                try atomicWrite(
+                    data,
+                    named: "normalized.txt",
+                    in: directoryFD,
+                    at: current.normalizedTextURL
+                )
+            } catch {
+                try? writeMetadata(current.metadata, at: current.metadataURL, directoryFD: directoryFD)
+                throw error
+            }
+            return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
+        }
+    }
+
+    public func readNormalizedText(for session: DictationSession) throws -> String {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try withSessionDirectory(at: session.directoryURL) { directoryFD in
+            let current = try readSession(at: session.directoryURL, directoryFD: directoryFD)
+            let data: Data?
+            do {
+                data = try readDataIfPresent(
+                    named: "normalized.txt",
+                    in: directoryFD,
+                    at: current.normalizedTextURL,
+                    maxBytes: Self.maxTranscriptBytes
+                )
+            } catch SessionStoreError.invalidMetadata {
+                throw SessionStoreError.transcriptTooLarge(current.normalizedTextURL)
+            }
+            guard let data else {
+                return ""
+            }
+            guard let normalizedText = String(data: data, encoding: .utf8) else {
+                throw SessionStoreError.invalidMetadata(current.normalizedTextURL)
+            }
+            return normalizedText
         }
     }
 
@@ -2220,10 +2342,14 @@ public final class SessionStore: @unchecked Sendable {
             let cleanTombstoneName = entryExists(named: "clean.txt", in: directoryFD)
                 ? ".clean.txt." + UUID().uuidString + ".pruned"
                 : nil
+            let normalizedTombstoneName = entryExists(named: "normalized.txt", in: directoryFD)
+                ? ".normalized.txt." + UUID().uuidString + ".pruned"
+                : nil
             let pending = PendingTranscriptPrune(
                 metadata: metadata,
                 rawTombstoneName: rawTombstoneName,
-                cleanTombstoneName: cleanTombstoneName
+                cleanTombstoneName: cleanTombstoneName,
+                normalizedTombstoneName: normalizedTombstoneName
             )
             try writePendingTranscriptPrune(
                 pending,
@@ -2246,6 +2372,14 @@ public final class SessionStore: @unchecked Sendable {
                     at: current.cleanTextURL
                 )
             }
+            if let normalizedTombstoneName {
+                try renameEntry(
+                    named: "normalized.txt",
+                    to: normalizedTombstoneName,
+                    in: directoryFD,
+                    at: current.normalizedTextURL
+                )
+            }
             try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
             if let rawTombstoneName {
                 try removeEntry(
@@ -2260,6 +2394,14 @@ public final class SessionStore: @unchecked Sendable {
                     named: cleanTombstoneName,
                     in: directoryFD,
                     at: current.directoryURL.appendingPathComponent(cleanTombstoneName),
+                    allowMissing: true
+                )
+            }
+            if let normalizedTombstoneName {
+                try removeEntry(
+                    named: normalizedTombstoneName,
+                    in: directoryFD,
+                    at: current.directoryURL.appendingPathComponent(normalizedTombstoneName),
                     allowMissing: true
                 )
             }
@@ -2532,7 +2674,8 @@ public final class SessionStore: @unchecked Sendable {
                   metadata.directoryName.hasSuffix("-" + metadata.id.uuidString.lowercased()),
                   metadata.audioFileName == "audio.caf",
                   metadata.rawTextFileName == "raw.txt",
-                  metadata.cleanTextFileName == "clean.txt" else {
+                  metadata.cleanTextFileName == "clean.txt",
+                  metadata.normalizedTextFileName == "normalized.txt" else {
                 throw SessionStoreError.invalidMetadata(metadataURL)
             }
             return DictationSession(metadata: metadata, directoryURL: directoryURL)
@@ -2575,6 +2718,38 @@ public final class SessionStore: @unchecked Sendable {
             at: session.cleanTextURL,
             allowMissing: true
         )
+    }
+
+    private func invalidateNormalizedText(
+        for session: DictationSession,
+        in directoryFD: Int32
+    ) throws {
+        try rejectSymlink(
+            named: "normalized.txt",
+            in: directoryFD,
+            at: session.normalizedTextURL,
+            allowMissing: true
+        )
+        try removeEntry(
+            named: "normalized.txt",
+            in: directoryFD,
+            at: session.normalizedTextURL,
+            allowMissing: true
+        )
+    }
+
+    private func invalidateDerivedTranscripts(
+        for session: DictationSession,
+        in directoryFD: Int32
+    ) throws {
+        try invalidateCleanText(for: session, in: directoryFD)
+        try invalidateNormalizedText(for: session, in: directoryFD)
+    }
+
+    private static func resetDerivedTranscriptMetadata(_ metadata: inout SessionMetadata) {
+        metadata.normalizedTextRevision = 0
+        metadata.normalizedFromRawRevision = nil
+        metadata.cleanFromNormalizedRevision = nil
     }
 
     private func consumeMetadataWriteFailure() -> Bool {
@@ -2680,7 +2855,8 @@ public final class SessionStore: @unchecked Sendable {
               pending.metadata.directoryName.hasSuffix("-" + pending.metadata.id.uuidString.lowercased()),
               pending.metadata.audioFileName == "audio.caf",
               pending.metadata.rawTextFileName == "raw.txt",
-              pending.metadata.cleanTextFileName == "clean.txt" else {
+              pending.metadata.cleanTextFileName == "clean.txt",
+              pending.metadata.normalizedTextFileName == "normalized.txt" else {
             throw SessionStoreError.invalidMetadata(pendingURL)
         }
 
@@ -2697,7 +2873,7 @@ public final class SessionStore: @unchecked Sendable {
                     at: directoryURL.appendingPathComponent(sourceName)
                 )
             } else {
-                try invalidateCleanText(
+                try invalidateDerivedTranscripts(
                     for: DictationSession(metadata: pending.metadata, directoryURL: directoryURL),
                     in: directoryFD
                 )
@@ -2739,7 +2915,7 @@ public final class SessionStore: @unchecked Sendable {
             at: rawTextURL
         )
         if currentByteCount == pending.targetRawTextByteCount {
-            try invalidateCleanText(
+            try invalidateDerivedTranscripts(
                 for: DictationSession(metadata: pending.metadata, directoryURL: directoryURL),
                 in: directoryFD
             )
@@ -2816,7 +2992,7 @@ public final class SessionStore: @unchecked Sendable {
             revisionCompleted = false
         }
         if revisionCompleted {
-            try invalidateCleanText(
+            try invalidateDerivedTranscripts(
                 for: DictationSession(metadata: pending.metadata, directoryURL: directoryURL),
                 in: directoryFD
             )
@@ -2862,7 +3038,8 @@ public final class SessionStore: @unchecked Sendable {
               pending.metadata.directoryName.hasSuffix("-" + pending.metadata.id.uuidString.lowercased()),
               pending.metadata.audioFileName == "audio.caf",
               pending.metadata.rawTextFileName == "raw.txt",
-              pending.metadata.cleanTextFileName == "clean.txt" else {
+              pending.metadata.cleanTextFileName == "clean.txt",
+              pending.metadata.normalizedTextFileName == "normalized.txt" else {
             throw SessionStoreError.invalidMetadata(pendingURL)
         }
 
@@ -2883,7 +3060,8 @@ public final class SessionStore: @unchecked Sendable {
             && metadata.firstTranscriptLine == nil
         let tombstones = [
             ("raw.txt", pending.rawTombstoneName),
-            ("clean.txt", pending.cleanTombstoneName)
+            ("clean.txt", pending.cleanTombstoneName),
+            ("normalized.txt", pending.normalizedTombstoneName)
         ]
         for (originalName, tombstoneName) in tombstones {
             guard let tombstoneName else {

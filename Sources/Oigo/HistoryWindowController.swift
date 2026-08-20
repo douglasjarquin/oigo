@@ -9,6 +9,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private let pasteAgain: (SessionHistoryEntry) -> Void
     private let pasteCleanAgain: (SessionHistoryEntry) -> Void
     private let cleanAgain: (SessionHistoryEntry) -> Void
+    private let reapplyDictionary: (SessionHistoryEntry) -> Void
     private let playRecording: (SessionHistoryEntry) -> Void
     private let retryTranscription: (SessionHistoryEntry) -> Void
     private let revealRecording: (SessionHistoryEntry) -> Void
@@ -39,6 +40,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private let pasteAgainButton = NSButton(title: "Paste Again", target: nil, action: nil)
     private let pasteCleanAgainButton = NSButton(title: "Paste Clean Again", target: nil, action: nil)
     private let cleanAgainButton = NSButton(title: "Clean Again", target: nil, action: nil)
+    private let reapplyDictionaryButton = NSButton(title: "Reapply Dictionary", target: nil, action: nil)
     private let playButton = NSButton(title: "Play Recording", target: nil, action: nil)
     private let retryButton = NSButton(title: "Retry Transcription", target: nil, action: nil)
     private let revealButton = NSButton(title: "Reveal Recording", target: nil, action: nil)
@@ -64,6 +66,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         pasteAgain: @escaping (SessionHistoryEntry) -> Void,
         pasteCleanAgain: @escaping (SessionHistoryEntry) -> Void,
         cleanAgain: @escaping (SessionHistoryEntry) -> Void,
+        reapplyDictionary: @escaping (SessionHistoryEntry) -> Void,
         playRecording: @escaping (SessionHistoryEntry) -> Void,
         retryTranscription: @escaping (SessionHistoryEntry) -> Void,
         revealRecording: @escaping (SessionHistoryEntry) -> Void,
@@ -78,6 +81,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         self.pasteAgain = pasteAgain
         self.pasteCleanAgain = pasteCleanAgain
         self.cleanAgain = cleanAgain
+        self.reapplyDictionary = reapplyDictionary
         self.playRecording = playRecording
         self.retryTranscription = retryTranscription
         self.revealRecording = revealRecording
@@ -195,7 +199,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             return
         }
         selectedTranscriptSource = .processed
-        transcriptVersionPopup.selectItem(at: 1)
+        transcriptVersionPopup.selectItem(at: 2)
         updateDetail(for: selectedEntry)
     }
 
@@ -244,10 +248,19 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             text = switch entry.session.metadata.insertionTextSource {
             case .raw:
                 "Raw"
+            case .normalized:
+                "Normalized"
             case .clean:
                 "Clean"
             case nil:
-                entry.textSource == .processed ? "Clean available" : "Raw"
+                switch entry.textSource {
+                case .processed:
+                    "Clean available"
+                case .normalized:
+                    "Normalized available"
+                case .raw:
+                    "Raw"
+                }
             }
         case "status":
             text = Self.statusText(entry.session.metadata.state)
@@ -318,11 +331,21 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         cleanAgain(selectedEntry)
     }
 
+    @objc private func reapplyDictionaryAction() {
+        guard let selectedEntry else { return }
+        reapplyDictionary(selectedEntry)
+    }
+
     @objc private func transcriptVersionAction() {
         guard let selectedEntry else { return }
-        selectedTranscriptSource = transcriptVersionPopup.indexOfSelectedItem == 1
-            ? .processed
-            : .raw
+        switch transcriptVersionPopup.indexOfSelectedItem {
+        case 1:
+            selectedTranscriptSource = .normalized
+        case 2:
+            selectedTranscriptSource = .processed
+        default:
+            selectedTranscriptSource = .raw
+        }
         updateDetail(for: selectedEntry)
     }
 
@@ -472,19 +495,20 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         configureButton(pasteAgainButton, action: #selector(pasteAgainAction))
         configureButton(pasteCleanAgainButton, action: #selector(pasteCleanAgainAction))
         configureButton(cleanAgainButton, action: #selector(cleanAgainAction))
+        configureButton(reapplyDictionaryButton, action: #selector(reapplyDictionaryAction))
         configureButton(playButton, action: #selector(playRecordingAction))
         configureButton(retryButton, action: #selector(retryTranscriptionAction))
         configureButton(revealButton, action: #selector(revealRecordingAction))
         configureButton(deleteButton, action: #selector(deleteSessionAction))
 
-        transcriptVersionPopup.addItems(withTitles: ["Raw transcript", "Clean transcript"])
+        transcriptVersionPopup.addItems(withTitles: ["Raw transcript", "Normalized transcript", "Clean transcript"])
         transcriptVersionPopup.target = self
         transcriptVersionPopup.action = #selector(transcriptVersionAction)
         transcriptVersionPopup.controlSize = .small
         transcriptVersionPopup.toolTip = "Choose which durable transcript version to display"
 
         let firstRow = NSStackView(views: [transcriptVersionPopup, copyButton, copyCleanButton])
-        let secondRow = NSStackView(views: [cleanAgainButton, pasteAgainButton, pasteCleanAgainButton])
+        let secondRow = NSStackView(views: [cleanAgainButton, reapplyDictionaryButton, pasteAgainButton, pasteCleanAgainButton])
         let thirdRow = NSStackView(views: [playButton, retryButton, revealButton, deleteButton])
         for row in [firstRow, secondRow, thirdRow] {
             row.orientation = .horizontal
@@ -523,9 +547,32 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
 
         detailTitle.stringValue = dateFormatter.string(from: entry.session.metadata.createdAt)
-        transcriptVersionPopup.selectItem(at: selectedTranscriptSource == .processed ? 1 : 0)
+        let hasNormalized = FileManager.default.fileExists(atPath: entry.session.normalizedTextURL.path)
+        let hasClean = FileManager.default.fileExists(atPath: entry.session.cleanTextURL.path)
+        transcriptVersionPopup.item(at: 1)?.isEnabled = hasNormalized
+        transcriptVersionPopup.item(at: 2)?.isEnabled = hasClean
+        if selectedTranscriptSource == .normalized, !hasNormalized {
+            selectedTranscriptSource = .raw
+        }
+        if selectedTranscriptSource == .processed, !hasClean {
+            selectedTranscriptSource = hasNormalized ? .normalized : .raw
+        }
+        let selectedIndex: Int
+        let selectedTitle: String
+        switch selectedTranscriptSource {
+        case .normalized:
+            selectedIndex = 1
+            selectedTitle = "Normalized transcript"
+        case .processed:
+            selectedIndex = 2
+            selectedTitle = "Clean transcript"
+        case .raw:
+            selectedIndex = 0
+            selectedTitle = "Raw transcript"
+        }
+        transcriptVersionPopup.selectItem(at: selectedIndex)
         detailStatus.stringValue = Self.statusText(entry.session.metadata.state)
-            + " · " + (selectedTranscriptSource == .processed ? "Clean transcript" : "Raw transcript")
+            + " · " + selectedTitle
             + " · " + entry.session.metadata.configurationIdentity.historyLabel
         failureLabel.stringValue = [
             entry.session.metadata.failureReason,
@@ -534,15 +581,6 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         ]
             .compactMap { $0 }
             .joined(separator: " · ")
-        if entry.textSource != .processed {
-            transcriptVersionPopup.item(at: 1)?.isEnabled = false
-            if selectedTranscriptSource == .processed {
-                selectedTranscriptSource = .raw
-                transcriptVersionPopup.selectItem(at: 0)
-            }
-        } else {
-            transcriptVersionPopup.item(at: 1)?.isEnabled = true
-        }
         transcriptView.string = "Loading transcript…"
         transcriptLoadGeneration &+= 1
         let generation = transcriptLoadGeneration
@@ -580,12 +618,16 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         pasteAgainButton.isEnabled = enabled
             && capabilities?.pasteAgainAvailable == true
             && sessionCommandsEnabled
-        let canUseCleanTranscript = canUseTranscript && entry?.textSource == .processed
-        transcriptVersionPopup.item(at: 1)?.isEnabled = canUseCleanTranscript
+        let hasNormalized = entry.map { FileManager.default.fileExists(atPath: $0.session.normalizedTextURL.path) } == true
+        let canUseCleanTranscript = canUseTranscript
+            && entry.map { FileManager.default.fileExists(atPath: $0.session.cleanTextURL.path) } == true
+        transcriptVersionPopup.item(at: 1)?.isEnabled = hasNormalized
+        transcriptVersionPopup.item(at: 2)?.isEnabled = canUseCleanTranscript
         transcriptVersionPopup.isEnabled = enabled && entry != nil
         copyCleanButton.isEnabled = canUseCleanTranscript
         pasteCleanAgainButton.isEnabled = canUseCleanTranscript && sessionCommandsEnabled
         cleanAgainButton.isEnabled = canUseTranscript && (commandAvailability?.canCleanAgain ?? true)
+        reapplyDictionaryButton.isEnabled = canUseTranscript && (commandAvailability?.canReapplyDictionary ?? true)
         let isPlayingSelection = entry.map { $0.id == playingSessionID } == true
         playButton.title = isPlayingSelection ? "Stop Playback" : "Play Recording"
         playButton.isEnabled = enabled && (

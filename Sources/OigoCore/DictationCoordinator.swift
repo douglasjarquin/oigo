@@ -1580,7 +1580,7 @@ public final class DictationCoordinator {
                 return "saved session insertion was already attempted"
             case .activeSession:
                 return "saved session is still active"
-            case .rawTextChanged:
+            case .rawTextChanged, .normalizedTextChanged:
                 return "saved transcript changed before cleanup completed"
             case .deletionConfirmationRequired:
                 return "history deletion requires confirmation"
