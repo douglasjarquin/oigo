@@ -32,7 +32,8 @@ private struct OigoIssue10ContractTests {
             ("shutdown waits for registered task", testShutdownWaitsForRegisteredTask),
             ("transcription shutdown waits for registered task", testTranscriptionShutdownWaitsForRegisteredTask),
             ("transcription shutdown cancels active transcription", testTranscriptionShutdownCancelsActiveTranscription),
-            ("insertion terminal paths release store references", testInsertionTerminalPathsReleaseStoreReferences)
+            ("insertion terminal paths release store references", testInsertionTerminalPathsReleaseStoreReferences),
+            ("live speech degradation preserves recording and retry", testLiveSpeechDegradationPreservesRecordingAndRetry)
         ]
 
         var failures = 0
@@ -966,6 +967,56 @@ private struct OigoIssue10ContractTests {
         }
     }
 
+    private static func testLiveSpeechDegradationPreservesRecordingAndRetry() async throws {
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let capture = ScriptedAudioCapture()
+        let transcription = DegradingTranscriptionController()
+        let coordinator = DictationCoordinator()
+        let session = try await coordinator.startRecordingWithTranscription(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        capture.writePartialCapture()
+        transcription.emitDegradation(.queueSaturated)
+        for _ in 0..<200 where coordinator.liveTranscriptionDegradation == nil {
+            await Task.yield()
+        }
+        let recording = try store.load(id: session.id)
+        guard coordinator.state == .recording,
+              coordinator.liveRecordingHUDDetail
+                == LiveTranscriptionHUDCopy.recordingPreservedRetryRequired,
+              recording.metadata.state == .recording,
+              recording.metadata.failureCode == .transcriptionFailed,
+              recording.metadata.failureReason == LiveTranscriptionDegradation.queueSaturated.rawValue,
+              capture.isActive else {
+            throw ContractFailure(message: "live speech degradation did not keep durable capture healthy")
+        }
+        do {
+            _ = try await coordinator.stopRecordingWithTranscription()
+            throw ContractFailure(message: "degraded live analysis completed as success")
+        } catch is TranscriptionError {
+        }
+        let failed = try store.load(id: session.id)
+        let history = DictationHistoryActions.capabilities(
+            sessionState: failed.metadata.state,
+            hasValidRaw: failed.metadata.rawTextByteCount != nil,
+            hasAudio: FileManager.default.fileExists(atPath: failed.audioURL.path)
+                || (failed.metadata.audioByteCount ?? 0) > 0
+        )
+        guard coordinator.state == .failed,
+              failed.metadata.state == .failed,
+              failed.metadata.failureCode == .transcriptionFailed,
+              history.savedAudioRetryAvailable,
+              DictationFailureCode.infer(from: "speech_queue_saturated") == .transcriptionFailed,
+              DictationFailureCode.infer(from: "audio file write failed: disk full") == .audioWriteFailed else {
+            throw ContractFailure(message: "live speech degradation did not expose saved-audio retry as a distinct outcome")
+        }
+    }
+
     private static func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("oigo-issue10-contract-" + UUID().uuidString, isDirectory: true)
@@ -1312,5 +1363,52 @@ private final class ProcessingTranscriptionController: TranscriptionController, 
         _ = session
         _ = store
         throw TranscriptionError.notRunning
+    }
+}
+
+@available(macOS 26.0, *)
+private final class DegradingTranscriptionController: TranscriptionController, @unchecked Sendable {
+    private var onUpdate: (@Sendable (TranscriptionUpdate) -> Void)?
+    private var finishError: Error?
+
+    func start(
+        session: DictationSession,
+        format: AudioCaptureFormat,
+        store: SessionStore,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+    ) async throws {
+        _ = session
+        _ = format
+        _ = store
+        self.onUpdate = onUpdate
+    }
+
+    func append(_ buffer: AudioCaptureBuffer) {
+        _ = buffer
+    }
+
+    func finish() async throws -> TranscriptionResult {
+        if let finishError {
+            throw finishError
+        }
+        throw TranscriptionError.notRunning
+    }
+
+    func cancel() async throws -> TranscriptionResult? {
+        nil
+    }
+
+    func retrySavedAudio(
+        for session: DictationSession,
+        store: SessionStore
+    ) async throws -> TranscriptionResult {
+        _ = session
+        _ = store
+        throw TranscriptionError.notRunning
+    }
+
+    func emitDegradation(_ degradation: LiveTranscriptionDegradation) {
+        finishError = TranscriptionError.liveQueueSaturated
+        onUpdate?(TranscriptionUpdate.liveHealth(degradation))
     }
 }

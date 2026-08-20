@@ -666,7 +666,9 @@ private struct OigoIssue9ContractTests {
                   "Copied",
                   "Dictation completed; paste failed",
                   "Failed"
-              ] else {
+              ],
+              LiveTranscriptionHUDCopy.recordingPreservedRetryRequired
+                == "Recording preserved; transcription retry required" else {
             throw ContractFailure(message: "HUD resources or processing statuses outlived the session")
         }
     }

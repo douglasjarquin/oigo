@@ -77,6 +77,8 @@
         A00000010000000000000050 /* AppOperationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000043 /* AppOperationGate.swift */; };
         A00000010000000000000051 /* OnboardingEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000044 /* OnboardingEvidence.swift */; };
         A00000010000000000000052 /* OnboardingSourceProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000045 /* OnboardingSourceProbe.swift */; };
+        A00000010000000000000053 /* AnalyzerInputBackpressure.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000046 /* AnalyzerInputBackpressure.swift */; };
+
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -209,6 +211,8 @@
         B00000010000000000000043 /* AppOperationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppOperationGate.swift; sourceTree = "<group>"; };
         B00000010000000000000044 /* OnboardingEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingEvidence.swift; sourceTree = "<group>"; };
         B00000010000000000000045 /* OnboardingSourceProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSourceProbe.swift; sourceTree = "<group>"; };
+        B00000010000000000000046 /* AnalyzerInputBackpressure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyzerInputBackpressure.swift; sourceTree = "<group>"; };
+
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -374,6 +378,8 @@
                 B0000001000000000000001A /* TranscriptionStartupGate.swift */,
                 B00000010000000000000014 /* TranscriptionService.swift */,
                 B00000010000000000000021 /* TranscriptCleanup.swift */,
+                B00000010000000000000046 /* AnalyzerInputBackpressure.swift */,
+
             );
             path = Sources/OigoTranscription;
             sourceTree = "<group>";
@@ -666,6 +672,8 @@
                 A0000001000000000000001C /* TranscriptionStartupGate.swift in Sources */,
                 A00000010000000000000015 /* TranscriptionService.swift in Sources */,
                 A00000010000000000000024 /* TranscriptCleanup.swift in Sources */,
+                A00000010000000000000053 /* AnalyzerInputBackpressure.swift in Sources */,
+
             );
             runOnlyForDeploymentPostprocessing = 0;
         };

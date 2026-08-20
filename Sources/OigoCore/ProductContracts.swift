@@ -830,6 +830,11 @@ public enum OigoHUDProcessingState: String, CaseIterable, Sendable {
     case failed = "Failed"
 }
 
+public enum LiveTranscriptionHUDCopy {
+    public static let recordingPreservedRetryRequired =
+        "Recording preserved; transcription retry required"
+}
+
 public struct DictationHistoryCapabilities: Equatable, Sendable {
     public let copyAvailable: Bool
     public let pasteAgainAvailable: Bool
