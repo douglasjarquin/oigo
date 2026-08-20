@@ -2,7 +2,7 @@ import AppKit
 import OigoCore
 
 @MainActor
-final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
+final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate {
     private let loadTranscript: (SessionHistoryEntry, SessionTextSource) -> Result<String, Error>
     private let copyRawTranscript: (SessionHistoryEntry) -> Void
     private let copyCleanTranscript: (SessionHistoryEntry) -> Void
@@ -14,11 +14,13 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private let revealRecording: (SessionHistoryEntry) -> Void
     private let deleteSession: (SessionHistoryEntry) -> Void
     private let runIdleMaintenance: () -> Void
+    private let onClose: () -> Void
 
     private var entries: [SessionHistoryEntry] = []
     private var isReloading = false
     private var preservedSelectionID: UUID?
     private var commandAvailability: AppCommandAvailability?
+    private var playingSessionID: UUID?
     private let tableView = NSTableView()
     private let detailTitle = NSTextField(labelWithString: "No session selected")
     private let detailStatus = NSTextField(labelWithString: "")
@@ -60,7 +62,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         retryTranscription: @escaping (SessionHistoryEntry) -> Void,
         revealRecording: @escaping (SessionHistoryEntry) -> Void,
         deleteSession: @escaping (SessionHistoryEntry) -> Void,
-        runIdleMaintenance: @escaping () -> Void
+        runIdleMaintenance: @escaping () -> Void,
+        onClose: @escaping () -> Void
     ) {
         self.loadTranscript = loadTranscript
         self.copyRawTranscript = copyRawTranscript
@@ -73,6 +76,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         self.revealRecording = revealRecording
         self.deleteSession = deleteSession
         self.runIdleMaintenance = runIdleMaintenance
+        self.onClose = onClose
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1_400, height: 620),
@@ -84,6 +88,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         window.minSize = NSSize(width: 900, height: 480)
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        window.delegate = self
         configureWindow()
     }
 
@@ -156,6 +161,16 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        _ = notification
+        onClose()
+    }
+
+    func setPlaybackState(playingSessionID: UUID?, isPlaying: Bool) {
+        self.playingSessionID = isPlaying ? playingSessionID : nil
+        setActionButtons(enabled: selectedEntry != nil, entry: selectedEntry)
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -492,7 +507,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         copyCleanButton.isEnabled = canUseCleanTranscript
         pasteCleanAgainButton.isEnabled = canUseCleanTranscript && sessionCommandsEnabled
         cleanAgainButton.isEnabled = canUseTranscript && (commandAvailability?.canCleanAgain ?? true)
-        playButton.isEnabled = enabled && entry.map { FileManager.default.fileExists(atPath: $0.session.audioURL.path) } == true
+        let isPlayingSelection = entry.map { $0.id == playingSessionID } == true
+        playButton.title = isPlayingSelection ? "Stop Playback" : "Play Recording"
+        playButton.isEnabled = enabled && (
+            isPlayingSelection
+                || entry.map { FileManager.default.fileExists(atPath: $0.session.audioURL.path) } == true
+        )
         retryButton.isEnabled = enabled
             && capabilities?.savedAudioRetryAvailable == true
             && (commandAvailability?.canRetry ?? true)

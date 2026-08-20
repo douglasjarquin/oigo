@@ -133,6 +133,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         storageCapability.onChange = { [weak self] in
             self?.storageCapabilityDidChange()
         }
+        playback.onStateChange = { [weak self] state in
+            DispatchQueue.main.async {
+                self?.handlePlaybackState(state)
+            }
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -475,6 +480,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 },
                 runIdleMaintenance: { [weak self] in
                     self?.runIdleMaintenance()
+                },
+                onClose: { [weak self] in
+                    self?.playback.stop()
                 }
             )
         }
@@ -1615,8 +1623,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func playRecording(for entry: SessionHistoryEntry) {
+        if playback.isPlaying(sessionID: entry.id) {
+            playback.stop()
+            historyWindow?.showMessage("Playback stopped.")
+            return
+        }
         do {
-            _ = try playback.play(url: entry.session.audioURL)
+            _ = try playback.play(url: entry.session.audioURL, sessionID: entry.id)
             historyWindow?.showMessage("Playing the saved recording.")
         } catch {
             historyWindow?.showMessage(Self.friendlyError("Playback failed", error))
@@ -1657,6 +1670,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         guard storageCapability.health.isReady,
               let store = sessionStore else {
             return
+        }
+        if playback.isPlaying(sessionID: entry.id) {
+            playback.stop()
         }
         do {
             try store.remove(id: entry.id)
@@ -1870,10 +1886,32 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         guard let session = lastSession else {
             return
         }
+        if playback.isPlaying(sessionID: session.id) {
+            playback.stop()
+            return
+        }
         do {
-            _ = try playback.play(url: session.audioURL)
+            _ = try playback.play(url: session.audioURL, sessionID: session.id)
         } catch {
-            NSLog("Oigo could not play the last recording: %@", Self.failureReason(for: error))
+            NSLog("Oigo could not play the last recording")
+        }
+    }
+
+    private func handlePlaybackState(_ state: AudioPlaybackState) {
+        historyWindow?.setPlaybackState(
+            playingSessionID: state.sessionID,
+            isPlaying: state.isPlaying
+        )
+        guard !state.isPlaying else {
+            return
+        }
+        switch state.outcome {
+        case .completed:
+            historyWindow?.showMessage("Playback finished.")
+        case .failed:
+            historyWindow?.showMessage("Playback failed.")
+        case .stopped, .replaced, .shutdown, nil:
+            break
         }
     }
 
