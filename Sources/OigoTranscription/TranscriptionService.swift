@@ -1015,7 +1015,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                         try await analyzer.start(inputSequence: intake.stream)
                     }
                     await Task.yield()
-                    try self.feedRetryStream(
+                    try await self.feedRetryStream(
                         reader: reader,
                         converter: audioConverter,
                         analyzerFormat: audioFormat,
@@ -1746,8 +1746,8 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         analyzerFormat: AVAudioFormat,
         intake: AnalyzerInputBackpressure,
         operationID: UUID
-    ) throws {
-        try feedRetryStream(
+    ) async throws {
+        try await feedRetryStream(
             reader: reader,
             converter: converter,
             analyzerFormat: analyzerFormat,
@@ -1762,7 +1762,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         analyzerFormat: AVAudioFormat,
         intake: AnalyzerInputBackpressure,
         operationID: UUID
-    ) throws {
+    ) async throws {
         defer { intake.finish() }
         while let source = try reader.read(frameCount: 1_024) {
             try Task.checkCancellation()
@@ -1788,7 +1788,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             } catch {
                 throw TranscriptionError.liveConversionFailed
             }
-            try enqueueRetryInput(
+            try await enqueueRetryInput(
                 pcmBuffer,
                 intake: intake,
                 operationID: operationID
@@ -1801,8 +1801,8 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         _ pcmBuffer: AVAudioPCMBuffer,
         intake: AnalyzerInputBackpressure,
         operationID: UUID
-    ) throws {
-        try enqueueRetryInput(
+    ) async throws {
+        try await enqueueRetryInput(
             pcmBuffer,
             intake: intake,
             operationID: operationID
@@ -1813,22 +1813,31 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         _ pcmBuffer: AVAudioPCMBuffer,
         intake: AnalyzerInputBackpressure,
         operationID: UUID
-    ) throws {
+    ) async throws {
         let byteCount = Int(pcmBuffer.frameLength)
             * Int(pcmBuffer.format.streamDescription.pointee.mBytesPerFrame)
-        switch intake.enqueue(
-            AnalyzerInput(buffer: pcmBuffer),
-            generation: operationID,
-            byteCount: byteCount
-        ) {
-        case .enqueued:
-            return
-        case .saturated:
-            throw TranscriptionError.liveQueueSaturated
-        case .terminated:
-            throw TranscriptionError.liveContinuationTerminated
-        case .rejected:
-            throw TranscriptionError.cancelled
+        while true {
+            switch intake.enqueue(
+                AnalyzerInput(buffer: pcmBuffer),
+                generation: operationID,
+                byteCount: byteCount,
+                waitForCapacity: true
+            ) {
+            case .enqueued:
+                return
+            case .saturated:
+                do {
+                    try Task.checkCancellation()
+                    try await Task.sleep(for: .milliseconds(2))
+                } catch {
+                    _ = intake.markDegraded(.queueSaturated)
+                    throw TranscriptionError.liveQueueSaturated
+                }
+            case .terminated:
+                throw TranscriptionError.liveContinuationTerminated
+            case .rejected:
+                throw TranscriptionError.cancelled
+            }
         }
     }
 

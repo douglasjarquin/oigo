@@ -86,7 +86,8 @@ public final class AnalyzerInputBackpressure: @unchecked Sendable {
     public func enqueue(
         _ input: AnalyzerInput,
         generation: UUID,
-        byteCount: Int
+        byteCount: Int,
+        waitForCapacity: Bool = false
     ) -> AnalyzerInputYieldOutcome {
         lock.lock()
         guard generation == self.generation,
@@ -123,8 +124,12 @@ public final class AnalyzerInputBackpressure: @unchecked Sendable {
             lock.unlock()
             return .enqueued
         case .dropped:
-            storedMetrics.saturateCount += 1
             storedMetrics.lastYieldOutcome = .saturated
+            if waitForCapacity {
+                lock.unlock()
+                return .saturated
+            }
+            storedMetrics.saturateCount += 1
             if storedMetrics.degradation == nil {
                 storedMetrics.degradation = .queueSaturated
             }

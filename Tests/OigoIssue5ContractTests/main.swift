@@ -54,6 +54,7 @@ private struct OigoIssue5ContractTests {
             ("live speech degradation preserves CAF and saved-audio retry", testLiveSpeechDegradationPreservesCAFAndRetry),
             ("writer failure stays distinct from speech degradation", testWriterFailureDistinctFromSpeechDegradation),
             ("stalled retry consumer saturates with typed degradation", testRetryFeedSaturatesOnStalledConsumer),
+            ("retry waits for a draining consumer past the live bound", testRetryFeedWaitsForDrainingConsumer),
             ("preparing live degradation persists into recording metadata", testPreparingDegradationPersistsIntoRecording)
         ]
 
@@ -1655,25 +1656,31 @@ private struct OigoIssue5ContractTests {
         )
     }
 
-    @MainActor
-    private static func testRetryFeedSaturatesOnStalledConsumer() throws {
+    private static func testRetryFeedSaturatesOnStalledConsumer() async throws {
         let generation = UUID()
         let intake = AnalyzerInputBackpressure(generation: generation)
         let service = TranscriptionService()
-        let pcmBuffer = try makeAnalyzerPCMBuffer()
-        do {
+        let feed = Task {
+            let pcmBuffer = try makeAnalyzerPCMBuffer()
             for _ in 0..<(AnalyzerInputLimits.capacity + 8) {
-                try service.enqueueRetryInputForTesting(
+                try await service.enqueueRetryInputForTesting(
                     pcmBuffer,
                     intake: intake,
                     operationID: generation
                 )
             }
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        feed.cancel()
+        do {
+            try await feed.value
             throw ContractFailure(message: "stalled retry feed completed without saturating")
         } catch let error as TranscriptionError {
             guard error == .liveQueueSaturated else {
                 throw ContractFailure(message: "stalled retry feed changed category: " + error.description)
             }
+        } catch is CancellationError {
+            throw ContractFailure(message: "stalled retry feed cancelled without a typed saturation")
         }
         let metrics = intake.metrics
         guard metrics.degradation == .queueSaturated,
@@ -1681,6 +1688,39 @@ private struct OigoIssue5ContractTests {
               metrics.highWaterBytes <= AnalyzerInputLimits.maxRetainedBytes,
               metrics.enqueueAccepted <= AnalyzerInputLimits.capacity else {
             throw ContractFailure(message: "stalled retry consumer grew past the analyzer-input bound")
+        }
+    }
+
+    private static func testRetryFeedWaitsForDrainingConsumer() async throws {
+        let generation = UUID()
+        let intake = AnalyzerInputBackpressure(generation: generation)
+        let service = TranscriptionService()
+        let pcmBuffer = try makeAnalyzerPCMBuffer()
+        let total = AnalyzerInputLimits.capacity + 16
+        let consumer = Task {
+            var count = 0
+            for await _ in intake.stream {
+                count += 1
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+            return count
+        }
+        for _ in 0..<total {
+            try await service.enqueueRetryInputForTesting(
+                pcmBuffer,
+                intake: intake,
+                operationID: generation
+            )
+        }
+        intake.finish()
+        let consumed = await consumer.value
+        let metrics = intake.metrics
+        guard consumed == total,
+              metrics.degradation == nil,
+              metrics.enqueueAccepted == total,
+              metrics.highWaterDepth <= AnalyzerInputLimits.capacity,
+              metrics.highWaterBytes <= AnalyzerInputLimits.maxRetainedBytes else {
+            throw ContractFailure(message: "retry of a CAF longer than the live bound failed while Speech was draining")
         }
     }
 
