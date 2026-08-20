@@ -21,6 +21,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let registrationStatus: () -> GlobalShortcutRegistrationStatus
     private let registrationError: () -> String?
     private let save: (OigoSettings) -> String?
+    private let checkSpeechAssets: (String) async -> OigoLocaleAssetStatus
     private let refreshPermissions: () -> (OigoPermissionState, OigoPermissionState)
     private let openMicrophoneSettings: () -> Void
     private let openAccessibilitySettings: () -> Void
@@ -29,9 +30,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let openDataFolder: () -> Void
     private let retryStorage: () -> Void
     private let deleteAllHistory: () -> Void
+    private let isPresented: () -> Bool
+    private let onClose: () -> Void
     private var committedShortcut: ToggleShortcut
     private var inputMenuSelections: [OigoInputSelection] = []
     private var selectedInput: OigoInputSelection
+    private var localeSelection: OigoLocaleSelectionState
+    private var localeMenuIdentifiers: [String] = []
+    private var isSaving = false
+    private var isDismissed = false
+    private var saveTask: Task<Void, Never>?
 
     init(
         settings: OigoSettings,
@@ -43,6 +51,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         registrationStatus: @escaping () -> GlobalShortcutRegistrationStatus,
         registrationError: @escaping () -> String?,
         save: @escaping (OigoSettings) -> String?,
+        checkSpeechAssets: @escaping (String) async -> OigoLocaleAssetStatus,
         refreshPermissions: @escaping () -> (OigoPermissionState, OigoPermissionState),
         openMicrophoneSettings: @escaping () -> Void,
         openAccessibilitySettings: @escaping () -> Void,
@@ -50,13 +59,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         openHistory: @escaping () -> Void,
         openDataFolder: @escaping () -> Void,
         retryStorage: @escaping () -> Void,
-        deleteAllHistory: @escaping () -> Void
+        deleteAllHistory: @escaping () -> Void,
+        isPresented: @escaping () -> Bool,
+        onClose: @escaping () -> Void
     ) {
         self.registrationStatus = registrationStatus
         self.registrationError = registrationError
         selectedInput = settings.selectedInput
         self.save = save
+        self.checkSpeechAssets = checkSpeechAssets
         self.refreshPermissions = refreshPermissions
+        localeSelection = OigoLocaleSelectionState(
+            committedIdentifier: settings.localeIdentifier,
+            role: .settings
+        )
         self.openMicrophoneSettings = openMicrophoneSettings
         self.openAccessibilitySettings = openAccessibilitySettings
         self.rerunOnboarding = rerunOnboarding
@@ -64,6 +80,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.openDataFolder = openDataFolder
         self.retryStorage = retryStorage
         self.deleteAllHistory = deleteAllHistory
+        self.isPresented = isPresented
+        self.onClose = onClose
         committedShortcut = settings.globalShortcut
         shortcutRecorder = ShortcutRecorderControl(shortcut: settings.globalShortcut)
 
@@ -79,14 +97,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
         window.delegate = self
         configureInputMenu(devices: inputDevices, selected: selectedInput)
-        localePopup.addItems(withTitles: supportedLocales)
-        if let selectedIndex = supportedLocales.firstIndex(where: {
-            $0.caseInsensitiveCompare(settings.localeIdentifier) == .orderedSame
-        }) {
-            localePopup.selectItem(at: selectedIndex)
-        } else if !supportedLocales.isEmpty {
-            localePopup.selectItem(at: 0)
-        }
+        localePopup.autoenablesItems = false
+        localeSelection.loadSupported(supportedLocales)
+        syncLocalePopup()
+        localePopup.target = self
+        localePopup.action = #selector(localeSelectionChanged)
         modePopup.addItems(withTitles: OigoProcessingMode.allCases.map(\.displayName))
         modePopup.selectItem(withTitle: settings.defaultMode.displayName)
         retentionPopup.addItems(withTitles: OigoAudioRetention.allCases.map(\.displayName))
@@ -113,8 +128,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         _ = notification
+        saveTask?.cancel()
+        saveTask = nil
+        isSaving = false
+        isDismissed = true
+        localeSelection.abandonUncommitted()
         shortcutRecorder.cancelRecording()
         shortcutRecorder.restoreCandidate(committedShortcut)
+        onClose()
     }
 
     func updateInputDevices(_ devices: [OigoInputDevice]) {
@@ -258,6 +279,36 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return inputMenuSelections[index]
     }
 
+    private func syncLocalePopup() {
+        let items = localeSelection.menuItems
+        localeMenuIdentifiers = items.map(\.identifier)
+        localePopup.removeAllItems()
+        localePopup.addItems(withTitles: items.map(\.title))
+        for (index, item) in items.enumerated() {
+            localePopup.item(at: index)?.isEnabled = !item.isUnavailable
+        }
+        if let selected = localeSelection.selectedIdentifier,
+           let index = items.firstIndex(where: { $0.identifier == selected }) {
+            localePopup.selectItem(at: index)
+        }
+    }
+
+    @objc private func localeSelectionChanged() {
+        guard let identifier = selectedLocaleFromMenu() else {
+            return
+        }
+        localeSelection.select(identifier)
+        messageLabel.stringValue = localeSelection.statusMessage
+    }
+
+    private func selectedLocaleFromMenu() -> String? {
+        let index = localePopup.indexOfSelectedItem
+        guard localeMenuIdentifiers.indices.contains(index) else {
+            return nil
+        }
+        return localeMenuIdentifiers[index]
+    }
+
     private func row(label: NSTextField, control: NSControl) -> NSStackView {
         let row = NSStackView(views: [label, control])
         row.orientation = .horizontal
@@ -343,8 +394,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func saveSettings() {
-        guard let localeIdentifier = localePopup.selectedItem?.title,
-              let modeTitle = modePopup.selectedItem?.title,
+        guard !isSaving else {
+            return
+        }
+        guard let modeTitle = modePopup.selectedItem?.title,
               let mode = OigoProcessingMode.allCases.first(where: { $0.displayName == modeTitle }),
               let retentionTitle = retentionPopup.selectedItem?.title,
               let retention = OigoAudioRetention.allCases.first(where: { $0.displayName == retentionTitle }) else {
@@ -353,23 +406,86 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         let candidate = shortcutRecorder.shortcut
-        let result = save(OigoSettings(
+        let draft = OigoSettings(
             globalShortcut: candidate,
-            localeIdentifier: localeIdentifier,
+            localeIdentifier: localeSelection.committedIdentifier,
             defaultMode: mode,
             showVolatilePreview: previewCheckbox.state == .on,
             audioRetention: retention,
             keepSuccessfulAudioIndefinitely: keepAudioCheckbox.state == .on,
             launchAtLogin: launchAtLoginCheckbox.state == .on,
             selectedInput: selectedInputFromMenu()
-        ))
+        )
+        guard localeSelection.requiresVerificationToCommit else {
+            _ = finishSave(draft, languageUnappliedMessage: nil)
+            return
+        }
+        guard let request = localeSelection.beginAssetRequest(status: .installing) else {
+            messageLabel.stringValue = localeSelection.statusMessage
+            NSSound.beep()
+            return
+        }
+        isSaving = true
+        messageLabel.stringValue = localeSelection.statusMessage
+        let inspectAssets = checkSpeechAssets
+        saveTask = Task { @MainActor [weak self] in
+            let status = await inspectAssets(request.localeIdentifier)
+            guard let self else { return }
+            defer { self.saveTask = nil }
+            guard !Task.isCancelled, !isDismissed, isPresented() else {
+                return
+            }
+            let applied = localeSelection.applyAssetResult(
+                localeIdentifier: request.localeIdentifier,
+                generation: request.generation,
+                status: status
+            )
+            isSaving = false
+            if applied,
+               localeSelection.canConfirm,
+               let locale = localeSelection.selectedIdentifier {
+                let saved = finishSave(
+                    draft.with(localeIdentifier: locale),
+                    languageUnappliedMessage: nil
+                )
+                if saved {
+                    _ = localeSelection.confirm()
+                }
+                return
+            }
+            let reason = applied
+                ? localeSelection.statusMessage
+                : "the selected language is no longer current"
+            if applied {
+                localeSelection.abandonUncommitted()
+                syncLocalePopup()
+            }
+            _ = finishSave(
+                draft,
+                languageUnappliedMessage: "Settings saved. Dictation language was not changed: " + reason
+            )
+        }
+    }
+
+    @discardableResult
+    private func finishSave(_ settings: OigoSettings, languageUnappliedMessage: String?) -> Bool {
+        guard !isDismissed, isPresented() else {
+            return false
+        }
+        let result = save(settings)
         if let result {
             messageLabel.stringValue = result
             updateShortcutStatus()
             NSSound.beep()
-            return
+            return false
         }
-        committedShortcut = candidate
+        committedShortcut = settings.globalShortcut
+        if let languageUnappliedMessage {
+            messageLabel.stringValue = languageUnappliedMessage
+            NSSound.beep()
+            return true
+        }
         window?.close()
+        return true
     }
 }

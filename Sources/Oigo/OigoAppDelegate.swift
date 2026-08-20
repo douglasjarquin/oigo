@@ -92,6 +92,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var reportedMalformedSessionCount = 0
     private var livePreview = ""
     private var settingsWindow: SettingsWindowController?
+    private var settingsSessionID: UUID?
     private var historyWindow: HistoryWindowController?
     private var statusItem: NSStatusItem?
     private var toggleItem: NSMenuItem?
@@ -300,6 +301,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func presentSettings(supportedLocales: [String]) {
+        let sessionID = UUID()
         let window = SettingsWindowController(
             settings: settings,
             inputDevices: currentInputDevices(),
@@ -315,6 +317,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             save: { [weak self] settings in
                 self?.applySettings(settings) ?? "Oigo is no longer available."
+            },
+            checkSpeechAssets: { [weak self] identifier in
+                await self?.inspectSpeechAssets(for: identifier) ?? .unavailable("Oigo is no longer available")
             },
             refreshPermissions: { [weak self] in
                 guard let self else {
@@ -342,8 +347,19 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             deleteAllHistory: { [weak self] in
                 self?.deleteAllHistory()
+            },
+            isPresented: { [weak self] in
+                self?.settingsSessionID == sessionID
+            },
+            onClose: { [weak self] in
+                guard self?.settingsSessionID == sessionID else {
+                    return
+                }
+                self?.settingsSessionID = nil
+                self?.settingsWindow = nil
             }
         )
+        settingsSessionID = sessionID
         settingsWindow = window
         window.showWindow(nil)
         window.window?.center()
@@ -359,6 +375,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             globalShortcut: settings.globalShortcut,
             inputDevices: currentInputDevices(),
             selectedInput: settings.selectedInput,
+            committedLocaleIdentifier: settings.localeIdentifier,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
             storageHealth: displayedStorageHealth,
@@ -376,18 +393,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 return [closest] + identifiers.filter { $0 != closest }
             },
             checkSpeechAssets: { [weak self] identifier in
-                guard let self else {
-                    return .unavailable("Oigo is no longer available")
-                }
-                guard self.storageCapability.health.isReady else {
-                    return .unavailable("durable storage is unavailable")
-                }
-                let service = self.transcriptionService(for: identifier)
-                do {
-                    return try await service.installSpeechAssets()
-                } catch {
-                    return service.currentAssetState
-                }
+                await self?.inspectSpeechAssets(for: identifier) ?? .unavailable("Oigo is no longer available")
             },
             saveLanguage: { [weak self] identifier in
                 guard let self else { return }
@@ -1950,6 +1956,38 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
              .deletionConfirmationRequired:
             return nil
         }
+    }
+
+    private func inspectSpeechAssets(for identifier: String) async -> OigoLocaleAssetStatus {
+        guard storageCapability.health.isReady else {
+            return .unavailable("durable storage is unavailable")
+        }
+        let service = speechAssetService(for: identifier)
+        do {
+            return Self.localeAssetStatus(from: try await service.installSpeechAssets())
+        } catch {
+            return Self.localeAssetStatus(from: service.currentAssetState)
+        }
+    }
+
+    private static func localeAssetStatus(from state: SpeechAssetState) -> OigoLocaleAssetStatus {
+        switch state {
+        case .ready:
+            .ready
+        case .installing:
+            .installing
+        case .failed(let reason):
+            .failed(reason)
+        case .unavailable(let reason):
+            .unavailable(reason)
+        }
+    }
+
+    private func speechAssetService(for identifier: String) -> TranscriptionService {
+        TranscriptionService(
+            locale: Locale(identifier: identifier),
+            instrumentation: performanceInstrumentation
+        )
     }
 
     private func transcriptionService(for requestedIdentifier: String? = nil) -> TranscriptionService {
