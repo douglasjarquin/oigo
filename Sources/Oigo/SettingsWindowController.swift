@@ -13,6 +13,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let previewCheckbox = NSButton(checkboxWithTitle: "Show volatile transcript preview", target: nil, action: nil)
     private let keepAudioCheckbox = NSButton(checkboxWithTitle: "Keep successful audio indefinitely", target: nil, action: nil)
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Launch Oigo at login", target: nil, action: nil)
+    private let launchAtLoginStatusLabel = NSTextField(wrappingLabelWithString: "")
+    private let openLoginItemsButton = NSButton(title: "Open Login Items", target: nil, action: nil)
     private let microphoneStatus = NSTextField(labelWithString: "")
     private let accessibilityStatus = NSTextField(labelWithString: "")
     private let storageStatus = NSTextField(labelWithString: "")
@@ -31,6 +33,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let openDataFolder: () -> Void
     private let retryStorage: () -> Void
     private let deleteAllHistory: () -> Void
+    private let launchAtLoginStatusProvider: () -> OigoLaunchAtLoginStatus
+    private let openLoginItemsSettings: () -> Void
     private let isPresented: () -> Bool
     private let onClose: () -> Void
     private var committedShortcut: ToggleShortcut
@@ -46,6 +50,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let nextDictationNotice = NSTextField(
         wrappingLabelWithString: NextDictationSettingsPolicy.nextDictationCopy
     )
+    private var lastRequestedLaunchAtLogin: Bool
+    private var currentLaunchAtLoginStatus: OigoLaunchAtLoginStatus
 
     init(
         settings: OigoSettings,
@@ -54,6 +60,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         microphoneState: OigoPermissionState,
         accessibilityState: OigoPermissionState,
         storageHealth: DurableSessionHealth,
+        launchAtLoginStatus: OigoLaunchAtLoginStatus,
+        launchAtLoginStatusProvider: @escaping () -> OigoLaunchAtLoginStatus,
+        openLoginItemsSettings: @escaping () -> Void,
         registrationStatus: @escaping () -> GlobalShortcutRegistrationStatus,
         registrationError: @escaping () -> String?,
         save: @escaping (OigoSettings) -> String?,
@@ -88,8 +97,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.openDataFolder = openDataFolder
         self.retryStorage = retryStorage
         self.deleteAllHistory = deleteAllHistory
+        self.launchAtLoginStatusProvider = launchAtLoginStatusProvider
+        self.openLoginItemsSettings = openLoginItemsSettings
         self.isPresented = isPresented
         self.onClose = onClose
+        lastRequestedLaunchAtLogin = settings.launchAtLogin
+        currentLaunchAtLoginStatus = launchAtLoginStatus
         committedShortcut = settings.globalShortcut
         shortcutRecorder = ShortcutRecorderControl(shortcut: settings.globalShortcut)
 
@@ -117,10 +130,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         retentionPopup.selectItem(withTitle: settings.audioRetention.displayName)
         previewCheckbox.state = settings.showVolatilePreview ? .on : .off
         keepAudioCheckbox.state = settings.keepSuccessfulAudioIndefinitely ? .on : .off
-        launchAtLoginCheckbox.state = settings.launchAtLogin ? .on : .off
         updatePermissionLabels(microphone: microphoneState, accessibility: accessibilityState)
         configureWindow()
         setStorageHealth(storageHealth)
+        setLaunchAtLoginStatus(launchAtLoginStatus)
     }
 
     @available(*, unavailable)
@@ -133,6 +146,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let states = refreshPermissions()
         updatePermissionLabels(microphone: states.0, accessibility: states.1)
         updateShortcutStatus()
+        setLaunchAtLoginStatus(launchAtLoginStatusProvider())
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -199,6 +213,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         microphoneStatus.font = .systemFont(ofSize: 12)
         accessibilityStatus.font = .systemFont(ofSize: 12)
         storageStatus.font = .systemFont(ofSize: 12)
+        launchAtLoginStatusLabel.font = .systemFont(ofSize: 12)
+        launchAtLoginStatusLabel.textColor = .secondaryLabelColor
+        launchAtLoginStatusLabel.maximumNumberOfLines = 3
+        openLoginItemsButton.target = self
+        openLoginItemsButton.action = #selector(openLoginItemsSettingsAction)
+        openLoginItemsButton.bezelStyle = .rounded
         messageLabel.font = .systemFont(ofSize: 12)
         messageLabel.textColor = .secondaryLabelColor
         messageLabel.maximumNumberOfLines = 2
@@ -249,6 +269,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             previewCheckbox,
             keepAudioCheckbox,
             launchAtLoginCheckbox,
+            launchAtLoginStatusLabel,
+            openLoginItemsButton,
             permissionsTitle,
             permissionStack,
             actionStack,
@@ -387,6 +409,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         retryStorageButton?.isEnabled = canRetry && health != .checking
     }
 
+    func setLaunchAtLoginStatus(_ status: OigoLaunchAtLoginStatus) {
+        currentLaunchAtLoginStatus = status
+        let presentation = OigoLaunchAtLoginPresentation(status: status)
+        launchAtLoginCheckbox.state = presentation.checkboxOn ? .on : .off
+        launchAtLoginCheckbox.isEnabled = presentation.allowsCheckboxMutation
+        launchAtLoginStatusLabel.stringValue = presentation.detail
+        openLoginItemsButton.isHidden = !presentation.showsOpenLoginItems
+        if !presentation.allowsCheckboxMutation {
+            launchAtLoginStatusLabel.textColor = .systemOrange
+        } else {
+            launchAtLoginStatusLabel.textColor = .secondaryLabelColor
+        }
+    }
+
     private func updateShortcutStatus() {
         switch registrationStatus() {
         case .active(let shortcut, _):
@@ -401,7 +437,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let states = refreshPermissions()
         updatePermissionLabels(microphone: states.0, accessibility: states.1)
         updateShortcutStatus()
+        setLaunchAtLoginStatus(launchAtLoginStatusProvider())
         messageLabel.stringValue = "Permission states refreshed."
+    }
+
+    @objc private func openLoginItemsSettingsAction() {
+        openLoginItemsSettings()
     }
 
     @objc private func openMicrophoneSettingsAction() {
@@ -467,7 +508,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             showVolatilePreview: previewCheckbox.state == .on,
             audioRetention: retention,
             keepSuccessfulAudioIndefinitely: keepAudioCheckbox.state == .on,
-            launchAtLogin: launchAtLoginCheckbox.state == .on,
+            launchAtLogin: OigoLaunchAtLoginReconciliation.persistableIntent(
+                checkboxOn: launchAtLoginCheckbox.state == .on,
+                allowsCheckboxMutation: OigoLaunchAtLoginPresentation(
+                    status: currentLaunchAtLoginStatus
+                ).allowsCheckboxMutation,
+                previousIntent: lastRequestedLaunchAtLogin,
+                status: currentLaunchAtLoginStatus
+            ),
             selectedInput: selectedInputFromMenu(),
             selectedInputChannel: selectedChannelFromMenu()
         )
@@ -531,9 +579,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         if let result {
             messageLabel.stringValue = result
             updateShortcutStatus()
+            setLaunchAtLoginStatus(launchAtLoginStatusProvider())
             NSSound.beep()
             return false
         }
+        lastRequestedLaunchAtLogin = settings.launchAtLogin
         committedShortcut = settings.globalShortcut
         if let languageUnappliedMessage {
             messageLabel.stringValue = languageUnappliedMessage

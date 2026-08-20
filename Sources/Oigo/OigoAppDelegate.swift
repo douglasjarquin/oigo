@@ -234,6 +234,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
             storageHealth: displayedStorageHealth,
+            launchAtLoginStatus: launchAtLoginController.status,
+            launchAtLoginStatusProvider: { [weak self] in
+                self?.launchAtLoginController.status ?? .unknown
+            },
+            openLoginItemsSettings: { [weak self] in
+                self?.launchAtLoginController.openLoginItemsSettings()
+            },
             registrationStatus: { [weak self] in
                 self?.shortcutRegistrar.status ?? .inactive("Global shortcut is not registered")
             },
@@ -1791,7 +1798,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         onboardingWindow?.setCommandAvailability(availability)
         storageStatusItem?.title = displayedStorageHealth.statusMessage
         retryStorageItem?.isEnabled = !storageReady && storageCapability.health != .checking
-        launchAtLoginItem?.state = launchAtLoginController.isEnabled ? .on : .off
+        let launchPresentation = OigoLaunchAtLoginPresentation(status: launchAtLoginController.status)
+        launchAtLoginItem?.state = launchPresentation.menuStateOn ? .on : .off
+        launchAtLoginItem?.title = launchPresentation.menuTitle
+        launchAtLoginItem?.toolTip = launchPresentation.menuToolTip
         statusItem?.button?.title = "Oigo"
         switch shortcutRegistrar.status {
         case .active(let shortcut, _):
@@ -1855,11 +1865,25 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleLaunchAtLogin() {
-        let enabled = !launchAtLoginController.isEnabled
+        let status = launchAtLoginController.status
+        if status == .requiresApproval {
+            launchAtLoginController.openLoginItemsSettings()
+            updateSurface()
+            return
+        }
+        if status == .notFound || status == .unknown {
+            showSettingsPersistenceFailure(
+                title: "Launch at Login is unavailable",
+                message: OigoLaunchAtLoginPresentation(status: status).detail
+            )
+            updateSurface()
+            return
+        }
+        let enabled = status != .enabled
         let previousSettings = settings
         let updatedSettings = settings.with(launchAtLogin: enabled)
         do {
-            try launchAtLoginController.setEnabled(enabled)
+            let resolved = try launchAtLoginController.setEnabled(enabled)
             do {
                 try settingsStore.save(updatedSettings)
             } catch {
@@ -1873,12 +1897,15 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             settings = updatedSettings
+            settingsWindow?.setLaunchAtLoginStatus(resolved)
             updateSurface()
         } catch {
             showSettingsPersistenceFailure(
                 title: "Launch at Login could not be changed",
                 message: Self.failureReason(for: error)
             )
+            settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
+            updateSurface()
         }
     }
 
@@ -2072,13 +2099,18 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func applySettings(_ newSettings: OigoSettings) -> String? {
         let previousSettings = settings
         let shortcutChanged = previousSettings.globalShortcut != newSettings.globalShortcut
-        let launchAtLoginChanged = previousSettings.launchAtLogin != newSettings.launchAtLogin
+        let currentLaunchStatus = launchAtLoginController.status
+        let launchAtLoginChanged = OigoLaunchAtLoginReconciliation.shouldMutate(
+            requested: newSettings.launchAtLogin,
+            status: currentLaunchStatus
+        )
 
         if launchAtLoginChanged {
             do {
                 try launchAtLoginController.setEnabled(newSettings.launchAtLogin)
             } catch {
                 registerShortcut()
+                settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                 return "Launch at Login could not be changed: " + Self.failureReason(for: error)
             }
         }
@@ -2098,15 +2130,18 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             guard shortcutValidation.isAvailable else {
                 let shortcutError = Self.shortcutValidationMessage(shortcutValidation)
                 guard launchAtLoginChanged else {
+                    settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                     updateSurface()
                     return shortcutError
                 }
                 do {
                     try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
                 } catch {
+                    settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                     updateSurface()
                     return shortcutError + "; Launch at Login could not be restored: " + Self.failureReason(for: error)
                 }
+                settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                 updateSurface()
                 return shortcutError
             }
@@ -2116,6 +2151,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 var message = "Settings could not be saved: \(error)"
                 guard launchAtLoginChanged else {
+                    settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                     updateSurface()
                     return message
                 }
@@ -2124,12 +2160,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 } catch let restoreError {
                     message += "; Launch at Login could not be restored: \(restoreError)"
                 }
+                settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                 updateSurface()
                 return message
             }
         }
 
         settings = newSettings
+        settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
         let operationOwnsCapture = !NextDictationSettingsPolicy.mayReplaceOwnedCapture(
             isOperationActive: coordinator.hasActiveWork
                 || (operationGate.currentKind?.isDictationLifecycle ?? false)
