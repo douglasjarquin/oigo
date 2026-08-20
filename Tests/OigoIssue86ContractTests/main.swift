@@ -468,10 +468,12 @@ struct OigoIssue86ContractTests {
                 String(describing: firstCapability.health) + " at " + root.path
             )
         }
-        guard firstCapability.history.contains(where: { $0.session.id == completed.id }),
+        guard firstCapability.history.count == 1,
               firstCapability.history.contains(where: { $0.session.id == unfinished.id }),
               case .ready(let report) = firstCapability.health,
-              report.recoveredSessionCount == 1 else {
+              report.recoveredSessionCount == 1,
+              report.historyEntryCount == 1,
+              (try? store.load(id: completed.id)) != nil else {
             throw ContractFailure.relaunchLostExistingHistory
         }
         guard try store.load(id: unfinished.id).metadata.state == .interrupted else {
@@ -487,8 +489,10 @@ struct OigoIssue86ContractTests {
                 String(describing: relaunchedCapability.health) + " at " + root.path
             )
         }
-        guard relaunchedCapability.history.contains(where: { $0.session.id == completed.id }),
-              relaunchedCapability.history.contains(where: { $0.session.id == unfinished.id }) else {
+        guard relaunchedCapability.history.count == 1,
+              relaunchedCapability.history.contains(where: { $0.session.id == unfinished.id }),
+              (try? store.load(id: completed.id)) != nil,
+              (try? store.load(id: unfinished.id)) != nil else {
             throw ContractFailure.relaunchLostExistingHistory
         }
         guard try store.load(id: completed.id).metadata.state == .completed else {

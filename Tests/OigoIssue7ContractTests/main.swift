@@ -29,6 +29,7 @@ private struct OigoIssue7ContractTests {
             ("interrupted discovery isolates malformed sessions", testInterruptedDiscoveryIsolatesMalformedSessions),
             ("active deletion is refused", testActiveDeletionIsRefused),
             ("history metadata is bounded and malformed sessions are isolated", testHistoryMetadataIsBounded),
+            ("history pages are bounded and stale generations are ignored", testHistoryPagesAndStaleGenerations),
             ("retry transition preserves durable audio", testRetryTransitionPreservesDurableAudio),
             ("retention boundaries are explicit and safe", testRetentionBoundaries),
             ("idle maintenance honors inspect bounds and continuation", testIdleMaintenanceBoundsAndContinuation),
@@ -247,6 +248,52 @@ private struct OigoIssue7ContractTests {
             guard case .transcriptTooLarge = error else {
                 throw ContractFailure(message: "oversized transcript returned the wrong error: " + error.description)
             }
+        }
+    }
+
+    private static func testHistoryPagesAndStaleGenerations() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(rootDirectory: root)
+        let base = Date(timeIntervalSince1970: 50_000)
+        var sessions: [DictationSession] = []
+        for index in 0..<6 {
+            let created = try store.createSession(now: base.addingTimeInterval(Double(index)))
+            let persisted = try store.persistRawText("page \(index)", for: created)
+            sessions.append(try store.update(persisted, state: .completed, at: base.addingTimeInterval(Double(index))))
+        }
+        let first = try store.listHistoryReport(
+            limit: 2,
+            maxDirectoriesToInspect: 2
+        )
+        guard first.entries.count == 2,
+              first.inspectedDirectoryCount <= 2,
+              first.hasMore,
+              first.cursor != nil,
+              first.entries[0].id == sessions[5].id else {
+            throw ContractFailure(message: "first history page was not newest-first and bounded")
+        }
+        let second = try store.listHistoryReport(
+            limit: 2,
+            cursor: first.cursor,
+            maxDirectoriesToInspect: 2
+        )
+        guard second.entries.allSatisfy({ entry in
+            !first.entries.contains(where: { $0.id == entry.id })
+        }) else {
+            throw ContractFailure(message: "history page two repeated the first page")
+        }
+        let latest = try store.listHistoryReport(limit: 1, maxDirectoriesToInspect: 4)
+        guard latest.entries.count == 1, latest.entries[0].id == sessions[5].id else {
+            throw ContractFailure(message: "latest-session history path loaded more than one row")
+        }
+
+        var generation = HistoryLoadGeneration()
+        let firstGeneration = generation.next()
+        let secondGeneration = generation.next()
+        guard !generation.isCurrent(firstGeneration),
+              generation.isCurrent(secondGeneration) else {
+            throw ContractFailure(message: "stale history generation replaced the current page")
         }
     }
 

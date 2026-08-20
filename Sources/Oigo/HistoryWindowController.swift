@@ -3,7 +3,7 @@ import OigoCore
 
 @MainActor
 final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate {
-    private let loadTranscript: (SessionHistoryEntry, SessionTextSource) -> Result<String, Error>
+    private let loadTranscript: (SessionHistoryEntry, SessionTextSource, @escaping @Sendable (Result<String, Error>) -> Void) -> Void
     private let copyRawTranscript: (SessionHistoryEntry) -> Void
     private let copyCleanTranscript: (SessionHistoryEntry) -> Void
     private let pasteAgain: (SessionHistoryEntry) -> Void
@@ -14,6 +14,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private let revealRecording: (SessionHistoryEntry) -> Void
     private let deleteSession: (SessionHistoryEntry) -> Void
     private let runIdleMaintenance: () -> Void
+    private let loadMore: () -> Void
     private let onClose: () -> Void
 
     private var entries: [SessionHistoryEntry] = []
@@ -21,6 +22,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private var preservedSelectionID: UUID?
     private var commandAvailability: AppCommandAvailability?
     private var playingSessionID: UUID?
+    private var hasMore = false
+    private var isLoading = false
+    private var transcriptLoadGeneration: UInt64 = 0
+    private let loadMoreButton = NSButton(title: "Load More", target: nil, action: nil)
+    private let loadingLabel = NSTextField(labelWithString: "")
     private let tableView = NSTableView()
     private let detailTitle = NSTextField(labelWithString: "No session selected")
     private let detailStatus = NSTextField(labelWithString: "")
@@ -52,7 +58,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }()
 
     init(
-        loadTranscript: @escaping (SessionHistoryEntry, SessionTextSource) -> Result<String, Error>,
+        loadTranscript: @escaping (SessionHistoryEntry, SessionTextSource, @escaping @Sendable (Result<String, Error>) -> Void) -> Void,
         copyRawTranscript: @escaping (SessionHistoryEntry) -> Void,
         copyCleanTranscript: @escaping (SessionHistoryEntry) -> Void,
         pasteAgain: @escaping (SessionHistoryEntry) -> Void,
@@ -63,6 +69,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         revealRecording: @escaping (SessionHistoryEntry) -> Void,
         deleteSession: @escaping (SessionHistoryEntry) -> Void,
         runIdleMaintenance: @escaping () -> Void,
+        loadMore: @escaping () -> Void,
         onClose: @escaping () -> Void
     ) {
         self.loadTranscript = loadTranscript
@@ -76,6 +83,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         self.revealRecording = revealRecording
         self.deleteSession = deleteSession
         self.runIdleMaintenance = runIdleMaintenance
+        self.loadMore = loadMore
         self.onClose = onClose
 
         let window = NSWindow(
@@ -97,12 +105,19 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         fatalError("init(coder:) has not been implemented")
     }
 
-    func reload(entries: [SessionHistoryEntry]) {
+    func reload(
+        entries: [SessionHistoryEntry],
+        hasMore: Bool = false,
+        isLoading: Bool = false
+    ) {
         let selectedID = selectedEntry?.id
         let selectedSource = selectedTranscriptSource
         isReloading = true
         defer { isReloading = false }
         self.entries = entries
+        self.hasMore = hasMore
+        self.isLoading = isLoading
+        updateLoadingChrome()
         tableView.reloadData()
         if let selectedID,
            let row = entries.firstIndex(where: { $0.id == selectedID }) {
@@ -134,6 +149,34 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     func showMessage(_ message: String) {
         messageLabel.stringValue = message
         messageLabel.isHidden = message.isEmpty
+    }
+
+    func setLoading(_ loading: Bool) {
+        isLoading = loading
+        updateLoadingChrome()
+    }
+
+    func append(
+        entries newEntries: [SessionHistoryEntry],
+        hasMore: Bool,
+        isLoading: Bool
+    ) {
+        let selectedID = selectedEntry?.id
+        let selectedSource = selectedTranscriptSource
+        isReloading = true
+        defer { isReloading = false }
+        let existingIDs = Set(entries.map(\.id))
+        entries.append(contentsOf: newEntries.filter { !existingIDs.contains($0.id) })
+        self.hasMore = hasMore
+        self.isLoading = isLoading
+        updateLoadingChrome()
+        tableView.reloadData()
+        if let selectedID,
+           let row = entries.firstIndex(where: { $0.id == selectedID }) {
+            preservedSelectionID = selectedID
+            tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            selectedTranscriptSource = selectedSource
+        }
     }
 
     func setCleanAgainEnabled(_ enabled: Bool) {
@@ -350,7 +393,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             action: #selector(runIdleMaintenanceAction)
         )
         maintenanceButton.bezelStyle = .rounded
-        let footer = NSStackView(views: [maintenanceButton])
+        loadMoreButton.target = self
+        loadMoreButton.action = #selector(loadMoreAction)
+        loadMoreButton.bezelStyle = .rounded
+        loadingLabel.textColor = .secondaryLabelColor
+        let footer = NSStackView(views: [maintenanceButton, loadMoreButton, loadingLabel])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.edgeInsets = NSEdgeInsets(top: 8, left: 20, bottom: 12, right: 20)
@@ -369,6 +416,17 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             listStack.widthAnchor.constraint(greaterThanOrEqualToConstant: 720)
         ])
         showMessage("")
+        updateLoadingChrome()
+    }
+
+    @objc private func loadMoreAction() {
+        loadMore()
+    }
+
+    private func updateLoadingChrome() {
+        loadingLabel.stringValue = isLoading ? "Loading sessions…" : ""
+        loadMoreButton.isEnabled = hasMore && !isLoading
+        loadMoreButton.isHidden = !hasMore && !isLoading
     }
 
     private func configureTable() {
@@ -476,12 +534,34 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         ]
             .compactMap { $0 }
             .joined(separator: " · ")
-        switch loadTranscript(entry, selectedTranscriptSource) {
-        case .success(let transcript):
-            transcriptView.string = transcript
-        case .failure:
-            transcriptView.string = "Transcript unavailable."
-            showMessage("Could not load the selected transcript.")
+        if entry.textSource != .processed {
+            transcriptVersionPopup.item(at: 1)?.isEnabled = false
+            if selectedTranscriptSource == .processed {
+                selectedTranscriptSource = .raw
+                transcriptVersionPopup.selectItem(at: 0)
+            }
+        } else {
+            transcriptVersionPopup.item(at: 1)?.isEnabled = true
+        }
+        transcriptView.string = "Loading transcript…"
+        transcriptLoadGeneration &+= 1
+        let generation = transcriptLoadGeneration
+        let source = selectedTranscriptSource
+        loadTranscript(entry, source) { [weak self] result in
+            Task { @MainActor in
+                guard let self,
+                      generation == self.transcriptLoadGeneration,
+                      self.selectedEntry?.id == entry.id else {
+                    return
+                }
+                switch result {
+                case .success(let transcript):
+                    self.transcriptView.string = transcript
+                case .failure:
+                    self.transcriptView.string = "Transcript unavailable."
+                    self.showMessage("Could not load the selected transcript.")
+                }
+            }
         }
         setActionButtons(enabled: true, entry: entry)
     }
@@ -500,9 +580,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         pasteAgainButton.isEnabled = enabled
             && capabilities?.pasteAgainAvailable == true
             && sessionCommandsEnabled
-        let canUseCleanTranscript = canUseTranscript && entry.map {
-            FileManager.default.fileExists(atPath: $0.session.cleanTextURL.path)
-        } == true
+        let canUseCleanTranscript = canUseTranscript && entry?.textSource == .processed
+        transcriptVersionPopup.item(at: 1)?.isEnabled = canUseCleanTranscript
         transcriptVersionPopup.isEnabled = enabled && entry != nil
         copyCleanButton.isEnabled = canUseCleanTranscript
         pasteCleanAgainButton.isEnabled = canUseCleanTranscript && sessionCommandsEnabled

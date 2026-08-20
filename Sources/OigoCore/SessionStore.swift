@@ -406,16 +406,49 @@ public struct SessionHistoryEntry: Equatable, Identifiable, Sendable {
     }
 }
 
+public struct SessionHistoryCursor: Equatable, Sendable {
+    public let lastDirectoryName: String
+
+    public init(lastDirectoryName: String) {
+        self.lastDirectoryName = lastDirectoryName
+    }
+}
+
+public struct HistoryLoadGeneration: Equatable, Sendable {
+    public private(set) var value: UInt64 = 0
+
+    public init() {}
+
+    @discardableResult
+    public mutating func next() -> UInt64 {
+        value &+= 1
+        return value
+    }
+
+    public func isCurrent(_ generation: UInt64) -> Bool {
+        generation == value
+    }
+}
+
 public struct SessionHistoryEnumeration: Equatable, Sendable {
     public let entries: [SessionHistoryEntry]
     public let malformedSessionCount: Int
+    public let inspectedDirectoryCount: Int
+    public let hasMore: Bool
+    public let cursor: SessionHistoryCursor?
 
     public init(
         entries: [SessionHistoryEntry],
-        malformedSessionCount: Int
+        malformedSessionCount: Int,
+        inspectedDirectoryCount: Int = 0,
+        hasMore: Bool = false,
+        cursor: SessionHistoryCursor? = nil
     ) {
         self.entries = entries
         self.malformedSessionCount = malformedSessionCount
+        self.inspectedDirectoryCount = max(0, inspectedDirectoryCount)
+        self.hasMore = hasMore
+        self.cursor = cursor
     }
 }
 
@@ -736,7 +769,10 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     public func listHistoryReport(
-        limit: Int = SessionRetentionPolicy.default.maxTranscriptSessions
+        limit: Int = SessionRetentionPolicy.default.maxTranscriptSessions,
+        cursor: SessionHistoryCursor? = nil,
+        maxDirectoriesToInspect: Int = SessionRetentionPolicy.default.maxDirectoriesToInspect,
+        maxElapsedNanoseconds: UInt64 = SessionRetentionPolicy.defaultMaxElapsedNanoseconds
     ) throws -> SessionHistoryEnumeration {
         guard limit > 0 else {
             return SessionHistoryEnumeration(entries: [], malformedSessionCount: 0)
@@ -745,59 +781,63 @@ public final class SessionStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        try ensureRootPathIdentity()
-
-        let urls = try fileManager.contentsOfDirectory(
-            at: rootDirectory,
-            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
-            options: [.skipsHiddenFiles]
-        )
-        var sessions: [DictationSession] = []
-        var malformedSessionCount = 0
-        for url in urls {
-            do {
-                let values = try url.resourceValues(
-                    forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
-                )
-                guard values.isSymbolicLink != true else {
-                    malformedSessionCount += 1
-                    continue
-                }
-                guard values.isDirectory == true else {
-                    continue
-                }
-                sessions.append(try readSession(at: url))
-            } catch {
-                malformedSessionCount += 1
-            }
+        let started = DispatchTime.now().uptimeNanoseconds
+        let inspectLimit = max(1, maxDirectoriesToInspect)
+        let maintenanceCursor = cursor.map {
+            SessionMaintenanceCursor(lastDirectoryName: $0.lastDirectoryName, retainedTranscriptCount: 0)
         }
-        let maxDirectories = SessionRetentionPolicy.default.maxDirectoriesToInspect
-        let boundedSessions = sessions
-            .sorted { lhs, rhs in
-                isNewer(lhs, than: rhs)
+        let batch = try collectMaintenanceBatch(
+            policy: SessionRetentionPolicy(
+                maxTranscriptSessions: limit,
+                maxDirectoriesToInspect: inspectLimit,
+                maxElapsedNanoseconds: maxElapsedNanoseconds
+            ),
+            cursor: maintenanceCursor
+        )
+        var entries: [SessionHistoryEntry] = []
+        var malformedSessionCount = 0
+        var inspectedDirectoryCount = 0
+        var lastDirectoryName: String?
+        var timedOut = false
+
+        for item in batch.items {
+            if DispatchTime.now().uptimeNanoseconds &- started >= maxElapsedNanoseconds {
+                timedOut = true
+                break
             }
-            .prefix(maxDirectories)
-        let entries = try boundedSessions
-            .sorted { lhs, rhs in
-                isNewer(lhs, than: rhs)
+            inspectedDirectoryCount += 1
+            lastDirectoryName = item.name
+            guard let session = item.session, !item.isSymbolicLink else {
+                malformedSessionCount += 1
+                continue
             }
-            .prefix(limit)
-            .map { session in
-                let firstLine = session.metadata.firstTranscriptLine
-                    ?? (try? readFirstTranscriptLine(at: session.directoryURL))
-                let hasCleanText = try withSessionDirectory(at: session.directoryURL) { directoryFD in
-                    entryExists(named: "clean.txt", in: directoryFD)
-                }
-                let source: SessionTextSource = hasCleanText ? .processed : .raw
-                return SessionHistoryEntry(
+            let firstLine = session.metadata.firstTranscriptLine
+                ?? (try? readFirstTranscriptLine(at: session.directoryURL))
+            let hasCleanText = (try? withSessionDirectory(at: session.directoryURL) { directoryFD in
+                entryExists(named: "clean.txt", in: directoryFD)
+            }) ?? false
+            entries.append(
+                SessionHistoryEntry(
                     session: session,
                     firstTranscriptLine: firstLine,
-                    textSource: source
+                    textSource: hasCleanText ? .processed : .raw
                 )
+            )
+            if entries.count == limit {
+                break
             }
+        }
+
+        let hasMore = timedOut
+            || batch.moreWorkRemains
+            || entries.count == limit && inspectedDirectoryCount < batch.items.count
+        let nextCursor = lastDirectoryName.map { SessionHistoryCursor(lastDirectoryName: $0) }
         return SessionHistoryEnumeration(
             entries: entries,
-            malformedSessionCount: malformedSessionCount
+            malformedSessionCount: malformedSessionCount,
+            inspectedDirectoryCount: inspectedDirectoryCount,
+            hasMore: hasMore,
+            cursor: hasMore ? nextCursor : nil
         )
     }
 
@@ -2314,7 +2354,13 @@ public final class SessionStore: @unchecked Sendable {
             if values?.isDirectory == true {
                 enumerator.skipDescendants()
             }
-            guard values?.isDirectory == true else {
+            guard url.deletingLastPathComponent().standardizedFileURL.path
+                    == rootDirectory.standardizedFileURL.path else {
+                continue
+            }
+            let isSymbolicLink = values?.isSymbolicLink == true
+                || (try? fileManager.destinationOfSymbolicLink(atPath: url.path)) != nil
+            guard isSymbolicLink || values?.isDirectory == true else {
                 continue
             }
             let name = url.lastPathComponent
@@ -2327,7 +2373,7 @@ public final class SessionStore: @unchecked Sendable {
                     name: name,
                     url: url,
                     session: nil,
-                    isSymbolicLink: values?.isSymbolicLink == true
+                    isSymbolicLink: isSymbolicLink
                 )
             )
             if selected.count > policy.maxDirectoriesToInspect {

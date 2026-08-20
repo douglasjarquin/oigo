@@ -94,6 +94,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: SettingsWindowController?
     private var settingsSessionID: UUID?
     private var historyWindow: HistoryWindowController?
+    private var historyLoadGeneration = HistoryLoadGeneration()
+    private var historyCursor: SessionHistoryCursor?
+    private var historyHasMore = false
     private var statusItem: NSStatusItem?
     private var toggleItem: NSMenuItem?
     private var shortcutStatusItem: NSMenuItem?
@@ -504,9 +507,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openHistory() {
         if historyWindow == nil {
             historyWindow = HistoryWindowController(
-                loadTranscript: { [weak self] entry, source in
-                    self?.loadTranscript(for: entry, source: source)
-                        ?? .failure(SessionStoreError.missingSession(entry.id))
+                loadTranscript: { [weak self] entry, source, completion in
+                    self?.loadTranscript(for: entry, source: source, completion: completion)
                 },
                 copyRawTranscript: { [weak self] entry in
                     self?.copyRawTranscript(for: entry)
@@ -537,6 +539,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 },
                 runIdleMaintenance: { [weak self] in
                     self?.runIdleMaintenance()
+                },
+                loadMore: { [weak self] in
+                    self?.loadMoreHistory()
                 },
                 onClose: { [weak self] in
                     self?.playback.stop()
@@ -1345,21 +1350,34 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func loadTranscript(
         for entry: SessionHistoryEntry,
-        source: SessionTextSource
-    ) -> Result<String, Error> {
-        guard let store = sessionStore else {
-            return .failure(SessionStoreError.missingSession(entry.id))
+        source: SessionTextSource,
+        completion: @escaping @Sendable (Result<String, Error>) -> Void
+    ) {
+        guard storageCapability.health.isReady,
+              let store = sessionStore else {
+            completion(.failure(SessionStoreError.missingSession(entry.id)))
+            return
         }
-        do {
-            let transcript = switch source {
-            case .raw:
-                try store.readRawText(for: entry.session)
-            case .processed:
-                try store.readCleanText(for: entry.session)
+        if source == .processed, entry.textSource != .processed {
+            completion(.failure(SessionStoreError.missingSession(entry.id)))
+            return
+        }
+        Task.detached {
+            let result: Result<String, Error>
+            do {
+                let transcript = switch source {
+                case .raw:
+                    try store.readRawText(for: entry.session)
+                case .processed:
+                    try store.readCleanText(for: entry.session)
+                }
+                result = .success(transcript)
+            } catch {
+                result = .failure(error)
             }
-            return .success(transcript)
-        } catch {
-            return .failure(error)
+            await MainActor.run {
+                completion(result)
+            }
         }
     }
 
@@ -1755,22 +1773,101 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
               let store = sessionStore else {
             return
         }
-        do {
-            let report = try store.listHistoryReport()
-            reportedMalformedSessionCount = report.malformedSessionCount
-            lastSession = report.entries.first?.session
-            historyWindow?.reload(entries: report.entries)
-            settingsWindow?.setStorageHealth(displayedStorageHealth)
-            onboardingWindow?.setStorageHealth(displayedStorageHealth)
-        } catch {
-            markStorageUnhealthyIfNeeded(error)
-            historyWindow?.showMessage(
-                storageCapability.health.failureCategory == nil
-                    ? Self.friendlyError("History unavailable", error)
-                    : storageCapability.health.statusMessage
-            )
+        let generation = historyLoadGeneration.next()
+        historyCursor = nil
+        historyHasMore = false
+        historyWindow?.setLoading(true)
+        let historyIsOpen = historyWindow != nil
+        Task.detached { [weak self] in
+            do {
+                let latest = try store.listHistoryReport(
+                    limit: 1,
+                    maxDirectoriesToInspect: 64
+                )
+                let page: SessionHistoryEnumeration
+                if historyIsOpen {
+                    page = try store.listHistoryReport(
+                        limit: 50,
+                        maxDirectoriesToInspect: 256
+                    )
+                } else {
+                    page = latest
+                }
+                await MainActor.run {
+                    guard let self, self.historyLoadGeneration.isCurrent(generation) else {
+                        return
+                    }
+                    self.reportedMalformedSessionCount = page.malformedSessionCount
+                    self.lastSession = latest.entries.first?.session
+                    self.historyCursor = page.cursor
+                    self.historyHasMore = page.hasMore
+                    self.historyWindow?.reload(
+                        entries: page.entries,
+                        hasMore: page.hasMore,
+                        isLoading: false
+                    )
+                    self.settingsWindow?.setStorageHealth(self.displayedStorageHealth)
+                    self.onboardingWindow?.setStorageHealth(self.displayedStorageHealth)
+                    self.updateSurface()
+                }
+            } catch {
+                await MainActor.run {
+                    guard let self, self.historyLoadGeneration.isCurrent(generation) else {
+                        return
+                    }
+                    self.historyWindow?.setLoading(false)
+                    self.markStorageUnhealthyIfNeeded(error)
+                    self.historyWindow?.showMessage(
+                        self.storageCapability.health.failureCategory == nil
+                            ? Self.friendlyError("History unavailable", error)
+                            : self.storageCapability.health.statusMessage
+                    )
+                    self.updateSurface()
+                }
+            }
         }
-        updateSurface()
+    }
+
+    private func loadMoreHistory() {
+        guard storageCapability.health.isReady,
+              let store = sessionStore,
+              historyHasMore else {
+            return
+        }
+        let generation = historyLoadGeneration.value
+        let cursor = historyCursor
+        historyWindow?.setLoading(true)
+        Task.detached { [weak self] in
+            do {
+                let page = try store.listHistoryReport(
+                    limit: 50,
+                    cursor: cursor,
+                    maxDirectoriesToInspect: 256
+                )
+                await MainActor.run {
+                    guard let self, self.historyLoadGeneration.isCurrent(generation) else {
+                        return
+                    }
+                    self.historyCursor = page.cursor
+                    self.historyHasMore = page.hasMore
+                    self.historyWindow?.append(
+                        entries: page.entries,
+                        hasMore: page.hasMore,
+                        isLoading: false
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    guard let self, self.historyLoadGeneration.isCurrent(generation) else {
+                        return
+                    }
+                    self.historyWindow?.setLoading(false)
+                    self.historyWindow?.showMessage(
+                        Self.friendlyError("History unavailable", error)
+                    )
+                }
+            }
+        }
     }
 
     private func runIdleMaintenance() {
@@ -2028,7 +2125,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 reportedMalformedSessionCount = report.malformedSessionCount
             }
             lastSession = storageCapability.history.first?.session
-            historyWindow?.reload(entries: storageCapability.history)
+            if historyWindow != nil {
+                refreshHistory()
+            }
             if onboardingStore.load().isComplete {
                 registerShortcut()
             }

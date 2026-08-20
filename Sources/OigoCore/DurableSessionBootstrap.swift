@@ -214,7 +214,10 @@ public struct DurableSessionBootstrapper: DurableSessionBootstrapping, Sendable 
             return recovered.count
         }
         historyEnumeration = { store in
-            try store.listHistoryReport()
+            try store.listHistoryReport(
+                limit: 1,
+                maxDirectoriesToInspect: 64
+            )
         }
     }
 
