@@ -1,0 +1,230 @@
+#!/bin/zsh
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+    print -u2 "usage: $0 <Oigo.app>"
+    exit 64
+fi
+
+app="${1%/}"
+if [[ ! -d "$app" ]]; then
+    print -u2 "FAIL: app bundle does not exist: $app"
+    exit 1
+fi
+
+required_version="26.0"
+required_bundle_id="com.oigo.app"
+required_executable_name="Oigo"
+failures=0
+
+fail() {
+    print -u2 "FAIL: $1"
+    failures=$((failures + 1))
+}
+
+pass() {
+    print "GREEN: $1"
+}
+
+if [[ "${app:t}" != "Oigo.app" ]]; then
+    fail "bundle name must be Oigo.app, found ${app:t}"
+fi
+
+parent="${app:h:t}"
+if [[ "$parent" != "Release" ]]; then
+    fail "bundle must be a Release product, found parent directory $parent"
+fi
+
+info="$app/Contents/Info.plist"
+if [[ ! -f "$info" ]]; then
+    fail "Info.plist is missing"
+    print -u2 "FAILURES=$failures"
+    exit 1
+fi
+
+/usr/bin/plutil -lint "$info" >/dev/null
+
+plist_string() {
+    /usr/libexec/PlistBuddy -c "Print :$1" "$info" 2>/dev/null || true
+}
+
+plist_bool() {
+    /usr/libexec/PlistBuddy -c "Print :$1" "$info" 2>/dev/null || true
+}
+
+minimum_os="$(plist_string MinimumOSVersion)"
+ls_minimum="$(plist_string LSMinimumSystemVersion)"
+if [[ -z "$minimum_os" && -z "$ls_minimum" ]]; then
+    fail "bundle Info.plist has neither MinimumOSVersion nor LSMinimumSystemVersion"
+fi
+if [[ -n "$minimum_os" && "$minimum_os" != "$required_version" ]]; then
+    fail "MinimumOSVersion must be $required_version, found $minimum_os"
+fi
+if [[ -n "$ls_minimum" && "$ls_minimum" != "$required_version" ]]; then
+    fail "LSMinimumSystemVersion must be $required_version, found $ls_minimum"
+fi
+if [[ "$minimum_os" == "$required_version" || "$ls_minimum" == "$required_version" ]]; then
+    pass "minimum OS is $required_version"
+fi
+
+bundle_id="$(plist_string CFBundleIdentifier)"
+if [[ "$bundle_id" == "$required_bundle_id" ]]; then
+    pass "bundle identifier is $required_bundle_id"
+else
+    fail "CFBundleIdentifier must be $required_bundle_id, found ${bundle_id:-<missing>}"
+fi
+
+executable_name="$(plist_string CFBundleExecutable)"
+if [[ "$executable_name" == "$required_executable_name" ]]; then
+    pass "CFBundleExecutable is $required_executable_name"
+else
+    fail "CFBundleExecutable must be $required_executable_name, found ${executable_name:-<missing>}"
+fi
+
+short_version="$(plist_string CFBundleShortVersionString)"
+bundle_version="$(plist_string CFBundleVersion)"
+if [[ -n "$short_version" && -n "$bundle_version" ]]; then
+    pass "bundle versions are $short_version ($bundle_version)"
+else
+    fail "CFBundleShortVersionString and CFBundleVersion must both be present"
+fi
+
+lsuielement="$(plist_bool LSUIElement)"
+if [[ "$lsuielement" == "true" ]]; then
+    pass "LSUIElement is true"
+else
+    fail "LSUIElement must be true, found ${lsuielement:-<missing>}"
+fi
+
+microphone_usage="$(plist_string NSMicrophoneUsageDescription)"
+if [[ -n "$microphone_usage" ]]; then
+    pass "NSMicrophoneUsageDescription is present"
+else
+    fail "NSMicrophoneUsageDescription is missing"
+fi
+
+executable="$app/Contents/MacOS/$required_executable_name"
+if [[ -x "$executable" ]]; then
+    pass "executable exists at Contents/MacOS/$required_executable_name"
+else
+    fail "executable is missing or not executable: $executable"
+fi
+
+if [[ -x "$executable" ]]; then
+    archs="$(/usr/bin/lipo -archs "$executable" 2>/dev/null || true)"
+    if [[ "$archs" == "arm64" ]]; then
+        pass "executable architecture is arm64"
+    else
+        fail "executable architecture must be exactly arm64, found ${archs:-<unknown>}"
+    fi
+fi
+
+forbidden=()
+while IFS= read -r path; do
+    case "$path" in
+        *.xctest|*/xctest|*/XCTest*|*/Tests/*|*.swift|*.dSYM|*/dSYM/*|*Test.bundle)
+            forbidden+="$path"
+            ;;
+    esac
+done < <(/usr/bin/find "$app" \( -type f -o -type d \))
+
+debug_artifacts=()
+while IFS= read -r path; do
+    debug_artifacts+="$path"
+done < <(/usr/bin/find "$app" \( -name '*debug*' -o -name '*Debug*' -o -name '*.xctest' -o -name 'XCTest*' \) 2>/dev/null)
+
+if (( ${#forbidden[@]} == 0 && ${#debug_artifacts[@]} == 0 )); then
+    pass "bundle contains no test or debug artifacts"
+else
+    fail "bundle contains test or debug artifacts: ${forbidden[*]} ${debug_artifacts[*]}"
+fi
+
+if [[ -d "$app/Contents/PlugIns" ]]; then
+    fail "bundle contains PlugIns, which ordinary Release CI must not ship"
+fi
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+if membership_error="$(
+    /usr/bin/python3 - "$repo_root" "$repo_root/Oigo.xcodeproj/project.pbxproj" <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+repo_root = sys.argv[1]
+pbxproj = sys.argv[2]
+converted = subprocess.check_output(
+    ["/usr/bin/plutil", "-convert", "json", "-o", "-", pbxproj]
+)
+project = json.loads(converted)
+objects = project.get("objects", {})
+compiled = set()
+for obj in objects.values():
+    if obj.get("isa") != "PBXSourcesBuildPhase":
+        continue
+    for build_file_id in obj.get("files", []):
+        build_file = objects.get(build_file_id, {})
+        file_ref = objects.get(build_file.get("fileRef"), {})
+        path = file_ref.get("path")
+        if not path or not path.endswith(".swift"):
+            sys.stdout.write("Xcode sources phase includes a non-Swift file: %s\n" % (path,))
+            sys.exit(1)
+        compiled.add(os.path.basename(path))
+
+production_roots = [
+    "Sources/Oigo",
+    "Sources/OigoCore",
+    "Sources/OigoCapture",
+    "Sources/OigoTranscription",
+    "Sources/OigoInsertion",
+    "Sources/OigoHotKey",
+]
+missing = []
+extra = set(compiled)
+for relative_root in production_roots:
+    directory = os.path.join(repo_root, relative_root)
+    found = False
+    for _, _, filenames in os.walk(directory):
+        for name in filenames:
+            if not name.endswith(".swift"):
+                continue
+            found = True
+            if name in compiled:
+                extra.discard(name)
+            else:
+                missing.append("%s/%s" % (relative_root, name))
+    if not found:
+        sys.stdout.write("%s has no Swift sources\n" % relative_root)
+        sys.exit(1)
+
+if missing or extra:
+    parts = []
+    if missing:
+        parts.append("missing from Xcode sources: " + ", ".join(sorted(missing)))
+    if extra:
+        parts.append(
+            "compiled Swift names not in production sources: " + ", ".join(sorted(extra))
+        )
+    sys.stdout.write("; ".join(parts) + "\n")
+    sys.exit(1)
+PY
+)"; then
+    pass "every production source is in an Xcode sources phase"
+else
+    fail "source membership drift: ${membership_error}"
+fi
+
+print "INCONCLUSIVE: microphone TCC is not exercised by bundle inspection"
+print "INCONCLUSIVE: Speech assets and recognition are not exercised by bundle inspection"
+print "INCONCLUSIVE: Accessibility permission is not exercised by bundle inspection"
+print "INCONCLUSIVE: hardware capture devices are not exercised by bundle inspection"
+print "INCONCLUSIVE: Developer ID signing, notarization, and Gatekeeper are not exercised by unsigned CI"
+print "INCONCLUSIVE: clean-account dogfood is not exercised by hosted CI"
+
+if (( failures > 0 )); then
+    print -u2 "FAILURES=$failures"
+    exit 1
+fi
+
+print "GREEN: Oigo.app bundle inspection"
+exit 0

@@ -37,6 +37,7 @@
         A0000001000000000000001C /* TranscriptionStartupGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001A /* TranscriptionStartupGate.swift */; };
         A0000001000000000000001D /* InsertionContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001C /* InsertionContracts.swift */; };
         A0000001000000000000001E /* InsertionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001D /* InsertionService.swift */; };
+        A00000010000000000000046 /* InsertionTargetHandoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000003A /* InsertionTargetHandoff.swift */; };
         A0000001000000000000001F /* ApplicationServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001E /* ApplicationServices.framework */; };
         A00000010000000000000020 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001F /* CoreGraphics.framework */; };
         A00000010000000000000021 /* libOigoInsertion.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000001B /* libOigoInsertion.a */; };
@@ -155,6 +156,7 @@
         B0000001000000000000001B /* libOigoInsertion.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoInsertion.a; sourceTree = BUILT_PRODUCTS_DIR; };
         B0000001000000000000001C /* InsertionContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertionContracts.swift; sourceTree = "<group>"; };
         B0000001000000000000001D /* InsertionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertionService.swift; sourceTree = "<group>"; };
+        B0000001000000000000003A /* InsertionTargetHandoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertionTargetHandoff.swift; sourceTree = "<group>"; };
         B0000001000000000000001E /* ApplicationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ApplicationServices.framework; path = System/Library/Frameworks/ApplicationServices.framework; sourceTree = SDKROOT; };
         B0000001000000000000001F /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
         B00000010000000000000020 /* HistoryWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryWindowController.swift; sourceTree = "<group>"; };
@@ -339,6 +341,7 @@
             children = (
                 B0000001000000000000001C /* InsertionContracts.swift */,
                 B0000001000000000000001D /* InsertionService.swift */,
+                B0000001000000000000003A /* InsertionTargetHandoff.swift */,
             );
             path = Sources/OigoInsertion;
             sourceTree = "<group>";
@@ -618,6 +621,7 @@
             files = (
                 A0000001000000000000001D /* InsertionContracts.swift in Sources */,
                 A0000001000000000000001E /* InsertionService.swift in Sources */,
+                A00000010000000000000046 /* InsertionTargetHandoff.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -675,7 +679,7 @@
         G00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 ONLY_ACTIVE_ARCH = NO;
                 SWIFT_VERSION = 6.0;
             };
@@ -684,7 +688,7 @@
         G00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 ONLY_ACTIVE_ARCH = NO;
                 SWIFT_VERSION = 6.0;
             };
@@ -697,7 +701,7 @@
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
                 INFOPLIST_FILE = Oigo/Info.plist;
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 ONLY_ACTIVE_ARCH = NO;
                 PRODUCT_BUNDLE_IDENTIFIER = com.oigo.app;
                 PRODUCT_NAME = Oigo;
@@ -712,7 +716,7 @@
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
                 INFOPLIST_FILE = Oigo/Info.plist;
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 ONLY_ACTIVE_ARCH = NO;
                 PRODUCT_BUNDLE_IDENTIFIER = com.oigo.app;
                 PRODUCT_NAME = Oigo;
@@ -726,7 +730,7 @@
                 ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 PRODUCT_NAME = OigoCore;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -736,7 +740,7 @@
             isa = XCBuildConfiguration;
             buildSettings = {
                 ARCHS = "$(ARCHS_STANDARD)";
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 PRODUCT_NAME = OigoCore;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -748,7 +752,7 @@
                 ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 PRODUCT_NAME = OigoCapture;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -758,7 +762,7 @@
             isa = XCBuildConfiguration;
             buildSettings = {
                 ARCHS = "$(ARCHS_STANDARD)";
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 PRODUCT_NAME = OigoCapture;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -770,7 +774,7 @@
                 ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 PRODUCT_NAME = OigoTranscription;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -780,7 +784,7 @@
             isa = XCBuildConfiguration;
             buildSettings = {
                 ARCHS = "$(ARCHS_STANDARD)";
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 PRODUCT_NAME = OigoTranscription;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -792,7 +796,7 @@
                 ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 PRODUCT_NAME = OigoInsertion;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -802,7 +806,7 @@
             isa = XCBuildConfiguration;
             buildSettings = {
                 ARCHS = "$(ARCHS_STANDARD)";
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 PRODUCT_NAME = OigoInsertion;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -814,7 +818,7 @@
                 ARCHS = "$(ARCHS_STANDARD)";
                 CODE_SIGNING_ALLOWED = NO;
                 CODE_SIGN_IDENTITY = "";
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 PRODUCT_NAME = OigoHotKey;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };
@@ -824,7 +828,7 @@
             isa = XCBuildConfiguration;
             buildSettings = {
                 ARCHS = "$(ARCHS_STANDARD)";
-                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
                 PRODUCT_NAME = OigoHotKey;
                 SWIFT_STRICT_CONCURRENCY = complete;
             };

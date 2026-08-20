@@ -4,7 +4,9 @@ This matrix hands the issue #82 global shortcut scenarios to issue #12's exact-r
 
 It is a handoff artifact, not a claim that issue #12 native acceptance is complete.
 
-The issue #12 operator must pin one reviewed source SHA and one exact Release `Oigo.app` bundle before running the native rows.
+The issue #12 operator must pin one reviewed source SHA and the exact Release `Oigo.app` produced by the `Xcode app bundle` GitHub Actions job for that SHA.
+
+If a Developer ID signed candidate is required, issue #14 must build it from that same Xcode contract rather than substituting a SwiftPM executable.
 
 The operator must record only non-content results and must classify unavailable app-bundle, permission, Speech, input-monitoring, focus, or separate key-edge surfaces as `INCONCLUSIVE`.
 
@@ -26,6 +28,8 @@ The exact Release bundle build passed at the issue #82 final SHA, and an isolate
 
 Computer Use Accessibility and Screen Recording permissions were unavailable during this handoff, so global key edges, microphone, Speech, input-monitoring, native focus, recording, and insertion rows remain `INCONCLUSIVE`.
 
-The issue #12 run must not convert those rows to `PASS` using SwiftPM callbacks, unsigned-binary launch, deterministic fakes, or static source inspection.
+The issue #12 run must not convert those rows to `PASS` using SwiftPM callbacks, unsigned-binary launch, deterministic fakes, static source inspection, or a green hosted CI job.
+
+Hosted CI does not replace native TCC, Speech, Accessibility, hardware, or dogfood proof.
 
 The issue #12 operator must not mutate TCC, Accessibility, Automation, Input Monitoring, shared defaults, system shortcut state, or private dogfood content to make a row pass.

@@ -54,13 +54,16 @@ Evidence: `/Users/douglasjarquin/.codex/evidence/oigo-issue-2/capabilities-final
 
 ## CI verification boundary
 
-Pull requests run SwiftPM compilation, the Oigo product build, and the spike plus issue #3 through issue #8 contract harnesses on a macOS 26 GitHub Actions runner through `.github/workflows/verify.yml`.
+Pull requests, pushes to `main`, and exact-ref `workflow_dispatch` runs run on a macOS 26 GitHub Actions runner through `.github/workflows/verify.yml`.
 
-This check intentionally uses SwiftPM and does not invoke `xcodebuild`.
+The `Swift build and contract harness` job compiles the Swift package, builds the Oigo product, checks the macOS 26 deployment floor, and runs the spike plus issue #3 through issue #11, #76, #77, #78, #82, and #86 contract harnesses.
 
-The CI check proves SwiftPM compilation, the Oigo product build, and the deterministic contract harnesses only.
+That job is not app-bundle validation.
 
-It does not remove the local Command Line Tools-only limitation described above, and it does not claim to validate live microphone/TCC behavior from an application bundle, Apple Intelligence availability, network-disabled Speech execution, or native Speech/Foundation Models resource measurements.
+The `Xcode app bundle` job `xcodebuild`s the `Oigo` scheme as unsigned Release `Oigo.app` and inspects bundle metadata, architecture, and source membership.
+
+A Command Line Tools-only laptop still cannot run `xcodebuild` locally.
+Hosted CI does not claim to validate live microphone/TCC behavior, Apple Intelligence availability, network-disabled Speech execution, or native Speech/Foundation Models resource measurements.
 
 ## Accuracy observations
 
