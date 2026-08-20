@@ -19,6 +19,12 @@ private final class AudioConverterInputState: @unchecked Sendable {
 }
 
 @available(macOS 26.0, *)
+public enum TranscriptionAnalysisPath: String, Equatable, Sendable {
+    case live
+    case retry
+}
+
+@available(macOS 26.0, *)
 public final class TranscriptionService: TranscriptionController, @unchecked Sendable {
     private static let maxPreviewCharacters = 512
 
@@ -68,6 +74,9 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private var liveDegradation: LiveTranscriptionDegradation?
     private var operationID: UUID?
     private var acceptsResults = false
+    private var recognitionContextualStrings: [String] = []
+    private var recordedAnalysisContextTerms: [[String]] = []
+    private var recordedAnalysisPaths: [TranscriptionAnalysisPath] = []
 
     public init(
         locale: Locale = Locale(identifier: "en-US"),
@@ -327,6 +336,34 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         configuredLocale.identifier
     }
 
+    public func applyRecognitionContext(_ snapshot: CompiledDictionarySnapshot) {
+        withLock {
+            recognitionContextualStrings = snapshot.canonicalTerms
+        }
+    }
+
+    @_spi(Testing)
+    public func makeAnalysisContext(path: TranscriptionAnalysisPath) -> AnalysisContext {
+        let terms = withLock { () -> [String] in
+            recordedAnalysisContextTerms.append(recognitionContextualStrings)
+            recordedAnalysisPaths.append(path)
+            return recognitionContextualStrings
+        }
+        let context = AnalysisContext()
+        context.contextualStrings[.general] = terms
+        return context
+    }
+
+    @_spi(Testing)
+    public var lastRecordedAnalysisContextTerms: [[String]] {
+        withLock { recordedAnalysisContextTerms }
+    }
+
+    @_spi(Testing)
+    public var lastRecordedAnalysisPaths: [TranscriptionAnalysisPath] {
+        withLock { recordedAnalysisPaths }
+    }
+
     public var currentAssetState: SpeechAssetState {
         lock.lock()
         defer { lock.unlock() }
@@ -482,11 +519,13 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             let intake = AnalyzerInputBackpressure(generation: operationID)
             preparedIntake = intake
             let analyzer = SpeechAnalyzer(
+                inputSequence: intake.stream,
                 modules: [module],
                 options: SpeechAnalyzer.Options(
                     priority: .userInitiated,
                     modelRetention: .whileInUse
-                )
+                ),
+                analysisContext: makeAnalysisContext(path: .live)
             )
             preparedAnalyzer = analyzer
 
@@ -916,6 +955,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             throw remember(Self.map(error))
         }
 
+        let retryIntake = AnalyzerInputBackpressure(generation: operationID)
         var createdAnalyzer: SpeechAnalyzer?
         do {
             createdAnalyzer = try await BoundedOperation.run(
@@ -925,11 +965,13 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 registry: operationRegistry
             ) {
                 let analyzer = SpeechAnalyzer(
+                    inputSequence: retryIntake.stream,
                     modules: [module],
                     options: SpeechAnalyzer.Options(
                         priority: .userInitiated,
                         modelRetention: .whileInUse
-                    )
+                    ),
+                    analysisContext: self.makeAnalysisContext(path: .retry)
                 )
                 try await analyzer.prepareToAnalyze(in: audioFormat)
                 return analyzer
@@ -1002,7 +1044,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
 
         do {
             try Task.checkCancellation()
-            let intake = AnalyzerInputBackpressure(generation: operationID)
+            let intake = retryIntake
             withLock { self.intake = intake }
             try await BoundedOperation.run(
                 operationID: operationID,

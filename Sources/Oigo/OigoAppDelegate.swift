@@ -87,6 +87,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         )
     }()
     private var sessionStore: SessionStore?
+    private var dictionaryStore: DictionaryStore?
+    private var dictionaryDocument = DictionaryDocument.empty
+    private var dictionaryLoadError: String?
     private var lastSession: DictationSession?
     private var pendingSessionBoundary: DictationSession?
     private var reportedMalformedSessionCount = 0
@@ -204,6 +207,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         installWorkspaceInterruptionObservers()
         configureStatusItem()
+        loadDictionary()
         storageCapability.start()
         if onboardingStore.load().isComplete {
             updateSurface()
@@ -333,6 +337,17 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             deleteAllHistory: { [weak self] in
                 self?.deleteAllHistory()
             },
+            dictionaryDocument: dictionaryDocument,
+            saveDictionary: { [weak self] document in
+                self?.saveDictionaryDocument(document)
+            },
+            previewDictionary: { [weak self] sample in
+                self?.previewDictionarySample(sample) ?? sample
+            },
+            addStarterTerms: { [weak self] in
+                self?.addDictionaryStarterTerms()
+                    ?? (DictionaryDocument.empty, "The custom dictionary could not be saved.")
+            },
             isPresented: { [weak self] in
                 self?.settingsSessionID == sessionID
             },
@@ -346,6 +361,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         )
         settingsSessionID = sessionID
         settingsWindow = window
+        window.setDictionaryStatus(dictionaryLoadError)
         window.showWindow(nil)
         window.window?.center()
         window.window?.makeKeyAndOrderFront(nil)
@@ -524,6 +540,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 },
                 cleanAgain: { [weak self] entry in
                     self?.cleanAgain(for: entry)
+                },
+                reapplyDictionary: { [weak self] entry in
+                    self?.reapplyDictionary(for: entry)
                 },
                 playRecording: { [weak self] entry in
                     self?.playRecording(for: entry)
@@ -947,6 +966,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     let format = try recorder.captureFormat()
                     try Task.checkCancellation()
                     let service = transcriptionService()
+                    self.applyRecognitionContext(to: service, localeIdentifier: service.configuredLocaleIdentifier)
                     let snapshot = self.makeConfigurationSnapshot(
                         format: format,
                         localeIdentifier: service.configuredLocaleIdentifier
@@ -1237,13 +1257,15 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             settings.selectedInput,
             from: currentInputDevices()
         ).uid
+        let resolvedLocale = localeIdentifier.isEmpty
+            ? Locale.current.identifier
+            : localeIdentifier
         return DictationConfigurationSnapshot.resolve(
             settings: settings,
-            resolvedLocaleIdentifier: localeIdentifier.isEmpty
-                ? Locale.current.identifier
-                : localeIdentifier,
+            resolvedLocaleIdentifier: resolvedLocale,
             resolvedDeviceUID: resolvedUID,
-            format: format
+            format: format,
+            dictionaryRevision: compiledDictionary(for: resolvedLocale).revision
         )
     }
 
@@ -1334,6 +1356,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 currentSettingsSnapshot: currentSnapshot
             )
             let service = transcriptionService(for: resolved.snapshot.resolvedLocaleIdentifier)
+            applyRecognitionContext(to: service, localeIdentifier: resolved.snapshot.resolvedLocaleIdentifier)
             lastSession = try await coordinator.retryRecordingWithTranscription(
                 for: session,
                 using: service,
@@ -1367,7 +1390,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             completion(.failure(SessionStoreError.missingSession(entry.id)))
             return
         }
-        if source == .processed, entry.textSource != .processed {
+        if source == .processed, !FileManager.default.fileExists(atPath: entry.session.cleanTextURL.path) {
+            completion(.failure(SessionStoreError.missingSession(entry.id)))
+            return
+        }
+        if source == .normalized, !FileManager.default.fileExists(atPath: entry.session.normalizedTextURL.path) {
             completion(.failure(SessionStoreError.missingSession(entry.id)))
             return
         }
@@ -1377,6 +1404,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 let transcript = switch source {
                 case .raw:
                     try store.readRawText(for: entry.session)
+                case .normalized:
+                    try store.readNormalizedText(for: entry.session)
                 case .processed:
                     try store.readCleanText(for: entry.session)
                 }
@@ -1396,47 +1425,29 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         mode: TranscriptCleanupMode,
         deadlineNanoseconds: UInt64 = DictationConfigurationSnapshot.defaultCleanupDeadlineNanoseconds
     ) async throws -> TranscriptCleanupDecision {
-        let rawText = try store.readRawText(for: session)
-        guard mode == .clean else {
-            return TranscriptCleanupDecision(
-                rawText: rawText,
-                insertionText: rawText,
-                cleanText: nil,
-                insertionSource: .raw
-            )
+        if mode == .clean {
+            performanceInstrumentation.mark(.cleanupStart)
         }
-
-        performanceInstrumentation.mark(.cleanupStart)
-        defer { performanceInstrumentation.mark(.cleanupEnd) }
-        var decision = await transcriptCleanup.resolve(
-            mode: .clean,
-            rawText: rawText,
-            deadlineNanoseconds: deadlineNanoseconds
-        )
-        try Task.checkCancellation()
-        if let cleanText = decision.cleanText {
-            try Task.checkCancellation()
-            do {
-                _ = try store.persistCleanText(
-                    cleanText,
-                    for: session
-                )
-            } catch {
-                if Self.storageFailureCategory(error) != nil {
-                    throw error
-                }
-                transcriptCleanupMetrics.record(.fallback)
-                decision = TranscriptCleanupDecision(
-                    rawText: rawText,
-                    insertionText: rawText,
-                    cleanText: nil,
-                    insertionSource: .raw,
-                    fallbackReason: .persistenceFailure(Self.failureReason(for: error)),
-                    chunkCount: decision.chunkCount
-                )
+        defer {
+            if mode == .clean {
+                performanceInstrumentation.mark(.cleanupEnd)
             }
         }
-        return decision
+        let locale = frozenConfiguration().resolvedLocaleIdentifier
+        let snapshot = compiledDictionary(for: locale)
+        let result = try await DictionaryTranscriptFinalizer.resolve(
+            mode: mode,
+            session: session,
+            store: store,
+            snapshot: snapshot,
+            cleanup: transcriptCleanup,
+            deadlineNanoseconds: deadlineNanoseconds
+        )
+        lastSession = result.session
+        if result.decision.fallbackReason != nil {
+            transcriptCleanupMetrics.record(.fallback)
+        }
+        return result.decision
     }
 
     private func copyRawTranscript(for entry: SessionHistoryEntry) {
@@ -1506,61 +1517,38 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         for entry: SessionHistoryEntry,
         store: SessionStore
     ) async {
+        var current = entry.session
         do {
             guard storageCapability.health.isReady else {
                 return
             }
-            let rawText = try store.readRawText(for: entry.session)
-            let decision = await transcriptCleanup.resolve(
+            let locale = current.metadata.configurationSnapshot?.resolvedLocaleIdentifier
+                ?? settings.localeIdentifier
+            let finalized = try await DictionaryTranscriptFinalizer.resolve(
                 mode: .clean,
-                rawText: rawText,
+                session: current,
+                store: store,
+                snapshot: compiledDictionary(for: locale),
+                cleanup: transcriptCleanup,
                 deadlineNanoseconds: 4_000_000_000
             )
+            current = finalized.session
+            let decision = finalized.decision
             try Task.checkCancellation()
             guard storageCapability.health.isReady else {
                 return
             }
-            guard let cleanText = decision.cleanText else {
+            if decision.cleanText == nil {
                 let fallbackReason = decision.fallbackReason?.description
                     ?? "cleanup did not complete"
                 try Task.checkCancellation()
                 _ = try store.update(
-                    entry.session,
-                    state: entry.session.metadata.state,
+                    current,
+                    state: current.metadata.state,
                     cleanupFallbackReason: fallbackReason
                 )
                 historyWindow?.showMessage(
-                    "Clean Again used no output. Raw transcript remains available: "
-                        + fallbackReason
-                )
-                refreshHistory()
-                return
-            }
-            try Task.checkCancellation()
-            do {
-                _ = try store.persistCleanText(
-                    cleanText,
-                    for: entry.session
-                )
-            } catch let error as SessionStoreError {
-                if case .rawTextChanged = error {
-                    throw error
-                }
-                if Self.storageFailureCategory(error) != nil {
-                    throw error
-                }
-                let fallbackReason = TranscriptCleanupFallbackReason
-                    .persistenceFailure(Self.failureReason(for: error))
-                    .description
-                try Task.checkCancellation()
-                _ = try store.update(
-                    entry.session,
-                    state: entry.session.metadata.state,
-                    insertionTextSource: .raw,
-                    cleanupFallbackReason: fallbackReason
-                )
-                historyWindow?.showMessage(
-                    "Clean Again could not save clean.txt. Raw transcript remains available: "
+                    "Clean Again used no output. Normalized transcript remains available: "
                         + fallbackReason
                 )
                 refreshHistory()
@@ -1569,16 +1557,20 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             try Task.checkCancellation()
             historyWindow?.showMessage("Clean transcript saved. Raw transcript was unchanged.")
             refreshHistory()
-        } catch SessionStoreError.rawTextChanged {
+        } catch let error as SessionStoreError where {
+            if case .rawTextChanged = error { return true }
+            if case .normalizedTextChanged = error { return true }
+            return false
+        }() {
             guard !Task.isCancelled else {
                 return
             }
-            let fallbackReason = "raw transcript changed while Clean Again was running"
+            let fallbackReason = "raw or normalized transcript changed while Clean Again was running"
             do {
                 _ = try store.update(
-                    entry.session,
-                    state: entry.session.metadata.state,
-                    insertionTextSource: .raw,
+                    current,
+                    state: current.metadata.state,
+                    insertionTextSource: current.metadata.insertionTextSource,
                     cleanupFallbackReason: fallbackReason
                 )
                 historyWindow?.showMessage(
@@ -1595,6 +1587,66 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             markStorageUnhealthyIfNeeded(error)
             historyWindow?.showMessage(Self.friendlyError("Clean Again failed", error))
         }
+    }
+
+    private func reapplyDictionary(for entry: SessionHistoryEntry) {
+        guard storageCapability.health.isReady,
+              let store = sessionStore else {
+            return
+        }
+        guard commandAvailability.canReapplyDictionary else {
+            if let reason = commandAvailability.busyReason {
+                showBusy(reason)
+            }
+            return
+        }
+        historyWindow?.showMessage("Reapplying the dictionary to the preserved raw transcript…")
+        switch operationGate.beginAndRun(.reapplyDictionary, completes: true, operation: { @MainActor [weak self] in
+            await self?.performReapplyDictionary(for: entry, store: store)
+        }) {
+        case .failure(let reason):
+            showBusy(reason)
+        case .success:
+            break
+        }
+    }
+
+    private func performReapplyDictionary(
+        for entry: SessionHistoryEntry,
+        store: SessionStore
+    ) async {
+        do {
+            let locale = entry.session.metadata.configurationSnapshot?.resolvedLocaleIdentifier
+                ?? settings.localeIdentifier
+            let snapshot = compiledDictionary(for: locale)
+            let result = try await DictionaryTranscriptFinalizer.reapply(
+                session: entry.session,
+                store: store,
+                snapshot: snapshot,
+                cleanup: transcriptCleanup,
+                deadlineNanoseconds: DictationConfigurationSnapshot.defaultCleanupDeadlineNanoseconds
+            )
+            try Task.checkCancellation()
+            if lastSession?.id == result.session.id {
+                lastSession = result.session
+            }
+            if result.decision.insertionSource == .clean {
+                historyWindow?.showMessage("Dictionary reapplied. Normalized and clean transcripts were updated from raw.txt.")
+            } else if result.decision.fallbackReason != nil {
+                historyWindow?.showMessage(
+                    "Dictionary reapplied. Normalized transcript was updated and stale clean output was removed."
+                )
+            } else {
+                historyWindow?.showMessage("Dictionary reapplied. Normalized transcript was updated from raw.txt.")
+            }
+            refreshHistory()
+        } catch is CancellationError {
+            return
+        } catch {
+            markStorageUnhealthyIfNeeded(error)
+            historyWindow?.showMessage(Self.friendlyError("Reapply Dictionary failed", error))
+        }
+        updateSurface()
     }
 
     private func pasteCleanAgain(for entry: SessionHistoryEntry) {
@@ -2194,6 +2246,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
              .insertionAlreadyAttempted,
              .activeSession,
              .rawTextChanged,
+             .normalizedTextChanged,
              .deletionConfirmationRequired:
             return nil
         }
@@ -2229,6 +2282,72 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             locale: Locale(identifier: identifier),
             instrumentation: performanceInstrumentation
         )
+    }
+
+    private func loadDictionary() {
+        if dictionaryStore == nil, let directory = try? DictionaryStore.defaultDirectory() {
+            dictionaryStore = try? DictionaryStore(directoryURL: directory)
+        }
+        guard let dictionaryStore else {
+            dictionaryDocument = .empty
+            dictionaryLoadError = nil
+            return
+        }
+        let loaded = dictionaryStore.load()
+        dictionaryDocument = loaded.document
+        dictionaryLoadError = loaded.error?.userMessage
+    }
+
+    private func compiledDictionary(for localeIdentifier: String) -> CompiledDictionarySnapshot {
+        (try? DictionaryCompiler.compile(dictionaryDocument.entries, localeIdentifier: localeIdentifier))
+            ?? .empty
+    }
+
+    private func applyRecognitionContext(to service: TranscriptionService, localeIdentifier: String) {
+        service.applyRecognitionContext(compiledDictionary(for: localeIdentifier))
+    }
+
+    private func saveDictionaryDocument(_ document: DictionaryDocument) -> String? {
+        do {
+            try DictionaryCompiler.validate(document.entries)
+            if dictionaryStore == nil, let directory = try? DictionaryStore.defaultDirectory() {
+                dictionaryStore = try DictionaryStore(directoryURL: directory)
+            }
+            guard let dictionaryStore else {
+                return "The custom dictionary could not be saved."
+            }
+            try dictionaryStore.save(document)
+            dictionaryDocument = document
+            return nil
+        } catch let error as DictionaryStoreError {
+            return error.userMessage
+        } catch {
+            return "The custom dictionary could not be saved."
+        }
+    }
+
+    private func previewDictionarySample(_ sample: String) -> String {
+        let locale = settings.localeIdentifier.isEmpty ? Locale.current.identifier : settings.localeIdentifier
+        let snapshot = compiledDictionary(for: locale)
+        return TerminologyNormalizer(snapshot: snapshot).normalize(sample)
+    }
+
+    private func addDictionaryStarterTerms() -> (DictionaryDocument, String?) {
+        do {
+            if dictionaryStore == nil, let directory = try? DictionaryStore.defaultDirectory() {
+                dictionaryStore = try DictionaryStore(directoryURL: directory)
+            }
+            guard let dictionaryStore else {
+                return (dictionaryDocument, "The custom dictionary could not be saved.")
+            }
+            let document = try dictionaryStore.addStarterTerms()
+            dictionaryDocument = document
+            return (document, nil)
+        } catch let error as DictionaryStoreError {
+            return (dictionaryDocument, error.userMessage)
+        } catch {
+            return (dictionaryDocument, "The custom dictionary could not be saved.")
+        }
     }
 
     private func transcriptionService(for requestedIdentifier: String? = nil) -> TranscriptionService {
@@ -2435,6 +2554,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             switch insertionSource {
             case .clean:
                 selectedText = (try? store.readCleanText(for: session)) ?? ""
+            case .normalized:
+                selectedText = (try? store.readNormalizedText(for: session)) ?? ""
             case .raw:
                 selectedText = (try? store.readRawText(for: session)) ?? ""
             }
@@ -2743,7 +2864,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 return "saved session state changed"
             case .transcriptTooLarge:
                 return "saved transcript is too large"
-            case .rawTextChanged:
+            case .rawTextChanged, .normalizedTextChanged:
                 return "saved transcript changed before cleanup completed"
             case .missingSession:
                 return "saved session is unavailable"

@@ -79,6 +79,9 @@
         A00000010000000000000052 /* OnboardingSourceProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000045 /* OnboardingSourceProbe.swift */; };
         A00000010000000000000053 /* AnalyzerInputBackpressure.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000046 /* AnalyzerInputBackpressure.swift */; };
         A00000010000000000000054 /* SessionMaintenanceCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000047 /* SessionMaintenanceCoordinator.swift */; };
+        A00000010000000000000055 /* DictionaryContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000048 /* DictionaryContracts.swift */; };
+        A00000010000000000000056 /* DictionaryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000049 /* DictionaryStore.swift */; };
+        A00000010000000000000057 /* TerminologyNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000004A /* TerminologyNormalizer.swift */; };
 
 /* End PBXBuildFile section */
 
@@ -214,6 +217,9 @@
         B00000010000000000000045 /* OnboardingSourceProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSourceProbe.swift; sourceTree = "<group>"; };
         B00000010000000000000046 /* AnalyzerInputBackpressure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyzerInputBackpressure.swift; sourceTree = "<group>"; };
         B00000010000000000000047 /* SessionMaintenanceCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionMaintenanceCoordinator.swift; sourceTree = "<group>"; };
+        B00000010000000000000048 /* DictionaryContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryContracts.swift; sourceTree = "<group>"; };
+        B00000010000000000000049 /* DictionaryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryStore.swift; sourceTree = "<group>"; };
+        B0000001000000000000004A /* TerminologyNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminologyNormalizer.swift; sourceTree = "<group>"; };
 
 /* End PBXFileReference section */
 
@@ -352,6 +358,9 @@
                 B00000010000000000000043 /* AppOperationGate.swift */,
                 B00000010000000000000044 /* OnboardingEvidence.swift */,
                 B00000010000000000000047 /* SessionMaintenanceCoordinator.swift */,
+                B00000010000000000000048 /* DictionaryContracts.swift */,
+                B00000010000000000000049 /* DictionaryStore.swift */,
+                B0000001000000000000004A /* TerminologyNormalizer.swift */,
             );
             path = Sources/OigoCore;
             sourceTree = "<group>";
@@ -647,6 +656,9 @@
                 A00000010000000000000050 /* AppOperationGate.swift in Sources */,
                 A00000010000000000000051 /* OnboardingEvidence.swift in Sources */,
                 A00000010000000000000054 /* SessionMaintenanceCoordinator.swift in Sources */,
+                A00000010000000000000055 /* DictionaryContracts.swift in Sources */,
+                A00000010000000000000056 /* DictionaryStore.swift in Sources */,
+                A00000010000000000000057 /* TerminologyNormalizer.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };

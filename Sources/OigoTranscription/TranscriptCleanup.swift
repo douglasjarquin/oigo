@@ -1325,3 +1325,115 @@ public final class FoundationModelsTranscriptCleaner: TranscriptCleaner, @unchec
         activeTaskLock.unlock()
     }
 }
+
+@available(macOS 26.0, *)
+public struct DictionaryTranscriptFinalizerResult: Equatable, Sendable {
+    public let session: DictationSession
+    public let decision: TranscriptCleanupDecision
+
+    public init(session: DictationSession, decision: TranscriptCleanupDecision) {
+        self.session = session
+        self.decision = decision
+    }
+}
+
+@available(macOS 26.0, *)
+public enum DictionaryTranscriptFinalizer {
+    public static func resolve(
+        mode: TranscriptCleanupMode,
+        session: DictationSession,
+        store: SessionStore,
+        snapshot: CompiledDictionarySnapshot,
+        cleanup: TranscriptCleanupCoordinator,
+        deadlineNanoseconds: UInt64
+    ) async throws -> DictionaryTranscriptFinalizerResult {
+        let rawText = try store.readRawText(for: session)
+        let normalizer = TerminologyNormalizer(snapshot: snapshot)
+        let normalizedText = normalizer.normalize(rawText)
+        let persisted = try store.persistNormalizedText(normalizedText, for: session)
+        guard mode == .clean else {
+            return DictionaryTranscriptFinalizerResult(
+                session: persisted,
+                decision: TranscriptCleanupDecision(
+                    rawText: rawText,
+                    insertionText: normalizedText,
+                    cleanText: nil,
+                    insertionSource: .normalized
+                )
+            )
+        }
+        let decision = await cleanup.resolve(
+            mode: .clean,
+            rawText: normalizedText,
+            deadlineNanoseconds: deadlineNanoseconds
+        )
+        try Task.checkCancellation()
+        if let cleanText = decision.cleanText {
+            let renormalized = normalizer.normalize(cleanText)
+            do {
+                let cleaned = try store.persistCleanText(renormalized, for: persisted)
+                return DictionaryTranscriptFinalizerResult(
+                    session: cleaned,
+                    decision: TranscriptCleanupDecision(
+                        rawText: rawText,
+                        insertionText: renormalized,
+                        cleanText: renormalized,
+                        insertionSource: .clean,
+                        chunkCount: decision.chunkCount
+                    )
+                )
+            } catch {
+                return DictionaryTranscriptFinalizerResult(
+                    session: persisted,
+                    decision: TranscriptCleanupDecision(
+                        rawText: rawText,
+                        insertionText: normalizedText,
+                        cleanText: nil,
+                        insertionSource: .normalized,
+                        fallbackReason: .persistenceFailure(String(describing: error)),
+                        chunkCount: decision.chunkCount
+                    )
+                )
+            }
+        }
+        return DictionaryTranscriptFinalizerResult(
+            session: persisted,
+            decision: TranscriptCleanupDecision(
+                rawText: rawText,
+                insertionText: normalizedText,
+                cleanText: nil,
+                insertionSource: .normalized,
+                fallbackReason: decision.fallbackReason,
+                chunkCount: decision.chunkCount
+            )
+        )
+    }
+
+    public static func reapply(
+        session: DictationSession,
+        store: SessionStore,
+        snapshot: CompiledDictionarySnapshot,
+        cleanup: TranscriptCleanupCoordinator,
+        deadlineNanoseconds: UInt64
+    ) async throws -> DictionaryTranscriptFinalizerResult {
+        let hadClean = FileManager.default.fileExists(atPath: session.cleanTextURL.path)
+        guard hadClean else {
+            return try await resolve(
+                mode: .instant,
+                session: session,
+                store: store,
+                snapshot: snapshot,
+                cleanup: cleanup,
+                deadlineNanoseconds: deadlineNanoseconds
+            )
+        }
+        return try await resolve(
+            mode: .clean,
+            session: session,
+            store: store,
+            snapshot: snapshot,
+            cleanup: cleanup,
+            deadlineNanoseconds: deadlineNanoseconds
+        )
+    }
+}

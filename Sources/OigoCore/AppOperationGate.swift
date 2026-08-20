@@ -4,6 +4,7 @@ public enum AppOperationKind: String, Codable, CaseIterable, Equatable, Sendable
     case dictation
     case retry
     case cleanAgain
+    case reapplyDictionary
     case pasteAgain
     case onboardingTest
     case interruption
@@ -26,6 +27,8 @@ public enum AppOperationKind: String, Codable, CaseIterable, Equatable, Sendable
             "transcription retry is running"
         case .cleanAgain:
             "Clean Again is running"
+        case .reapplyDictionary:
+            "Reapply Dictionary is running"
         case .pasteAgain:
             "Paste Again is running"
         case .interruption:
@@ -41,7 +44,7 @@ public enum AppOperationKind: String, Codable, CaseIterable, Equatable, Sendable
         switch self {
         case .dictation, .onboardingTest:
             .startup
-        case .retry, .cleanAgain, .pasteAgain, .maintenance:
+        case .retry, .cleanAgain, .reapplyDictionary, .pasteAgain, .maintenance:
             .retry
         case .interruption:
             .interruption
@@ -109,6 +112,7 @@ public struct AppCommandAvailability: Equatable, Sendable {
     public let canStopDictation: Bool
     public let canRetry: Bool
     public let canCleanAgain: Bool
+    public let canReapplyDictionary: Bool
     public let canPasteAgain: Bool
     public let canRunOnboardingTest: Bool
     public let canCancelOnboardingTest: Bool
@@ -178,6 +182,7 @@ public struct AppCommandAvailability: Equatable, Sendable {
             canStopDictation: canStop,
             canRetry: canHistoryAction,
             canCleanAgain: canHistoryAction,
+            canReapplyDictionary: canHistoryAction,
             canPasteAgain: canHistoryAction,
             canRunOnboardingTest: idleForSessionWork && terminalCoordinator,
             canCancelOnboardingTest: acceptingCommands && occupiedKind == .onboardingTest,

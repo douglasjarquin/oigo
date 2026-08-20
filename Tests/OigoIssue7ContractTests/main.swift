@@ -774,6 +774,7 @@ private struct OigoIssue7ContractTests {
         let completed = try store.update(persisted, state: .completed)
         try Data([0x43, 0x41, 0x46]).write(to: completed.audioURL, options: [.atomic])
         try Data("processed".utf8).write(to: completed.cleanTextURL, options: [.atomic])
+        try Data("normalized".utf8).write(to: completed.normalizedTextURL, options: [.atomic])
 
         try store.remove(id: completed.id)
         guard !FileManager.default.fileExists(atPath: completed.directoryURL.path),
@@ -781,6 +782,7 @@ private struct OigoIssue7ContractTests {
               !FileManager.default.fileExists(atPath: completed.audioURL.path),
               !FileManager.default.fileExists(atPath: completed.rawTextURL.path),
               !FileManager.default.fileExists(atPath: completed.cleanTextURL.path),
+              !FileManager.default.fileExists(atPath: completed.normalizedTextURL.path),
               FileManager.default.fileExists(atPath: root.path) else {
             throw ContractFailure(message: "session deletion did not remove all associated artifacts atomically enough")
         }

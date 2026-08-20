@@ -66,7 +66,8 @@ public struct DictationConfigurationSnapshot: Codable, Equatable, Sendable {
         settings: OigoSettings,
         resolvedLocaleIdentifier: String,
         resolvedDeviceUID: String?,
-        format: AudioCaptureFormat
+        format: AudioCaptureFormat,
+        dictionaryRevision: String? = nil
     ) -> DictationConfigurationSnapshot {
         let requestedLocale = settings.localeIdentifier.isEmpty
             ? Locale.current.identifier
@@ -79,7 +80,8 @@ public struct DictationConfigurationSnapshot: Codable, Equatable, Sendable {
             resolvedDeviceUID: resolvedDeviceUID,
             inputChannelIndex: settings.selectedInputChannel,
             sampleRate: format.sampleRate,
-            previewEnabled: settings.showVolatilePreview
+            previewEnabled: settings.showVolatilePreview,
+            dictionaryRevision: dictionaryRevision
         )
     }
 
