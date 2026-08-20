@@ -1,7 +1,7 @@
 import Foundation
 @_spi(Testing) import OigoCore
 import OigoInsertion
-import OigoTranscription
+@_spi(Testing) import OigoTranscription
 
 private struct ContractFailure: Error, CustomStringConvertible {
     let message: String
@@ -27,6 +27,10 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Cleanup failures fall back to raw without partial output")
             try await testUnsafeCleanupOutputFallsBackToRaw()
             print("GREEN: Unsafe cleanup output falls back to raw without insertion")
+            try await testIntendedCleanupCorrectionsAreAccepted()
+            print("GREEN: Intended punctuation, casing, filler, false-start, and ordinary substitutions are accepted")
+            try await testAdditionalUnsafeCleanupOutputFallsBackToRaw()
+            print("GREEN: Added facts, reordering, and protected-span edits fall back to raw")
             try await testLongTranscriptChunksSequentiallyAtStableBoundaries()
             print("GREEN: Long transcripts chunk sequentially with order and paragraphs preserved")
             try await testContextOverflowResplitsOversizedChunks()
@@ -252,9 +256,9 @@ private struct OigoIssue8ContractTests {
             rawText: "Let's eat, grandma",
             deadlineNanoseconds: 100_000_000
         )
-        guard punctuationDecision.insertionSource == .raw,
-              punctuationDecision.fallbackReason == .unsafeOutput else {
-            throw ContractFailure(message: "meaning-bearing punctuation deletion was accepted")
+        guard punctuationDecision.insertionSource == .clean,
+              punctuationDecision.insertionText == "Let's eat grandma" else {
+            throw ContractFailure(message: "punctuation-only cleanup was rejected")
         }
 
         let unicodeCoordinator = TranscriptCleanupCoordinator(
@@ -286,6 +290,87 @@ private struct OigoIssue8ContractTests {
               capitalizationDecision.insertionText == "Open the file" else {
             throw ContractFailure(message: "ordinary-word capitalization was rejected")
         }
+    }
+
+    private static func testIntendedCleanupCorrectionsAreAccepted() async throws {
+        let accepted: [(raw: String, cleaned: String)] = [
+            ("hello world", "Hello, world."),
+            ("Hello, world!", "Hello world."),
+            ("send the report now", "Send the report now."),
+            ("say hello there", "Say Hello there."),
+            ("uh um please open the file", "Please open the file."),
+            ("ah er hmm mm check the logs", "Check the logs."),
+            ("please please open the file", "Please open the file."),
+            ("I want I want to send the report", "I want to send the report."),
+            ("we should actually we should check the logs", "We should check the logs."),
+            ("please check the file before sending", "Please check the document before sending.")
+        ]
+        for sample in accepted {
+            let decision = try await resolveClean(rawText: sample.raw, cleanedText: sample.cleaned)
+            guard decision.insertionSource == .clean,
+                  decision.insertionText == sample.cleaned,
+                  decision.cleanText == sample.cleaned,
+                  decision.fallbackReason == nil else {
+                throw ContractFailure(
+                    message: "intended cleanup was rejected: " + sample.raw
+                )
+            }
+        }
+
+        let ordinaryCount = 4
+        guard TranscriptCleanupOutputGuard.substitutionBudget(ordinaryTokenCount: ordinaryCount)
+                == max(1, ordinaryCount / 50),
+              TranscriptCleanupOutputGuard.substitutionBudget(ordinaryTokenCount: 50) == 1,
+              TranscriptCleanupOutputGuard.substitutionBudget(ordinaryTokenCount: 100) == 2 else {
+            throw ContractFailure(message: "ordinary substitution budget is not max(1, ordinaryTokenCount / 50)")
+        }
+        guard TranscriptCleanupOutputGuard.accepts(
+            rawText: "please check the file before sending",
+            cleanedText: "Please check the document before sending."
+        ) else {
+            throw ContractFailure(message: "output guard rejected an in-budget ordinary substitution")
+        }
+    }
+
+    private static func testAdditionalUnsafeCleanupOutputFallsBackToRaw() async throws {
+        let rejected: [(raw: String, cleaned: String)] = [
+            ("send the report to Alice", "Send the report to Alice after lunch."),
+            ("send the report to Alice", "Send Alice the report."),
+            ("open https://api.example.com/v1/items?id=42", "Open https://api.example.com/v1/items?id=43"),
+            ("copy /tmp/oigo.yaml into place", "Copy /tmp/oigo.json into place."),
+            ("run the job 42 times", "Run the job 43 times."),
+            ("say the exact text \"deploy nice baas\"", "Say the exact text \"deploy nice bass\"."),
+            ("please run oigo", "please run Oigo"),
+            ("oigo status", "Oigo status"),
+            ("please check the file before sending now", "Please review the document after mailing later.")
+        ]
+        for sample in rejected {
+            let decision = try await resolveClean(rawText: sample.raw, cleanedText: sample.cleaned)
+            guard decision.insertionText == sample.raw,
+                  decision.insertionSource == .raw,
+                  decision.cleanText == nil,
+                  decision.fallbackReason == .unsafeOutput else {
+                throw ContractFailure(
+                    message: "unsafe cleanup was accepted: " + sample.cleaned
+                )
+            }
+        }
+    }
+
+    private static func resolveClean(
+        rawText: String,
+        cleanedText: String
+    ) async throws -> TranscriptCleanupDecision {
+        let coordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: {
+                FixedResultCleaner(result: .success(cleanedText))
+            }
+        )
+        return await coordinator.resolve(
+            mode: .clean,
+            rawText: rawText,
+            deadlineNanoseconds: 100_000_000
+        )
     }
 
     private static func testLongTranscriptChunksSequentiallyAtStableBoundaries() async throws {
@@ -809,9 +894,13 @@ private struct OigoIssue8ContractTests {
         let expectedIDs: Set<String> = [
             "command-path-and-number",
             "url-identifier-and-product",
-            "quoted-text-and-package-name"
+            "quoted-text-and-package-name",
+            "punctuation-and-casing",
+            "filler-removal",
+            "false-start-restatement",
+            "ordinary-substitution"
         ]
-        guard cases.count >= 3,
+        guard cases.count >= 7,
               Set(cases.map(\.id)) == expectedIDs else {
             throw ContractFailure(message: "cleanup evaluation corpus is too small to review")
         }
@@ -820,18 +909,21 @@ private struct OigoIssue8ContractTests {
                   expectedIDs.contains(sample.id),
                   !sample.rawTranscript.isEmpty,
                   !sample.modelOutput.isEmpty,
-                  !sample.expectedMeaning.isEmpty,
-                  !sample.protectedTechnicalTokens.isEmpty else {
+                  !sample.expectedMeaning.isEmpty else {
                 throw ContractFailure(message: "evaluation corpus contains an unapproved or incomplete sample")
             }
             let rawMeaningTokens = semanticTokens(in: sample.rawTranscript)
             let outputMeaningTokens = semanticTokens(in: sample.modelOutput)
             let expectedMeaningTokens = semanticTokens(in: sample.expectedMeaning)
-            guard outputMeaningTokens.isSubset(of: rawMeaningTokens) else {
-                throw ContractFailure(message: "evaluation sample added factual tokens: " + sample.id)
+            if sample.allowsOrdinarySubstitution != true {
+                guard outputMeaningTokens.isSubset(of: rawMeaningTokens) else {
+                    throw ContractFailure(message: "evaluation sample added factual tokens: " + sample.id)
+                }
+                guard expectedMeaningTokens.isSubset(of: rawMeaningTokens) else {
+                    throw ContractFailure(message: "evaluation sample changed intended meaning: " + sample.id)
+                }
             }
             guard !expectedMeaningTokens.isEmpty,
-                  expectedMeaningTokens.isSubset(of: rawMeaningTokens),
                   expectedMeaningTokens.isSubset(of: outputMeaningTokens) else {
                 throw ContractFailure(message: "evaluation sample changed intended meaning: " + sample.id)
             }
@@ -896,6 +988,7 @@ private struct EvaluationCase: Codable {
     let expectedMeaning: String
     let protectedTechnicalTokens: [String]
     let reviewStatus: String
+    let allowsOrdinarySubstitution: Bool?
 }
 
 private actor ModelRecorder {
