@@ -4,7 +4,7 @@ import OigoCore
 import OigoHotKey
 
 @main
-@available(macOS 13.0, *)
+@available(macOS 26.0, *)
 @MainActor
 struct OigoIssue82ContractTests {
     static func main() {

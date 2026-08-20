@@ -2,9 +2,23 @@ name: verify
 
 on:
   pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact git SHA, tag, or branch to diagnose. Passed only to actions/checkout.
+        required: true
+        type: string
 
 permissions:
   contents: read
+  actions: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   swift-build-and-contracts:
@@ -13,16 +27,36 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Check out source
+        if: github.event_name != 'workflow_dispatch'
         uses: actions/checkout@v4
-      - name: Report SwiftPM host
+      - name: Check out exact ref
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+      - name: Record SwiftPM host and toolchain
+        env:
+          DISPATCH_REF: ${{ github.event.inputs.ref }}
         run: |
+          echo "event=${GITHUB_EVENT_NAME}"
+          echo "ref=${GITHUB_REF}"
+          echo "workflow_sha=${GITHUB_SHA}"
+          echo "head_ref=${GITHUB_HEAD_REF:-}"
+          checked_out_sha=$(git rev-parse HEAD)
+          echo "checked_out_sha=${checked_out_sha}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            printf 'dispatch_ref=%s\n' "$DISPATCH_REF"
+          fi
           sw_vers
+          uname -m
           swift --version
           xcode-select -p
       - name: Swift build
         run: swift build
       - name: Menu-bar app product build
         run: swift build --product Oigo
+      - name: macOS 26 floor metadata check
+        run: swift run oigo-macos-floor-check
       - name: Dependency-free contract harness
         run: swift run oigo-spike-contract-tests
       - name: Issue three contract harness
@@ -53,3 +87,97 @@ jobs:
         run: swift run oigo-issue78-contract-tests
       - name: Issue eighty-two global hotkey contract harness
         run: swift run oigo-issue82-contract-tests
+
+  xcode-app-bundle:
+    name: Xcode app bundle
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        if: github.event_name != 'workflow_dispatch'
+        uses: actions/checkout@v4
+      - name: Check out exact ref
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+      - name: Record Xcode host, toolchain, and SHA
+        id: identity
+        env:
+          DISPATCH_REF: ${{ github.event.inputs.ref }}
+        run: |
+          echo "event=${GITHUB_EVENT_NAME}"
+          echo "ref=${GITHUB_REF}"
+          echo "workflow_sha=${GITHUB_SHA}"
+          echo "head_ref=${GITHUB_HEAD_REF:-}"
+          checked_out_sha=$(git rev-parse HEAD)
+          echo "checked_out_sha=${checked_out_sha}"
+          echo "checked_out_sha=${checked_out_sha}" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            printf 'dispatch_ref=%s\n' "$DISPATCH_REF"
+          fi
+          sw_vers
+          uname -m
+          xcode-select -p
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-path
+          xcrun --sdk macosx --show-sdk-version
+          swift --version
+          xcodebuild -project Oigo.xcodeproj -list
+      - name: Show Oigo Release build settings
+        env:
+          DERIVED_DATA: ${{ runner.temp }}/oigo-derived-data
+        run: |
+          set -euo pipefail
+          mkdir -p "$DERIVED_DATA/ci-evidence"
+          SETTINGS="$DERIVED_DATA/ci-evidence/oigo-release-build-settings.txt"
+          xcodebuild \
+            -project Oigo.xcodeproj \
+            -scheme Oigo \
+            -configuration Release \
+            -sdk macosx \
+            -destination 'platform=macOS,arch=arm64' \
+            -showBuildSettings \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            | awk '
+              /ARCHS |CONFIGURATION |MACOSX_DEPLOYMENT_TARGET |SDKROOT |PLATFORM_NAME |PRODUCT_BUNDLE_IDENTIFIER |PRODUCT_NAME |INFOPLIST_FILE |CODE_SIGNING_ALLOWED |CODE_SIGN_IDENTITY |CODE_SIGNING_REQUIRED |LSUIElement |NATIVE_ARCH /
+              { print }
+            ' \
+            | tee "$SETTINGS"
+      - name: Build unsigned Release Oigo.app
+        env:
+          DERIVED_DATA: ${{ runner.temp }}/oigo-derived-data
+        run: |
+          mkdir -p "$DERIVED_DATA"
+          xcodebuild \
+            -project Oigo.xcodeproj \
+            -scheme Oigo \
+            -configuration Release \
+            -sdk macosx \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath "$DERIVED_DATA" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+      - name: Inspect Oigo.app
+        env:
+          DERIVED_DATA: ${{ runner.temp }}/oigo-derived-data
+        run: zsh ./Scripts/inspect-oigo-app-bundle.sh "$DERIVED_DATA/Build/Products/Release/Oigo.app"
+      - name: Upload inspected Oigo.app
+        uses: actions/upload-artifact@v4
+        with:
+          name: oigo-app-${{ steps.identity.outputs.checked_out_sha }}
+          path: |
+            ${{ runner.temp }}/oigo-derived-data/Build/Products/Release/Oigo.app
+            ${{ runner.temp }}/oigo-derived-data/ci-evidence/oigo-release-build-settings.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Bounded launch smoke test
+        env:
+          DERIVED_DATA: ${{ runner.temp }}/oigo-derived-data
+        run: zsh ./Scripts/bounded-oigo-launch.sh "$DERIVED_DATA/Build/Products/Release/Oigo.app"

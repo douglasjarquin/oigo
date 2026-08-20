@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "OigoSpike",
     platforms: [
-        .macOS("13.0")
+        .macOS("26.0")
     ],
     products: [
         .library(name: "OigoCore", targets: ["OigoCore"]),
@@ -72,6 +72,10 @@ let package = Package(
         .executable(
             name: "oigo-issue82-contract-tests",
             targets: ["OigoIssue82ContractTests"]
+        ),
+        .executable(
+            name: "oigo-macos-floor-check",
+            targets: ["OigoMacOSFloorCheck"]
         )
     ],
     targets: [
@@ -212,6 +216,10 @@ let package = Package(
             name: "OigoIssue82ContractTests",
             dependencies: ["OigoCore", "OigoHotKey"],
             path: "Tests/OigoIssue82ContractTests"
+        ),
+        .executableTarget(
+            name: "OigoMacOSFloorCheck",
+            path: "Tests/OigoMacOSFloorCheck"
         )
     ]
 )
