@@ -82,6 +82,7 @@
         A00000010000000000000055 /* DictionaryContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000048 /* DictionaryContracts.swift */; };
         A00000010000000000000056 /* DictionaryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000049 /* DictionaryStore.swift */; };
         A00000010000000000000057 /* TerminologyNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000004A /* TerminologyNormalizer.swift */; };
+        A00000010000000000000058 /* OigoDiagnosticsExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000004B /* OigoDiagnosticsExport.swift */; };
 
 /* End PBXBuildFile section */
 
@@ -220,6 +221,7 @@
         B00000010000000000000048 /* DictionaryContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryContracts.swift; sourceTree = "<group>"; };
         B00000010000000000000049 /* DictionaryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryStore.swift; sourceTree = "<group>"; };
         B0000001000000000000004A /* TerminologyNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminologyNormalizer.swift; sourceTree = "<group>"; };
+        B0000001000000000000004B /* OigoDiagnosticsExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OigoDiagnosticsExport.swift; sourceTree = "<group>"; };
 
 /* End PBXFileReference section */
 
@@ -361,6 +363,7 @@
                 B00000010000000000000048 /* DictionaryContracts.swift */,
                 B00000010000000000000049 /* DictionaryStore.swift */,
                 B0000001000000000000004A /* TerminologyNormalizer.swift */,
+                B0000001000000000000004B /* OigoDiagnosticsExport.swift */,
             );
             path = Sources/OigoCore;
             sourceTree = "<group>";
@@ -659,6 +662,7 @@
                 A00000010000000000000055 /* DictionaryContracts.swift in Sources */,
                 A00000010000000000000056 /* DictionaryStore.swift in Sources */,
                 A00000010000000000000057 /* TerminologyNormalizer.swift in Sources */,
+                A00000010000000000000058 /* OigoDiagnosticsExport.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };

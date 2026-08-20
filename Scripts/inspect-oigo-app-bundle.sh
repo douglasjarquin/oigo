@@ -84,10 +84,18 @@ fi
 
 short_version="$(plist_string CFBundleShortVersionString)"
 bundle_version="$(plist_string CFBundleVersion)"
-if [[ -n "$short_version" && -n "$bundle_version" ]]; then
+required_short_version="1.0.0"
+if [[ "$short_version" == "$required_short_version" && -n "$bundle_version" ]]; then
     pass "bundle versions are $short_version ($bundle_version)"
 else
-    fail "CFBundleShortVersionString and CFBundleVersion must both be present"
+    fail "CFBundleShortVersionString must be $required_short_version and CFBundleVersion must be present, found ${short_version:-<missing>} (${bundle_version:-<missing>})"
+fi
+
+apple_events_usage="$(plist_string NSAppleEventsUsageDescription)"
+if [[ -n "$apple_events_usage" ]]; then
+    pass "NSAppleEventsUsageDescription is present"
+else
+    fail "NSAppleEventsUsageDescription is missing"
 fi
 
 lsuielement="$(plist_bool LSUIElement)"

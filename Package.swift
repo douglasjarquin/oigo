@@ -92,6 +92,10 @@ let package = Package(
         .executable(
             name: "oigo-issue13-dictionary-contract-tests",
             targets: ["OigoIssue13ContractTests"]
+        ),
+        .executable(
+            name: "oigo-issue14-contract-tests",
+            targets: ["OigoIssue14ContractTests"]
         )
     ],
     targets: [
@@ -257,6 +261,11 @@ let package = Package(
             name: "OigoIssue13ContractTests",
             dependencies: ["OigoCore", "OigoTranscription", "OigoInsertion"],
             path: "Tests/OigoIssue13ContractTests"
+        ),
+        .executableTarget(
+            name: "OigoIssue14ContractTests",
+            dependencies: ["OigoCore"],
+            path: "Tests/OigoIssue14ContractTests"
         )
     ]
 )
