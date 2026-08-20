@@ -415,7 +415,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 do {
                     try self.settingsStore.save(updatedSettings)
                     self.settings = updatedSettings
-                    self.recorder.setInputSelection(selection)
+                    self.recorder.setInputSelection(
+                        selection,
+                        channel: self.settings.selectedInputChannel
+                    )
                 } catch {
                     self.showSettingsPersistenceFailure(error)
                 }
@@ -924,7 +927,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 ) { [self] persistedSession, store in
                     pendingSessionBoundary = persistedSession
                     lastSession = persistedSession
-                    recorder.setInputSelection(settings.selectedInput)
+                    recorder.setInputSelection(
+                        settings.selectedInput,
+                        channel: settings.selectedInputChannel
+                    )
                     let format = try recorder.captureFormat()
                     try Task.checkCancellation()
                     let service = transcriptionService()
@@ -2063,7 +2069,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         settings = newSettings
-        recorder.setInputSelection(settings.selectedInput)
+        recorder.setInputSelection(
+            settings.selectedInput,
+            channel: settings.selectedInputChannel
+        )
         if previousSettings.localeIdentifier != settings.localeIdentifier {
             transcription = nil
         }

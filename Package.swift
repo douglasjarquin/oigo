@@ -76,6 +76,10 @@ let package = Package(
         .executable(
             name: "oigo-macos-floor-check",
             targets: ["OigoMacOSFloorCheck"]
+        ),
+        .executable(
+            name: "oigo-issue90-contract-tests",
+            targets: ["OigoIssue90ContractTests"]
         )
     ],
     targets: [
@@ -88,7 +92,8 @@ let package = Package(
             dependencies: ["OigoCore"],
             path: "Sources/OigoCapture",
             linkerSettings: [
-                .linkedFramework("AVFAudio")
+                .linkedFramework("AVFAudio"),
+                .linkedFramework("AudioToolbox")
             ]
         ),
         .target(
@@ -220,6 +225,11 @@ let package = Package(
         .executableTarget(
             name: "OigoMacOSFloorCheck",
             path: "Tests/OigoMacOSFloorCheck"
+        ),
+        .executableTarget(
+            name: "OigoIssue90ContractTests",
+            dependencies: ["OigoCore", "OigoCapture"],
+            path: "Tests/OigoIssue90ContractTests"
         )
     ]
 )

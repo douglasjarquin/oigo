@@ -284,7 +284,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         store: SessionStore,
         onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
     ) async throws {
-        guard format.isValid, format.channelCount == 1 else {
+        guard format.isCanonicalMono else {
             throw remember(.invalidCaptureFormat)
         }
 

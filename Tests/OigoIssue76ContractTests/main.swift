@@ -135,6 +135,20 @@ private struct OigoIssue76ContractTests {
         guard selectedInput?["kind"] as? String == "systemDefault" else {
             throw ContractFailure(message: "legacy settings did not migrate to explicit System Default input selection")
         }
+        guard loaded.selectedInputChannel == 0,
+              encoded?["selectedInputChannel"] as? Int == 0 else {
+            throw ContractFailure(message: "legacy settings did not migrate selected input channel to 0")
+        }
+
+        let withChannel = loaded.with(selectedInputChannel: 2)
+        try OigoSettingsStore(defaults: defaults).save(withChannel)
+        let reloaded = OigoSettingsStore(defaults: defaults).load()
+        guard reloaded.selectedInputChannel == 2,
+              OigoInputChannelPolicy.isValid(1, channelCount: 2),
+              !OigoInputChannelPolicy.isValid(2, channelCount: 2),
+              OigoInputChannelPolicy.displayTitle(for: 0) == "Channel 1" else {
+            throw ContractFailure(message: "selected input channel did not persist or validate against hardware channel count")
+        }
     }
 
     private static func testMenuAndUnavailable() throws {

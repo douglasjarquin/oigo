@@ -87,6 +87,8 @@ jobs:
         run: swift run oigo-issue78-contract-tests
       - name: Issue eighty-two global hotkey contract harness
         run: swift run oigo-issue82-contract-tests
+      - name: Issue ninety capture pipeline contract harness
+        run: swift run oigo-issue90-contract-tests
 
   xcode-app-bundle:
     name: Xcode app bundle

@@ -39,6 +39,10 @@ public struct AudioCaptureFormat: Equatable, Sendable {
     public var isValid: Bool {
         sampleRate.isFinite && sampleRate > 0 && channelCount > 0
     }
+
+    public var isCanonicalMono: Bool {
+        isValid && channelCount == 1
+    }
 }
 
 public struct AudioCaptureBuffer: Equatable, Sendable {

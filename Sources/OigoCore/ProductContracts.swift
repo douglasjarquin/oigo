@@ -225,6 +225,35 @@ public enum OigoInputMenu {
     }
 }
 
+public enum OigoInputChannelPolicy {
+    public static let defaultIndex = 0
+
+    public static func sanitized(_ index: Int) -> Int {
+        max(0, index)
+    }
+
+    public static func isValid(_ index: Int, channelCount: Int) -> Bool {
+        index >= 0 && channelCount > 0 && index < channelCount
+    }
+
+    public static func displayTitle(for index: Int) -> String {
+        "Channel " + String(index + 1)
+    }
+
+    public static func channelCount(
+        for selection: OigoInputSelection,
+        devices: [OigoInputDevice]
+    ) -> Int {
+        let visibleDevices = OigoInputDeviceCatalog.visibleDevices(from: devices)
+        switch selection {
+        case .systemDefault:
+            return max(1, visibleDevices.first(where: \.isDefault)?.inputChannelCount ?? 1)
+        case .pinned(let uid):
+            return max(1, visibleDevices.first(where: { $0.uid == uid })?.inputChannelCount ?? 1)
+        }
+    }
+}
+
 public struct OigoSettings: Codable, Equatable, Sendable {
     public static let `default` = OigoSettings()
 
@@ -236,6 +265,7 @@ public struct OigoSettings: Codable, Equatable, Sendable {
     public var keepSuccessfulAudioIndefinitely: Bool
     public var launchAtLogin: Bool
     public var selectedInput: OigoInputSelection
+    public var selectedInputChannel: Int
 
     private enum CodingKeys: String, CodingKey {
         case globalShortcut
@@ -246,6 +276,7 @@ public struct OigoSettings: Codable, Equatable, Sendable {
         case keepSuccessfulAudioIndefinitely
         case launchAtLogin
         case selectedInput
+        case selectedInputChannel
     }
 
     public init(
@@ -256,7 +287,8 @@ public struct OigoSettings: Codable, Equatable, Sendable {
         audioRetention: OigoAudioRetention = .oneDay,
         keepSuccessfulAudioIndefinitely: Bool = false,
         launchAtLogin: Bool = false,
-        selectedInput: OigoInputSelection = .systemDefault
+        selectedInput: OigoInputSelection = .systemDefault,
+        selectedInputChannel: Int = OigoInputChannelPolicy.defaultIndex
     ) {
         self.globalShortcut = globalShortcut
         self.localeIdentifier = localeIdentifier
@@ -266,6 +298,7 @@ public struct OigoSettings: Codable, Equatable, Sendable {
         self.keepSuccessfulAudioIndefinitely = keepSuccessfulAudioIndefinitely
         self.launchAtLogin = launchAtLogin
         self.selectedInput = selectedInput
+        self.selectedInputChannel = OigoInputChannelPolicy.sanitized(selectedInputChannel)
     }
 
     public init(from decoder: Decoder) throws {
@@ -278,7 +311,9 @@ public struct OigoSettings: Codable, Equatable, Sendable {
             audioRetention: try container.decode(OigoAudioRetention.self, forKey: .audioRetention),
             keepSuccessfulAudioIndefinitely: try container.decode(Bool.self, forKey: .keepSuccessfulAudioIndefinitely),
             launchAtLogin: try container.decode(Bool.self, forKey: .launchAtLogin),
-            selectedInput: try container.decodeIfPresent(OigoInputSelection.self, forKey: .selectedInput) ?? .systemDefault
+            selectedInput: try container.decodeIfPresent(OigoInputSelection.self, forKey: .selectedInput) ?? .systemDefault,
+            selectedInputChannel: try container.decodeIfPresent(Int.self, forKey: .selectedInputChannel)
+                ?? OigoInputChannelPolicy.defaultIndex
         )
     }
 
@@ -292,6 +327,7 @@ public struct OigoSettings: Codable, Equatable, Sendable {
         try container.encode(keepSuccessfulAudioIndefinitely, forKey: .keepSuccessfulAudioIndefinitely)
         try container.encode(launchAtLogin, forKey: .launchAtLogin)
         try container.encode(selectedInput, forKey: .selectedInput)
+        try container.encode(selectedInputChannel, forKey: .selectedInputChannel)
     }
 
     public func with(
@@ -302,7 +338,8 @@ public struct OigoSettings: Codable, Equatable, Sendable {
         audioRetention: OigoAudioRetention? = nil,
         keepSuccessfulAudioIndefinitely: Bool? = nil,
         launchAtLogin: Bool? = nil,
-        selectedInput: OigoInputSelection? = nil
+        selectedInput: OigoInputSelection? = nil,
+        selectedInputChannel: Int? = nil
     ) -> OigoSettings {
         OigoSettings(
             globalShortcut: globalShortcut ?? self.globalShortcut,
@@ -313,7 +350,8 @@ public struct OigoSettings: Codable, Equatable, Sendable {
             keepSuccessfulAudioIndefinitely: keepSuccessfulAudioIndefinitely
                 ?? self.keepSuccessfulAudioIndefinitely,
             launchAtLogin: launchAtLogin ?? self.launchAtLogin,
-            selectedInput: selectedInput ?? self.selectedInput
+            selectedInput: selectedInput ?? self.selectedInput,
+            selectedInputChannel: selectedInputChannel ?? self.selectedInputChannel
         )
     }
 }

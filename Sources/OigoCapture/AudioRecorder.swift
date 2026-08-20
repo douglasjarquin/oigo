@@ -13,6 +13,7 @@ public enum AudioRecorderError: Error, CustomStringConvertible, Sendable {
     case selectedInputUnavailable
     case inputDeviceRouteFailed
     case invalidInputFormat
+    case selectedChannelUnavailable
     case engineStartFailed(String)
 
     public var description: String {
@@ -33,6 +34,8 @@ public enum AudioRecorderError: Error, CustomStringConvertible, Sendable {
             "Oigo could not select the requested microphone; choose another source in Settings and try again"
         case .invalidInputFormat:
             "microphone input format is unavailable"
+        case .selectedChannelUnavailable:
+            "the selected input channel is not available on this microphone; choose another channel in Settings"
         case .engineStartFailed(let reason):
             "audio engine could not start: " + reason
         }
@@ -530,12 +533,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private let callbackDeliveryGate = AudioRecordingCallbackGate()
     private var engine: AVAudioEngine?
     private var preparedEngine: AVAudioEngine?
-    private var audioFile: AVAudioFile?
-    private var audioFileDescriptor: AudioFileDescriptor?
-    private var onBuffer: (@Sendable (AudioCaptureBuffer) -> Void)?
-    private var onFinish: (@Sendable () -> Void)?
-    private var onInterruption: (@Sendable (String) -> Void)?
-    private var onFailure: (@Sendable (String) -> Void)?
+    private var pipeline: CapturePipeline?
     private var configurationObserver: NSObjectProtocol?
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var recording = false
@@ -543,8 +541,8 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private var finishing = false
     private var pendingInterruptionReason: String?
     private var failureReported = false
-    private var firstBufferReported = false
     private var selectedInput: OigoInputSelection = .systemDefault
+    private var selectedChannel: Int = OigoInputChannelPolicy.defaultIndex
     private var activeSelection: OigoInputSelection?
     private var activeDeviceUID: String?
     private var recordingFence = AudioRecordingOperationFence()
@@ -560,9 +558,13 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         self.instrumentation = instrumentation
     }
 
-    public func setInputSelection(_ selection: OigoInputSelection) {
+    public func setInputSelection(
+        _ selection: OigoInputSelection,
+        channel: Int = OigoInputChannelPolicy.defaultIndex
+    ) {
         lock.lock()
         selectedInput = selection
+        selectedChannel = OigoInputChannelPolicy.sanitized(channel)
         if !recording && !starting {
             activeSelection = selection
             preparedEngine = nil
@@ -596,7 +598,8 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         preparedInput = PreparedInput(
             selection: preparation.selection,
             deviceUID: preparation.device.uid,
-            configuration: inputConfiguration
+            configuration: inputConfiguration,
+            selectedChannel: preparation.selectedChannel
         )
         lock.unlock()
         return AudioCaptureFormat(
@@ -632,25 +635,6 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                 descriptor.close()
             }
         }
-        try start(
-            writingTo: URL(fileURLWithPath: "/dev/fd/\(descriptor.rawValue)"),
-            descriptor: descriptor,
-            onBuffer: onBuffer,
-            onFinish: onFinish,
-            onInterruption: onInterruption,
-            onFailure: onFailure
-        )
-        retained = true
-    }
-
-    private func start(
-        writingTo url: URL,
-        descriptor: AudioFileDescriptor,
-        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
-        onFinish: @escaping @Sendable () -> Void,
-        onInterruption: @escaping @Sendable (String) -> Void,
-        onFailure: @escaping @Sendable (String) -> Void
-    ) throws {
         let recordingGeneration = try claimStart()
         var startCompleted = false
         defer {
@@ -676,44 +660,84 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         lock.unlock()
         let engine = preparedEngine ?? AVAudioEngine()
         let inputNode = engine.inputNode
-        let preparation: (device: OigoInputDevice, configuration: InputConfiguration)
+        let preparation: (
+            device: OigoInputDevice,
+            configuration: InputConfiguration,
+            selectedChannel: Int
+        )
         if let preparedInput {
-            preparation = try resolvePreparedInput(preparedInput, on: inputNode)
+            let resolved = try resolvePreparedInput(preparedInput, on: inputNode)
+            preparation = (resolved.device, resolved.configuration, preparedInput.selectedChannel)
         } else {
             let fullPreparation = try prepareInput(on: inputNode)
-            preparation = (fullPreparation.device, fullPreparation.configuration)
+            preparation = (
+                fullPreparation.device,
+                fullPreparation.configuration,
+                fullPreparation.selectedChannel
+            )
         }
         let inputConfiguration = preparation.configuration
-        let captureFormat = AVAudioFormat(
-            standardFormatWithSampleRate: inputConfiguration.sampleRate,
-            channels: AVAudioChannelCount(inputConfiguration.channelCount)
-        )
-        guard let captureFormat else {
+        let sourceFormat = inputNode.inputFormat(forBus: 0)
+        guard sourceFormat.sampleRate == inputConfiguration.sampleRate,
+              sourceFormat.channelCount == inputConfiguration.channelCount else {
+            throw AudioRecorderError.invalidInputFormat
+        }
+        let adapter: CanonicalMonoAdapter
+        do {
+            adapter = try CanonicalMonoAdapter(
+                sourceFormat: sourceFormat,
+                selectedChannel: preparation.selectedChannel
+            )
+        } catch CanonicalMonoAdapterError.selectedChannelOutOfRange {
+            throw AudioRecorderError.selectedChannelUnavailable
+        } catch {
+            throw AudioRecorderError.invalidInputFormat
+        }
+        let canonicalFormat = adapter.canonicalCaptureFormat
+        guard canonicalFormat.isCanonicalMono else {
             throw AudioRecorderError.invalidInputFormat
         }
 
-        let file = try AVAudioFile(
-            forWriting: url,
-            settings: captureFormat.settings,
-            commonFormat: captureFormat.commonFormat,
-            interleaved: captureFormat.isInterleaved
+        let writer: CAFWriter
+        do {
+            writer = try CAFWriter(descriptor: descriptor, format: adapter.outputFormat)
+        } catch let error as CAFWriterError {
+            throw AudioRecorderError.engineStartFailed(error.description)
+        } catch {
+            throw AudioRecorderError.engineStartFailed(String(describing: error))
+        }
+        retained = true
+
+        let pipeline = CapturePipeline(
+            generation: recordingGeneration,
+            adapter: adapter,
+            writer: writer,
+            instrumentation: instrumentation,
+            onBuffer: onBuffer,
+            onFinish: onFinish,
+            onInterruption: onInterruption,
+            onFailure: onFailure,
+            teardownHandler: { [weak self] in
+                self?.beginEngineTeardown()
+            },
+            onTerminalized: { [weak self] in
+                self?.markCaptureIdle()
+            },
+            permissionCheck: {
+                AVAudioApplication.shared.recordPermission == .granted
+            }
         )
 
         lock.lock()
         guard starting && recordingFence.accepts(recordingGeneration) else {
             lock.unlock()
+            pipeline.cancelAndWait()
             throw AudioRecorderError.inputDeviceUnavailable
         }
         self.engine = engine
-        audioFile = file
-        audioFileDescriptor = descriptor
-        self.onBuffer = onBuffer
-        self.onFinish = onFinish
-        self.onInterruption = onInterruption
-        self.onFailure = onFailure
+        self.pipeline = pipeline
         pendingInterruptionReason = nil
         failureReported = false
-        firstBufferReported = false
         lock.unlock()
 
         do {
@@ -773,15 +797,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                 }
                 lock.unlock()
                 if let startupInterruption {
-                    lock.lock()
-                    let callback: (@Sendable (String) -> Void)? = onInterruption
-                    lock.unlock()
-                    guard let resources = beginTeardown(expectedGeneration: recordingGeneration) else {
-                        return true
-                    }
-                    finish(resources) {
-                        callback?(startupInterruption)
-                    }
+                    handleInterruption(startupInterruption, generation: recordingGeneration)
                     return true
                 }
                 guard startupIsCurrent else {
@@ -809,7 +825,6 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             starting = true
             pendingInterruptionReason = nil
             failureReported = false
-            firstBufferReported = false
             return recordingFence.begin()
         }
         guard let generation else {
@@ -823,10 +838,12 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     ) throws -> (
         device: OigoInputDevice,
         configuration: InputConfiguration,
-        selection: OigoInputSelection
+        selection: OigoInputSelection,
+        selectedChannel: Int
     ) {
         lock.lock()
         let selection = selectedInput
+        let channel = selectedChannel
         if !recording {
             activeSelection = selection
         }
@@ -842,9 +859,14 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                     try inputRouter.route(inputNode: inputNode, to: device.deviceID)
                 },
                 inspect: { _ in
-                    guard let configuration = Self.inputConfiguration(for: inputNode),
-                          configuration.channelCount == 1 else {
+                    guard let configuration = Self.inputConfiguration(for: inputNode) else {
                         throw AudioRecorderError.invalidInputFormat
+                    }
+                    guard OigoInputChannelPolicy.isValid(
+                        channel,
+                        channelCount: Int(configuration.channelCount)
+                    ) else {
+                        throw AudioRecorderError.selectedChannelUnavailable
                     }
                     inputConfiguration = configuration
                 }
@@ -855,7 +877,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             lock.lock()
             activeDeviceUID = device.uid
             lock.unlock()
-            return (device, inputConfiguration, selection)
+            return (device, inputConfiguration, selection, channel)
         } catch OigoInputDeviceResolutionError.pinnedInputUnavailable {
             throw AudioRecorderError.selectedInputUnavailable
         } catch OigoInputDeviceResolutionError.noAvailableInput {
@@ -915,97 +937,24 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     }
 
     public func stop() throws {
-        guard let resources = beginTeardown() else {
-            return
-        }
-        finish(resources)
+        terminalize(.userStop, generation: nil)
     }
 
     public func cancel() {
-        guard let resources = beginTeardown() else {
-            return
-        }
-        finish(resources)
+        terminalize(.cancel, generation: nil)
     }
 
     private func handle(_ buffer: AVAudioPCMBuffer, generation: UInt64) {
-        guard AVAudioApplication.shared.recordPermission == .granted else {
-            handleInterruption("microphone permission revoked", generation: generation)
-            return
-        }
-
-        var callback: (@Sendable (AudioCaptureBuffer) -> Void)?
-        var forwardedBuffer: AudioCaptureBuffer?
-        var failure: (@Sendable (String) -> Void)?
-        var failureDescription: String?
-        var markFirstBuffer = false
-
         lock.lock()
         guard recording,
               recordingFence.accepts(generation),
               !failureReported,
-              let audioFile else {
+              let pipeline else {
             lock.unlock()
             return
         }
-        do {
-            try audioFile.write(from: buffer)
-            if !firstBufferReported {
-                firstBufferReported = true
-                markFirstBuffer = true
-            }
-            callback = onBuffer
-            forwardedBuffer = AudioCaptureBuffer(
-                frameCount: Int(buffer.frameLength),
-                sampleRate: buffer.format.sampleRate,
-                channelCount: Int(buffer.format.channelCount),
-                pcmData: Self.pcmData(from: buffer)
-            )
-        } catch {
-            if !failureReported {
-                failureReported = true
-                failure = onFailure
-                failureDescription = String(describing: error)
-            }
-        }
         lock.unlock()
-
-        if let failure, let failureDescription {
-            guard let resources = beginTeardown(expectedGeneration: generation) else {
-                return
-            }
-            finish(resources) {
-                failure(failureDescription)
-            }
-        } else if let callback, let forwardedBuffer {
-            callbackDeliveryGate.deliverIfAllowed(
-                { [weak self] in
-                    guard let self else {
-                        return false
-                    }
-                    lock.lock()
-                    let isCurrentOperation = recording
-                        && recordingFence.accepts(generation)
-                        && !failureReported
-                    lock.unlock()
-                    return isCurrentOperation
-                },
-                {
-                    if markFirstBuffer {
-                        instrumentation.mark(.firstAudioBuffer)
-                    }
-                    callback(forwardedBuffer)
-                }
-            )
-        }
-    }
-
-    private static func pcmData(from buffer: AVAudioPCMBuffer) -> Data {
-        let audioBuffer = buffer.audioBufferList.pointee.mBuffers
-        guard let data = audioBuffer.mData, audioBuffer.mDataByteSize > 0 else {
-            return Data()
-        }
-        return Data(bytes: data, count: Int(audioBuffer.mDataByteSize))
+        _ = pipeline.tryAccept(buffer, generation: generation)
     }
 
     private struct InputConfiguration {
@@ -1017,6 +966,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         let selection: OigoInputSelection
         let deviceUID: String
         let configuration: InputConfiguration
+        let selectedChannel: Int
     }
 
     private static func inputConfiguration(
@@ -1034,16 +984,21 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         )
     }
 
-    private func beginTeardown() -> TeardownResources? {
-        beginTeardown(expectedGeneration: nil)
+    private enum TerminalAction {
+        case userStop
+        case cancel
+        case interrupt(String)
     }
 
-    private func beginTeardown(expectedGeneration: UInt64?) -> TeardownResources? {
-        let teardown: (resources: TeardownResources, configurationObserver: NSObjectProtocol?)? = callbackDeliveryGate.performExclusively {
+    private func terminalize(
+        _ action: TerminalAction,
+        generation: UInt64?
+    ) {
+        let pipeline: CapturePipeline? = callbackDeliveryGate.performExclusively {
             lock.lock()
             defer { lock.unlock() }
             guard recording || starting,
-                  expectedGeneration.map(recordingFence.accepts) ?? true else {
+                  generation.map(recordingFence.accepts) ?? true else {
                 return nil
             }
             recording = false
@@ -1051,46 +1006,81 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             finishing = true
             pendingInterruptionReason = nil
             recordingFence.invalidate()
-            firstBufferReported = false
             activeSelection = nil
             activeDeviceUID = nil
-            let resources = TeardownResources(
-                engine: engine,
-                onFinish: onFinish,
-                descriptor: audioFileDescriptor
-            )
-            engine = nil
-            audioFile = nil
-            audioFileDescriptor = nil
-            onBuffer = nil
-            onFinish = nil
-            let observer = configurationObserver
-            configurationObserver = nil
-            onInterruption = nil
-            onFailure = nil
-            return (resources, observer)
+            let pipeline = self.pipeline
+            return pipeline
         }
-        guard let teardown else {
-            return nil
+        guard let pipeline else {
+            teardownEngineAndObservers()
+            lock.lock()
+            finishing = false
+            lock.unlock()
+            return
         }
-        if let observer = teardown.configurationObserver {
+        switch action {
+        case .userStop:
+            pipeline.stopAndWait()
+        case .cancel:
+            pipeline.cancelAndWait()
+        case .interrupt(let reason):
+            pipeline.interruptAndWait(reason)
+        }
+        markCaptureIdle()
+    }
+
+    private func markCaptureIdle() {
+        lock.lock()
+        recording = false
+        starting = false
+        finishing = false
+        recordingFence.invalidate()
+        pipeline = nil
+        activeSelection = nil
+        activeDeviceUID = nil
+        lock.unlock()
+    }
+
+    private func beginEngineTeardown() {
+        lock.lock()
+        recordingFence.invalidate()
+        recording = false
+        starting = false
+        lock.unlock()
+        teardownEngineAndObservers()
+    }
+
+    private func teardownEngineAndObservers() {
+        let engineAndObservers: (
+            engine: AVAudioEngine?,
+            configurationObserver: NSObjectProtocol?,
+            lifecycleObservers: [NSObjectProtocol]
+        ) = callbackDeliveryGate.performExclusively {
+            lock.lock()
+            let engine = self.engine
+            self.engine = nil
+            let configurationObserver = self.configurationObserver
+            self.configurationObserver = nil
+            let lifecycleObservers = self.lifecycleObservers
+            self.lifecycleObservers = []
+            lock.unlock()
+            return (engine, configurationObserver, lifecycleObservers)
+        }
+        if let observer = engineAndObservers.configurationObserver {
             NotificationCenter.default.removeObserver(observer)
         }
-        lock.lock()
-        let lifecycleObservers = self.lifecycleObservers
-        self.lifecycleObservers = []
-        lock.unlock()
-        for observer in lifecycleObservers {
+        for observer in engineAndObservers.lifecycleObservers {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
         deviceMonitor.stop()
-        return teardown.resources
+        engineAndObservers.engine?.inputNode.removeTap(onBus: 0)
+        engineAndObservers.engine?.stop()
+        engineAndObservers.engine?.reset()
     }
 
     private func handleInterruption(_ reason: String, generation: UInt64? = nil) {
         lock.lock()
         guard recording || starting,
-              !failureReported,
               generation.map(recordingFence.accepts) ?? true else {
             lock.unlock()
             return
@@ -1100,37 +1090,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             lock.unlock()
             return
         }
-        let callback = onInterruption
-        failureReported = true
         lock.unlock()
-
-        guard let resources = beginTeardown(expectedGeneration: generation) else {
-            return
-        }
-        finish(resources) {
-            callback?(reason)
-        }
+        terminalize(.interrupt(reason), generation: generation)
     }
-
-    private func finish(
-        _ resources: TeardownResources,
-        terminalCallback: (@Sendable () -> Void)? = nil
-    ) {
-        defer {
-            lock.lock()
-            finishing = false
-            lock.unlock()
-        }
-        resources.engine?.inputNode.removeTap(onBus: 0)
-        resources.engine?.stop()
-        resources.onFinish?()
-        terminalCallback?()
-        resources.descriptor?.close()
-    }
-}
-
-private struct TeardownResources {
-    let engine: AVAudioEngine?
-    let onFinish: (@Sendable () -> Void)?
-    let descriptor: AudioFileDescriptor?
 }
