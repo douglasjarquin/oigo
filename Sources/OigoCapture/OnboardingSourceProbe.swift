@@ -227,5 +227,6 @@ public final class OnboardingSourceProbe: @unchecked Sendable {
         adapter = nil
         onUpdate = nil
         running = false
+        deviceMonitor.stop()
     }
 }

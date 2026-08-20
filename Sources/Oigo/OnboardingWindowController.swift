@@ -23,7 +23,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let openDataLocation: () -> Void
     private let startSourceProbe: (OigoInputSelection, Int, UInt64) -> Void
     private let stopSourceProbe: () -> Void
-    private let startTest: () -> Void
+    private let startTest: (UInt64) -> Void
     private let stopTest: () -> Void
     private let cancelTest: () -> Void
     private let openHistory: () -> Void
@@ -101,7 +101,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         openDataLocation: @escaping () -> Void,
         startSourceProbe: @escaping (OigoInputSelection, Int, UInt64) -> Void,
         stopSourceProbe: @escaping () -> Void,
-        startTest: @escaping () -> Void,
+        startTest: @escaping (UInt64) -> Void,
         stopTest: @escaping () -> Void,
         cancelTest: @escaping () -> Void,
         openHistory: @escaping () -> Void,
@@ -229,26 +229,41 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    func bindTestSession(_ sessionID: UUID) {
+        guard let generation = activeTestGeneration else {
+            return
+        }
+        _ = evidence.bindSession(generation: generation, sessionID: sessionID)
+    }
+
     func applyTestCompletion(
+        generation: UInt64,
+        sessionID: UUID?,
         report: OigoOnboardingProductionReport,
         selectedInsertionText: String
     ) {
-        guard let generation = activeTestGeneration,
-              evidence.recordProductionPath(generation: generation, report: report) else {
+        guard generation == activeTestGeneration else {
+            return
+        }
+        var report = report
+        if report.sessionID == nil {
+            report.sessionID = sessionID
+        } else if let sessionID, report.sessionID != sessionID {
+            return
+        }
+        guard evidence.recordProductionPath(generation: generation, report: report) else {
+            return
+        }
+        if report.insertionPath == .production,
+           report.insertionOutcome == .pasted || report.insertionOutcome == .dispatched,
+           evidence.outcome != .failed {
+            verifyDestinationAfterPaste(
+                generation: generation,
+                selectedInsertionText: selectedInsertionText
+            )
             return
         }
         activeTestGeneration = nil
-        if report.insertionPath == .production,
-           report.insertionOutcome == .pasted || report.insertionOutcome == .dispatched {
-            Task { @MainActor [weak self] in
-                await Self.waitForEventBoundary()
-                self?.finishDestinationVerification(
-                    generation: generation,
-                    selectedInsertionText: selectedInsertionText
-                )
-            }
-            return
-        }
         render()
     }
 
@@ -381,9 +396,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             || evidence.signalHealth != .silent
             || !evidence.acceptedCanonicalBuffer
         testField.isHidden = !isSupported || currentStep != .testDictation
-        historyButton.isHidden = currentStep != .recovery && evidence.failedStage != .durableCAF
-            && evidence.failedStage != .speech
-            && evidence.failedStage != .destinationVerification
+        historyButton.isHidden = currentStep != .recovery
+            && !(currentStep == .testDictation && evidence.recoveryActions.contains(.openHistory))
         storageStatusLabel.isHidden = storageHealth.isReady
         retryStorageButton.isHidden = storageHealth.isReady
         openDataLocationButton.isHidden = storageHealth.isReady
@@ -724,7 +738,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             activeTestGeneration = generation
             _ = evidence.markDestinationCleared(generation: generation)
             window?.makeFirstResponder(testField)
-            startTest()
+            startTest(generation)
             render()
         default:
             break
@@ -885,8 +899,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         evidence.leaveMicrophoneStep()
         stopSourceProbe()
         meter.doubleValue = 0
-        if cancelActiveTest, evidence.testRunning {
-            cancelTest()
+        if cancelActiveTest {
+            activeTestGeneration = nil
+            if evidence.testRunning {
+                cancelTest()
+            }
         }
     }
 
@@ -910,25 +927,88 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         return "Waiting for a usable buffer from the selected source."
     }
 
-    private func finishDestinationVerification(
+    private func verifyDestinationAfterPaste(
         generation: UInt64,
         selectedInsertionText: String
     ) {
-        let matches = testField.stringValue == selectedInsertionText && !selectedInsertionText.isEmpty
+        let deadline = Date().addingTimeInterval(0.25)
+        while Date() < deadline {
+            guard generation == activeTestGeneration, generation == evidence.generation else {
+                return
+            }
+            if window?.firstResponder !== testField {
+                finishDestinationVerification(
+                    generation: generation,
+                    selectedInsertionText: selectedInsertionText,
+                    eventBoundaryCompleted: false,
+                    failure: .targetChanged
+                )
+                return
+            }
+            if fieldMatchesDurableText(selectedInsertionText) {
+                finishDestinationVerification(
+                    generation: generation,
+                    selectedInsertionText: selectedInsertionText,
+                    eventBoundaryCompleted: true
+                )
+                return
+            }
+            pumpPostedAppKitEvents(until: min(Date().addingTimeInterval(0.01), deadline))
+        }
+        guard generation == activeTestGeneration, generation == evidence.generation else {
+            return
+        }
+        if fieldMatchesDurableText(selectedInsertionText) {
+            finishDestinationVerification(
+                generation: generation,
+                selectedInsertionText: selectedInsertionText,
+                eventBoundaryCompleted: true
+            )
+            return
+        }
+        let hasOtherText = !testField.stringValue.isEmpty
+        finishDestinationVerification(
+            generation: generation,
+            selectedInsertionText: selectedInsertionText,
+            eventBoundaryCompleted: hasOtherText,
+            failure: hasOtherText ? .mismatch : .timeout
+        )
+    }
+
+    private func fieldMatchesDurableText(_ selectedInsertionText: String) -> Bool {
+        !selectedInsertionText.isEmpty && testField.stringValue == selectedInsertionText
+    }
+
+    private func pumpPostedAppKitEvents(until deadline: Date) {
+        while Date() < deadline {
+            guard let event = NSApp.nextEvent(
+                matching: .any,
+                until: deadline,
+                inMode: .default,
+                dequeue: true
+            ) else {
+                _ = CFRunLoopRunInMode(CFRunLoopMode.defaultMode, 0.01, true)
+                return
+            }
+            NSApp.sendEvent(event)
+        }
+    }
+
+    private func finishDestinationVerification(
+        generation: UInt64,
+        selectedInsertionText: String,
+        eventBoundaryCompleted: Bool,
+        failure: OigoOnboardingDestinationFailure? = nil
+    ) {
+        let matches = fieldMatchesDurableText(selectedInsertionText)
         _ = evidence.completeDestinationVerification(
             generation: generation,
             fieldMatchesDurableSelectedText: matches,
-            eventBoundaryCompleted: true
+            eventBoundaryCompleted: eventBoundaryCompleted,
+            failure: failure
         )
+        activeTestGeneration = nil
         render()
-    }
-
-    private static func waitForEventBoundary() async {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.main.async {
-                continuation.resume()
-            }
-        }
     }
 
     private static func validationMessage(_ validation: OigoShortcutValidation) -> String {

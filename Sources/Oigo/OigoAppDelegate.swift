@@ -115,6 +115,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var pasteAgainFlow = InsertionPasteAgainFlow(handoff: insertionTargetHandoff)
     private var onboardingWindow: OnboardingWindowController?
     private var onboardingSourceProbe: OnboardingSourceProbe?
+    private var onboardingTestGeneration: UInt64?
+    private var onboardingTestSessionID: UUID?
     private var recordingStartedAt: Date?
     private var previewThrottle = OigoHUDPreviewThrottle()
     private let operationGate = AppOperationGate()
@@ -391,14 +393,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             stopSourceProbe: { [weak self] in
                 self?.stopOnboardingSourceProbe()
             },
-            startTest: { [weak self] in
+            startTest: { [weak self] generation in
                 self?.onboardingWindow?.focusTestField()
+                self?.beginOnboardingProductionTest(generation: generation)
                 _ = self?.shortcutBridge.receive(.pressed)
             },
             stopTest: { [weak self] in
                 _ = self?.shortcutBridge.receive(.released)
             },
             cancelTest: { [weak self] in
+                self?.clearOnboardingTestBinding()
                 self?.shortcutBridge.reset()
                 self?.cancelTestDictation()
             },
@@ -828,12 +832,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func finishTestDictation() {
-        Task { @MainActor [weak self] in
-            self?.continueDictationStop()
-        }
-    }
-
     private func performStartDictation() async {
         do {
             switch coordinator.state {
@@ -852,6 +850,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     failureDetail = "microphone_permission_retry_required"
                     shortcutFeedbackDetail = "Microphone permission granted. Press the shortcut again to start dictation."
                     historyWindow?.showMessage(shortcutFeedbackDetail ?? "Press the shortcut again to start dictation.")
+                    reportOnboardingTestFailure()
                     updateSurface()
                     return
                 }
@@ -860,6 +859,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 ) { [self] persistedSession, store in
                     pendingSessionBoundary = persistedSession
                     lastSession = persistedSession
+                    bindOnboardingTestSession(persistedSession.id)
                     recorder.setInputSelection(
                         settings.selectedInput,
                         channel: settings.selectedInputChannel
@@ -2112,6 +2112,42 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         (try? deviceInventoryMonitor.currentDevices()) ?? []
     }
 
+    private func beginOnboardingProductionTest(generation: UInt64) {
+        onboardingTestGeneration = generation
+        onboardingTestSessionID = nil
+    }
+
+    private func bindOnboardingTestSession(_ sessionID: UUID) {
+        guard onboardingTestGeneration != nil else {
+            return
+        }
+        if onboardingTestSessionID == nil {
+            onboardingTestSessionID = sessionID
+        }
+        onboardingWindow?.bindTestSession(sessionID)
+    }
+
+    private func clearOnboardingTestBinding() {
+        onboardingTestGeneration = nil
+        onboardingTestSessionID = nil
+    }
+
+    private func sessionForOnboardingTest(_ session: DictationSession?) -> DictationSession? {
+        guard let boundID = onboardingTestSessionID else {
+            return nil
+        }
+        if let session, session.id == boundID {
+            return session
+        }
+        if let current = coordinator.currentSession, current.id == boundID {
+            return current
+        }
+        if let lastSession, lastSession.id == boundID {
+            return lastSession
+        }
+        return nil
+    }
+
     private func startOnboardingSourceProbe(
         selection: OigoInputSelection,
         channel: Int,
@@ -2142,11 +2178,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         result: InsertionResult,
         insertionSource: TranscriptInsertionSource
     ) {
-        guard let onboardingWindow else {
+        guard let onboardingWindow,
+              let generation = onboardingTestGeneration else {
             return
         }
         shortcutBridge.reset()
         let bound = recorder.currentSelection()
+        let session = sessionForOnboardingTest(session)
         let selectedText: String
         if let session {
             switch insertionSource {
@@ -2172,21 +2210,26 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             insertionOutcome: result.outcome,
             insertionPath: .production,
             insertionInvoked: true,
-            recoverableArtifactsRetained: cafExists || speechFinalized
+            recoverableArtifactsRetained: cafExists || speechFinalized,
+            sessionID: session?.id ?? onboardingTestSessionID
         )
         onboardingWindow.applyTestCompletion(
+            generation: generation,
+            sessionID: onboardingTestSessionID,
             report: report,
             selectedInsertionText: selectedText
         )
+        clearOnboardingTestBinding()
     }
 
     private func reportOnboardingTestFailure() {
-        guard let onboardingWindow else {
+        guard let onboardingWindow,
+              let generation = onboardingTestGeneration else {
             return
         }
         shortcutBridge.reset()
         let bound = recorder.currentSelection()
-        let session = lastSession ?? coordinator.currentSession
+        let session = sessionForOnboardingTest(lastSession ?? coordinator.currentSession)
         let cafExists = session.map { FileManager.default.fileExists(atPath: $0.audioURL.path) } ?? false
         let speechFinalized = session.map { ($0.metadata.rawTextByteCount ?? 0) > 0 } ?? false
         let report = OigoOnboardingProductionReport(
@@ -2201,12 +2244,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             insertionOutcome: .failed,
             insertionPath: .production,
             insertionInvoked: false,
-            recoverableArtifactsRetained: cafExists || speechFinalized
+            recoverableArtifactsRetained: cafExists || speechFinalized,
+            sessionID: session?.id ?? onboardingTestSessionID
         )
         onboardingWindow.applyTestCompletion(
+            generation: generation,
+            sessionID: onboardingTestSessionID,
             report: report,
             selectedInsertionText: ""
         )
+        clearOnboardingTestBinding()
     }
 
     private func startInputDeviceInventoryMonitor() {

@@ -749,6 +749,10 @@ private struct OigoIssue9ContractTests {
         try testProductionInsertionPathIsRequired()
         try testMicrophoneProbeReleasesOnStepChange()
         try testFailureIdentifiesStageAndKeepsArtifacts()
+        try testEventBoundaryTimeoutCannotPass()
+        try testCleanupFailureCannotPass()
+        try testMismatchedSessionIsIgnored()
+        try testSessionlessFailureDoesNotClaimPriorArtifacts()
     }
 
     private static func testStorageUnhealthyCannotFinishReady() throws {
@@ -1082,6 +1086,99 @@ private struct OigoIssue9ContractTests {
               machine.statusMessage == OigoOnboardingEvidenceMachine.statusMessage(for: .speech),
               machine.recoveryActions.contains(.openHistory) else {
             throw ContractFailure(message: "failure UI did not identify the failed stage or retain artifacts")
+        }
+    }
+
+    private static func testEventBoundaryTimeoutCannotPass() throws {
+        var machine = preparedMachine()
+        recordUsableProbe(&machine)
+        guard let generation = machine.beginTest(destinationEditable: true) else {
+            throw ContractFailure(message: "timeout fixture could not start")
+        }
+        _ = machine.markDestinationCleared(generation: generation)
+        _ = machine.recordProductionPath(generation: generation, report: passingReport())
+        _ = machine.completeDestinationVerification(
+            generation: generation,
+            fieldMatchesDurableSelectedText: true,
+            eventBoundaryCompleted: false
+        )
+        guard machine.outcome != .passed,
+              machine.failedStage == .destinationTimeout,
+              !machine.eventBoundaryCompleted else {
+            throw ContractFailure(message: "a timed-out event boundary still passed automatic paste")
+        }
+    }
+
+    private static func testCleanupFailureCannotPass() throws {
+        var machine = preparedMachine()
+        recordUsableProbe(&machine)
+        guard let generation = machine.beginTest(destinationEditable: true) else {
+            throw ContractFailure(message: "cleanup fixture could not start")
+        }
+        _ = machine.markDestinationCleared(generation: generation)
+        var report = passingReport()
+        report.cleanupSucceeded = false
+        _ = machine.recordProductionPath(generation: generation, report: report)
+        _ = machine.completeDestinationVerification(
+            generation: generation,
+            fieldMatchesDurableSelectedText: true,
+            eventBoundaryCompleted: true
+        )
+        guard machine.outcome != .passed,
+              machine.failedStage == .cleanup else {
+            throw ContractFailure(message: "a cleanup failure was overwritten by destination verification")
+        }
+    }
+
+    private static func testMismatchedSessionIsIgnored() throws {
+        var machine = preparedMachine()
+        recordUsableProbe(&machine)
+        guard let generation = machine.beginTest(destinationEditable: true) else {
+            throw ContractFailure(message: "session fixture could not start")
+        }
+        let bound = UUID()
+        guard machine.bindSession(generation: generation, sessionID: bound) else {
+            throw ContractFailure(message: "the test session could not be bound")
+        }
+        _ = machine.markDestinationCleared(generation: generation)
+        var report = passingReport()
+        report.sessionID = UUID()
+        guard !machine.recordProductionPath(generation: generation, report: report),
+              machine.outcome == .pending else {
+            throw ContractFailure(message: "a report for a different session updated the current run")
+        }
+        report.sessionID = bound
+        _ = machine.recordProductionPath(generation: generation, report: report)
+        _ = machine.completeDestinationVerification(
+            generation: generation,
+            fieldMatchesDurableSelectedText: true,
+            eventBoundaryCompleted: true
+        )
+        guard machine.outcome == .passed,
+              machine.boundSessionID == bound else {
+            throw ContractFailure(message: "the bound session was not required to pass")
+        }
+    }
+
+    private static func testSessionlessFailureDoesNotClaimPriorArtifacts() throws {
+        var machine = preparedMachine()
+        recordUsableProbe(&machine)
+        guard let generation = machine.beginTest(destinationEditable: true) else {
+            throw ContractFailure(message: "sessionless failure fixture could not start")
+        }
+        var report = passingReport()
+        report.sessionCreated = false
+        report.sessionID = UUID()
+        report.insertionInvoked = false
+        report.insertionOutcome = .failed
+        report.clipboardWritten = false
+        report.targetValidationSucceeded = false
+        _ = machine.recordProductionPath(generation: generation, report: report)
+        guard machine.outcome == .failed,
+              machine.failedStage == .durableCAF,
+              !machine.recoverableArtifactsRetained,
+              machine.evidence.speech == .notStarted else {
+            throw ContractFailure(message: "a sessionless failure claimed CAF or speech from a previous session")
         }
     }
 

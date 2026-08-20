@@ -18,7 +18,18 @@ public enum OigoOnboardingFailedStage: String, Equatable, Sendable {
     case targetValidation
     case pasteDispatch
     case destinationVerification
+    case destinationTimeout
+    case destinationMismatch
+    case destinationEventFailure
+    case destinationTargetChanged
     case destinationNotEditable
+}
+
+public enum OigoOnboardingDestinationFailure: Equatable, Sendable {
+    case timeout
+    case mismatch
+    case eventFailure
+    case targetChanged
 }
 
 public enum OigoOnboardingSignalHealth: Equatable, Sendable {
@@ -126,6 +137,7 @@ public struct OigoOnboardingProductionReport: Equatable, Sendable {
     public var insertionPath: OigoOnboardingInsertionPath
     public var insertionInvoked: Bool
     public var recoverableArtifactsRetained: Bool
+    public var sessionID: UUID?
 
     public init(
         usedInput: OigoInputSelection,
@@ -140,7 +152,8 @@ public struct OigoOnboardingProductionReport: Equatable, Sendable {
         insertionOutcome: InsertionOutcome?,
         insertionPath: OigoOnboardingInsertionPath,
         insertionInvoked: Bool,
-        recoverableArtifactsRetained: Bool
+        recoverableArtifactsRetained: Bool,
+        sessionID: UUID? = nil
     ) {
         self.usedInput = usedInput
         self.usedChannel = usedChannel
@@ -155,6 +168,7 @@ public struct OigoOnboardingProductionReport: Equatable, Sendable {
         self.insertionPath = insertionPath
         self.insertionInvoked = insertionInvoked
         self.recoverableArtifactsRetained = recoverableArtifactsRetained
+        self.sessionID = sessionID
     }
 }
 
@@ -185,6 +199,8 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
     public private(set) var transcriptNonempty = false
     public private(set) var clipboardWritten = false
     public private(set) var sourceUnavailable = false
+    public private(set) var boundSessionID: UUID?
+    public private(set) var destinationFailure: OigoOnboardingDestinationFailure?
 
     public init() {}
 
@@ -209,6 +225,20 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
         if !destinationEditable, testRunning || outcome == .failed {
             return .destinationNotEditable
         }
+        if evidence.destinationVerification == .failed {
+            switch destinationFailure {
+            case .timeout:
+                return .destinationTimeout
+            case .mismatch:
+                return .destinationMismatch
+            case .eventFailure:
+                return .destinationEventFailure
+            case .targetChanged:
+                return .destinationTargetChanged
+            case .none:
+                return .destinationVerification
+            }
+        }
         return evidence.failedStage
     }
 
@@ -220,7 +250,9 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
             [.retry, .openMicrophoneSettings]
         case .targetValidation:
             [.retry, .openAccessibilitySettings]
-        case .durableCAF, .speech, .cleanup, .clipboard, .pasteDispatch, .destinationVerification:
+        case .durableCAF, .speech, .cleanup, .clipboard, .pasteDispatch,
+             .destinationVerification, .destinationTimeout, .destinationMismatch,
+             .destinationEventFailure, .destinationTargetChanged:
             [.retry, .openHistory]
         case .shortcut, .destinationNotEditable, .none:
             [.retry]
@@ -269,6 +301,8 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
         recoverableArtifactsRetained = false
         transcriptNonempty = false
         clipboardWritten = false
+        boundSessionID = nil
+        destinationFailure = nil
         applyStorageStatus()
         applySelectedSourceAvailability()
     }
@@ -370,6 +404,8 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
         recoverableArtifactsRetained = false
         transcriptNonempty = false
         clipboardWritten = false
+        boundSessionID = nil
+        destinationFailure = nil
         evidence.shortcut = .notStarted
         evidence.durableCAF = .notStarted
         evidence.speech = .notStarted
@@ -397,6 +433,15 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
     }
 
     @discardableResult
+    public mutating func bindSession(generation: UInt64, sessionID: UUID) -> Bool {
+        guard generation == self.generation, testRunning || outcome == .pending else {
+            return false
+        }
+        boundSessionID = sessionID
+        return true
+    }
+
+    @discardableResult
     public mutating func markDestinationCleared(generation: UInt64) -> Bool {
         guard generation == self.generation, testRunning || outcome == .pending else {
             return false
@@ -413,7 +458,13 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
         guard generation == self.generation else {
             return false
         }
+        if let boundSessionID, let reported = report.sessionID, boundSessionID != reported {
+            return false
+        }
         testRunning = false
+        if boundSessionID == nil {
+            boundSessionID = report.sessionID
+        }
         usedInput = report.usedInput
         usedChannel = report.usedChannel
         insertionPath = report.insertionPath
@@ -421,17 +472,25 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
         insertionOutcome = report.insertionOutcome
         transcriptNonempty = report.transcriptNonempty
         clipboardWritten = report.clipboardWritten
-        recoverableArtifactsRetained = report.recoverableArtifactsRetained
         programmaticAssignmentAttempted = report.insertionPath == .programmaticFieldAssignment
+
+        let sessionCreated = report.sessionCreated && (report.sessionID == nil || report.sessionID == boundSessionID)
+        recoverableArtifactsRetained = sessionCreated && report.recoverableArtifactsRetained
 
         if report.usedInput != selectedInput || report.usedChannel != selectedChannel {
             evidence.selectedSource = .failed
         } else {
             evidence.selectedSource = .succeeded
         }
-        evidence.durableCAF = report.cafInitialized ? .succeeded : .failed
-        evidence.speech = report.speechFinalized ? .succeeded : .failed
-        if let cleanupSucceeded = report.cleanupSucceeded {
+        if sessionCreated {
+            evidence.durableCAF = report.cafInitialized ? .succeeded : .failed
+            evidence.speech = report.speechFinalized ? .succeeded : .failed
+        } else {
+            evidence.durableCAF = .failed
+            evidence.speech = .notStarted
+            evidence.cleanup = .notStarted
+        }
+        if sessionCreated, let cleanupSucceeded = report.cleanupSucceeded {
             evidence.cleanup = cleanupSucceeded ? .succeeded : .failed
         }
         evidence.clipboard = report.clipboardWritten ? .succeeded : .failed
@@ -445,9 +504,6 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
             evidence.pasteDispatch = .failed
         case .failed, .none:
             evidence.pasteDispatch = .failed
-        }
-        if !report.sessionCreated {
-            evidence.durableCAF = .failed
         }
         if programmaticAssignmentAttempted {
             evidence.destinationVerification = .failed
@@ -484,7 +540,8 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
     public mutating func completeDestinationVerification(
         generation: UInt64,
         fieldMatchesDurableSelectedText: Bool,
-        eventBoundaryCompleted: Bool
+        eventBoundaryCompleted: Bool,
+        failure: OigoOnboardingDestinationFailure? = nil
     ) -> Bool {
         guard generation == self.generation else {
             return false
@@ -492,9 +549,11 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
         testRunning = false
         self.fieldMatchesDurableSelectedText = fieldMatchesDurableSelectedText
         self.eventBoundaryCompleted = eventBoundaryCompleted
+        if outcome == .failed, evidence.failedStage != nil, evidence.failedStage != .destinationVerification {
+            return true
+        }
         if programmaticAssignmentAttempted || insertionPath != .production || !insertionInvoked {
-            evidence.destinationVerification = .failed
-            outcome = .failed
+            failDestinationVerification(.eventFailure)
             return true
         }
         if !destinationEditable {
@@ -502,17 +561,24 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
             outcome = .failed
             return true
         }
-        if !destinationCleared || !eventBoundaryCompleted || !fieldMatchesDurableSelectedText {
-            evidence.destinationVerification = .failed
-            outcome = .failed
+        if let failure {
+            failDestinationVerification(failure)
+            return true
+        }
+        if !eventBoundaryCompleted {
+            failDestinationVerification(.timeout)
+            return true
+        }
+        if !destinationCleared || !fieldMatchesDurableSelectedText {
+            failDestinationVerification(.mismatch)
             return true
         }
         switch insertionOutcome {
         case .pasted, .dispatched:
             evidence.destinationVerification = .succeeded
+            destinationFailure = nil
         default:
-            evidence.destinationVerification = .failed
-            outcome = .failed
+            failDestinationVerification(.eventFailure)
             return true
         }
         finalizeOutcome()
@@ -561,6 +627,14 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
             "Automatic paste did not succeed."
         case .destinationVerification:
             "The destination did not match the inserted transcript."
+        case .destinationTimeout:
+            "The destination did not update before the paste wait ended."
+        case .destinationMismatch:
+            "The destination did not match the inserted transcript."
+        case .destinationEventFailure:
+            "Paste dispatch did not reach the destination."
+        case .destinationTargetChanged:
+            "The destination changed before paste could be verified."
         case .destinationNotEditable:
             "The test destination is not editable."
         }
@@ -581,11 +655,21 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
         evidence.selectedSource = sourceUnavailable ? .failed : .succeeded
     }
 
+    private mutating func failDestinationVerification(_ failure: OigoOnboardingDestinationFailure) {
+        destinationFailure = failure
+        evidence.destinationVerification = .failed
+        outcome = .failed
+    }
+
     private mutating func finalizeOutcome() {
+        if outcome == .failed {
+            return
+        }
         guard storageReady,
               evidence.selectedSource == .succeeded,
               evidence.durableCAF == .succeeded,
               evidence.speech == .succeeded,
+              evidence.cleanup != .failed,
               evidence.clipboard == .succeeded,
               evidence.targetValidation == .succeeded,
               evidence.pasteDispatch == .succeeded,
