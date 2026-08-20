@@ -544,12 +544,21 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     self?.loadMoreHistory()
                 },
                 onClose: { [weak self] in
-                    self?.playback.stop()
+                    self?.closeHistoryWindow()
                 }
             )
         }
         refreshHistory()
         historyWindow?.showAndFocus()
+    }
+
+    private func closeHistoryWindow() {
+        playback.stop()
+        _ = historyLoadGeneration.next()
+        historyCursor = nil
+        historyHasMore = false
+        historyWindow = nil
+        maintenanceCoordinator.resumeIfNeeded()
     }
 
     @objc private func quit() {
@@ -1777,7 +1786,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         historyCursor = nil
         historyHasMore = false
         historyWindow?.setLoading(true)
-        let historyIsOpen = historyWindow != nil
+        let historyIsOpen = historyWindow?.window?.isVisible == true
         Task.detached { [weak self] in
             do {
                 let latest = try store.listHistoryReport(
@@ -1831,11 +1840,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func loadMoreHistory() {
         guard storageCapability.health.isReady,
               let store = sessionStore,
-              historyHasMore else {
+              historyHasMore,
+              let cursor = historyCursor else {
             return
         }
         let generation = historyLoadGeneration.value
-        let cursor = historyCursor
         historyWindow?.setLoading(true)
         Task.detached { [weak self] in
             do {
@@ -2083,6 +2092,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .stopped, .replaced, .shutdown, nil:
             break
         }
+        maintenanceCoordinator.resumeIfNeeded()
     }
 
     @objc private func revealLastRecording() {

@@ -132,6 +132,11 @@ public final class SessionMaintenanceCoordinator {
         activeTask?.cancel()
     }
 
+    public func resumeIfNeeded() {
+        preempted = false
+        startIfNeeded()
+    }
+
     @_spi(Testing)
     public func waitUntilIdle(timeoutNanoseconds: UInt64 = 1_000_000_000) async -> Bool {
         let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
@@ -178,10 +183,6 @@ public final class SessionMaintenanceCoordinator {
         }
         if preempted {
             pending = true
-            return
-        }
-        if pending {
-            startIfNeeded()
         }
     }
 }

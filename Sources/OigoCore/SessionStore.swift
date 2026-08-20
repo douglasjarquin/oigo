@@ -1977,6 +1977,12 @@ public final class SessionStore: @unchecked Sendable {
             let hasAudio = try withSessionDirectory(at: session.directoryURL) { directoryFD in
                 entryExists(named: "audio.caf", in: directoryFD)
             }
+            if session.metadata.state == .cancelled {
+                let hasTranscript = (try? sessionHasTranscript(session)) ?? false
+                if hasAudio || hasTranscript {
+                    return
+                }
+            }
             let referenceDate = session.metadata.endedAt ?? session.metadata.updatedAt
             let audioIsRetained = session.metadata.state == .completed
                 && hasAudio
@@ -2335,71 +2341,66 @@ public final class SessionStore: @unchecked Sendable {
         cursor: SessionMaintenanceCursor?
     ) throws -> MaintenanceBatch {
         try ensureRootPathIdentity()
-        guard let enumerator = fileManager.enumerator(
-            at: rootDirectory,
-            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
-            options: [.skipsHiddenFiles],
-            errorHandler: { _, _ in true }
-        ) else {
-            return MaintenanceBatch(items: [], moreWorkRemains: false)
+        let listingFlags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
+        let listingFD = Darwin.openat(rootDirectoryFD, ".", listingFlags)
+        guard listingFD >= 0 else {
+            throw storageFailure(for: errno)
         }
+        guard let directory = Darwin.fdopendir(listingFD) else {
+            let errorCode = errno
+            _ = Darwin.close(listingFD)
+            throw storageFailure(for: errorCode)
+        }
+        defer { _ = Darwin.closedir(directory) }
 
-        var selected: [MaintenanceDirectory] = []
-        var remainingCount = 0
-        while let value = enumerator.nextObject() {
-            guard let url = value as? URL else {
+        let inspectLimit = max(1, policy.maxDirectoriesToInspect)
+        var newest: [String] = []
+        newest.reserveCapacity(min(inspectLimit * 2, 128))
+        var overflow = false
+        while let entry = Darwin.readdir(directory) {
+            let fileType = entry.pointee.d_type
+            if fileType == DT_REG {
                 continue
             }
-            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-            if values?.isDirectory == true {
-                enumerator.skipDescendants()
+            let name = withUnsafePointer(to: entry.pointee.d_name) { namePointer in
+                namePointer.withMemoryRebound(
+                    to: CChar.self,
+                    capacity: MemoryLayout.size(ofValue: entry.pointee.d_name)
+                ) { pointer in
+                    String(cString: pointer)
+                }
             }
-            guard url.deletingLastPathComponent().standardizedFileURL.path
-                    == rootDirectory.standardizedFileURL.path else {
+            guard name != ".", name != ".." else {
                 continue
             }
-            let isSymbolicLink = values?.isSymbolicLink == true
-                || (try? fileManager.destinationOfSymbolicLink(atPath: url.path)) != nil
-            guard isSymbolicLink || values?.isDirectory == true else {
-                continue
-            }
-            let name = url.lastPathComponent
             if let cursor, name >= cursor.lastDirectoryName {
                 continue
             }
-            remainingCount += 1
-            selected.append(
-                MaintenanceDirectory(
-                    name: name,
-                    url: url,
-                    session: nil,
-                    isSymbolicLink: isSymbolicLink
-                )
-            )
-            if selected.count > policy.maxDirectoriesToInspect {
-                if let oldestIndex = selected.indices.min(by: { selected[$0].name < selected[$1].name }) {
-                    selected.remove(at: oldestIndex)
-                }
+            newest.append(name)
+            if newest.count > inspectLimit * 2 {
+                newest.sort(by: >)
+                overflow = true
+                newest.removeLast(newest.count - inspectLimit)
             }
+        }
+        newest.sort(by: >)
+        if newest.count > inspectLimit {
+            overflow = true
+            newest.removeLast(newest.count - inspectLimit)
         }
 
-        selected.sort { lhs, rhs in
-            if lhs.name == rhs.name {
-                return lhs.url.path > rhs.url.path
-            }
-            return lhs.name > rhs.name
-        }
-        let decoded = selected.map { item in
-            let session = item.isSymbolicLink ? nil : (try? readSession(at: item.url))
+        let decoded = newest.map { name -> MaintenanceDirectory in
+            let url = rootDirectory.appendingPathComponent(name)
+            let isSymbolicLink = (try? fileManager.destinationOfSymbolicLink(atPath: url.path)) != nil
+            let session = isSymbolicLink ? nil : (try? readSession(at: url))
             return MaintenanceDirectory(
-                name: item.name,
-                url: item.url,
+                name: name,
+                url: url,
                 session: session,
-                isSymbolicLink: item.isSymbolicLink
+                isSymbolicLink: isSymbolicLink
             )
         }
-        let moreWorkRemains = remainingCount > decoded.count
-        return MaintenanceBatch(items: decoded, moreWorkRemains: moreWorkRemains)
+        return MaintenanceBatch(items: decoded, moreWorkRemains: overflow)
     }
 
     private func forEachTolerantSession(

@@ -184,14 +184,16 @@ public final class AudioPlayback: @unchecked Sendable {
         performer.setFinishHandler { [weak self] outcome in
             self?.finish(generation: generation, outcome: outcome)
         }
+        lock.lock()
+        self.performer = performer
+        self.sessionID = sessionID
+        lastOutcome = nil
+        lock.unlock()
         guard performer.start() else {
             failCurrent()
             throw AudioPlaybackError.startFailed
         }
         lock.lock()
-        self.performer = performer
-        self.sessionID = sessionID
-        lastOutcome = nil
         let state = snapshotLocked()
         let handler = stateHandler
         lock.unlock()
@@ -249,7 +251,7 @@ public final class AudioPlayback: @unchecked Sendable {
             return
         }
         let current = performer
-        guard current != nil || outcome == .failed else {
+        guard current != nil || outcome == .failed || outcome == .completed else {
             lock.unlock()
             return
         }
@@ -349,7 +351,7 @@ private final class AVAudioPlayerPerformer: NSObject, AVAudioPlayerDelegate, Aud
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         _ = player
         _ = flag
-        finishHandler?(.completed)
+        finishHandler?(flag ? .completed : .failed)
     }
 
     func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
