@@ -35,6 +35,10 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Automatic cleanup deadline cancels and releases slow generation")
             try await testDeadlineUsesCleanerCancellationHook()
             print("GREEN: Automatic cleanup deadline stops cancellation-resistant generation")
+            try await testNoncooperativeDeadlineReturnsRawFallback()
+            print("GREEN: Noncooperative cleanup returns raw fallback by the deadline")
+            try await testLateCleanupOutputCannotPersistOrInsert()
+            print("GREEN: Late cleanup output cannot persist or change insertion")
             try await testCleanupInstrumentationRecordsLifecycleMetrics()
             print("GREEN: Cleanup availability, start, completion, and fallback metrics are recorded")
             try await testOversizedChunkBoundariesPreserveWhitespace()
@@ -343,13 +347,17 @@ private struct OigoIssue8ContractTests {
             cleanerFactory: { cleaner }
         )
         let rawText = "a deliberately slow transcript"
+        let startedAt = DispatchTime.now().uptimeNanoseconds
         let decision = await coordinator.resolve(
             mode: .clean,
             rawText: rawText,
             deadlineNanoseconds: 5_000_000
         )
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
+        await coordinator.waitForRetainedGenerationRelease()
         guard decision.insertionText == rawText,
-              decision.fallbackReason == .timeout || decision.fallbackReason == .cancellation,
+              decision.fallbackReason == .timeout,
+              elapsedNanoseconds < 100_000_000,
               await cancellationRecorder.wasCancelledValue(),
               await cancellationRecorder.wasFinishedValue() else {
             throw ContractFailure(message: "deadline did not produce raw fallback and release the cancelled operation")
@@ -371,9 +379,107 @@ private struct OigoIssue8ContractTests {
         guard decision.insertionSource == .raw,
               decision.fallbackReason == .timeout,
               elapsedNanoseconds < 100_000_000,
-              box.wasCancelled(),
-              box.waitForFinished(timeout: 100_000_000) else {
+              box.wasCancelled() else {
             throw ContractFailure(message: "deadline did not stop a cancellation-resistant cleaner")
+        }
+        await coordinator.waitForRetainedGenerationRelease()
+        guard box.waitForFinished(timeout: 100_000_000) else {
+            throw ContractFailure(message: "cancellation-resistant cleaner was not tracked until release")
+        }
+    }
+
+    private static func testNoncooperativeDeadlineReturnsRawFallback() async throws {
+        let cleaner = NeverReturningCleaner()
+        let metrics = TranscriptCleanupMetrics(forwarding: NoopTranscriptCleanupInstrumentation())
+        let coordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: { cleaner },
+            instrumentation: metrics
+        )
+        let rawText = "durable raw transcript"
+        let deadline: UInt64 = 20_000_000
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let decision = await coordinator.resolve(
+            mode: .clean,
+            rawText: rawText,
+            deadlineNanoseconds: deadline
+        )
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
+        let snapshot = metrics.snapshot()
+        guard decision.insertionText == rawText,
+              decision.insertionSource == .raw,
+              decision.cleanText == nil,
+              decision.fallbackReason == .timeout,
+              elapsedNanoseconds < deadline + 80_000_000,
+              snapshot.timeoutCount == 1,
+              snapshot.timeoutReturnLatencyNanoseconds.count == 1,
+              snapshot.timeoutReturnLatencyNanoseconds[0] < deadline + 80_000_000,
+              snapshot.resourceReleaseLatencyNanoseconds.isEmpty,
+              coordinator.isRetainingTimedOutGeneration else {
+            throw ContractFailure(message: "noncooperative cleanup did not return raw fallback by the deadline")
+        }
+
+        let overlapping = await coordinator.resolve(
+            mode: .clean,
+            rawText: rawText,
+            deadlineNanoseconds: deadline
+        )
+        guard overlapping.fallbackReason == .priorGenerationBusy,
+              overlapping.insertionSource == .raw,
+              overlapping.cleanText == nil else {
+            throw ContractFailure(message: "overlapping Clean did not fall back while the timed-out generation was retained")
+        }
+        cleaner.completeLater(.success("late poisoned cleanup output"))
+        await coordinator.waitForRetainedGenerationRelease()
+        let released = metrics.snapshot()
+        guard !coordinator.isRetainingTimedOutGeneration,
+              released.resourceReleaseLatencyNanoseconds.count == 1,
+              released.timeoutReturnLatencyNanoseconds.count == 1 else {
+            throw ContractFailure(message: "timeout-return and resource-release latencies were not independently recorded")
+        }
+    }
+
+    private static func testLateCleanupOutputCannotPersistOrInsert() async throws {
+        let cleaner = NeverReturningCleaner()
+        let coordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: { cleaner }
+        )
+        let rawText = "keep this raw transcript"
+        let decision = await coordinator.resolve(
+            mode: .clean,
+            rawText: rawText,
+            deadlineNanoseconds: 10_000_000
+        )
+        guard decision.fallbackReason == .timeout else {
+            throw ContractFailure(message: "late-output fixture did not time out")
+        }
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue8-late-clean-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(rootDirectory: root)
+        let session = try store.persistRawText(rawText, for: store.createSession())
+        cleaner.completeLater(.success("late poisoned cleanup output"))
+        await coordinator.waitForRetainedGenerationRelease()
+
+        guard decision.insertionText == rawText,
+              decision.cleanText == nil,
+              decision.insertionSource == .raw,
+              !FileManager.default.fileExists(atPath: session.cleanTextURL.path),
+              try store.readRawText(for: session) == rawText else {
+            throw ContractFailure(message: "late cleanup output persisted or changed insertion source")
+        }
+
+        let recovered = await coordinator.resolve(
+            mode: .clean,
+            rawText: rawText,
+            deadlineNanoseconds: 10_000_000
+        )
+        cleaner.completeLater(.success("second late output"))
+        await coordinator.waitForRetainedGenerationRelease()
+        guard recovered.insertionSource == .raw,
+              recovered.cleanText == nil,
+              !FileManager.default.fileExists(atPath: session.cleanTextURL.path) else {
+            throw ContractFailure(message: "a later Clean request published stale model output")
         }
     }
 
@@ -1013,6 +1119,44 @@ private struct CancellationResistantCleaner: TranscriptCleaner {
         }
         box.markFinished()
         return .cancelled
+    }
+}
+
+@available(macOS 26.0, *)
+private final class NeverReturningCleaner: TranscriptCleaner, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>?
+    private(set) var cancelCount = 0
+
+    func availability() -> TranscriptCleanupAvailability {
+        .available
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelCount += 1
+        lock.unlock()
+    }
+
+    func clean(
+        chunk: String,
+        deadlineNanoseconds: UInt64
+    ) async -> TranscriptCleanupGeneration {
+        _ = chunk
+        _ = deadlineNanoseconds
+        return await withCheckedContinuation { continuation in
+            lock.lock()
+            self.continuation = continuation
+            lock.unlock()
+        }
+    }
+
+    func completeLater(_ result: TranscriptCleanupGeneration) {
+        lock.lock()
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(returning: result)
     }
 }
 

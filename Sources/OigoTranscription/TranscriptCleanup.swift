@@ -54,6 +54,7 @@ public enum TranscriptCleanupFallbackReason: Equatable, Sendable, CustomStringCo
     case emptyOutput
     case unsafeOutput
     case persistenceFailure(String)
+    case priorGenerationBusy
 
     public var description: String {
         switch self {
@@ -75,6 +76,8 @@ public enum TranscriptCleanupFallbackReason: Equatable, Sendable, CustomStringCo
             "cleanup changed protected transcript content"
         case .persistenceFailure(let reason):
             "clean transcript could not be persisted: " + reason
+        case .priorGenerationBusy:
+            "prior cleanup still owns model resources"
         }
     }
 }
@@ -118,6 +121,19 @@ public enum TranscriptCleanupEvent: String, Hashable, Sendable {
 @available(macOS 26.0, *)
 public protocol TranscriptCleanupInstrumentation: Sendable {
     func record(_ event: TranscriptCleanupEvent)
+    func recordTimeoutReturnLatency(nanoseconds: UInt64)
+    func recordResourceReleaseLatency(nanoseconds: UInt64)
+}
+
+@available(macOS 26.0, *)
+extension TranscriptCleanupInstrumentation {
+    public func recordTimeoutReturnLatency(nanoseconds: UInt64) {
+        _ = nanoseconds
+    }
+
+    public func recordResourceReleaseLatency(nanoseconds: UInt64) {
+        _ = nanoseconds
+    }
 }
 
 @available(macOS 26.0, *)
@@ -154,6 +170,9 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
     private let cleanerFactory: @Sendable () -> TranscriptCleaner
     private let instrumentation: TranscriptCleanupInstrumentation
     private let faultInjector: DictationFaultInjector?
+    private let lock = NSLock()
+    private var currentGeneration: UInt64 = 0
+    private var activeLifecycle: TranscriptCleanupLifecycle?
 
     public init(
         cleanerFactory: @escaping @Sendable () -> TranscriptCleaner,
@@ -175,6 +194,19 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
         self.faultInjector = faultInjector
     }
 
+    public var isRetainingTimedOutGeneration: Bool {
+        let lifecycle = withLock { activeLifecycle }
+        guard let lifecycle else {
+            return false
+        }
+        return lifecycle.wasInvalidated && lifecycle.holdsModelResources
+    }
+
+    public func waitForRetainedGenerationRelease() async {
+        let lifecycle = withLock { activeLifecycle }
+        await lifecycle?.waitForRelease()
+    }
+
     public func resolve(
         mode: TranscriptCleanupMode,
         rawText: String,
@@ -189,6 +221,10 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
             )
         }
 
+        if isRetainingTimedOutGeneration {
+            return fallback(rawText: rawText, reason: .priorGenerationBusy)
+        }
+
         let cleaner = cleanerFactory()
         let availability = cleaner.availability()
         instrumentation.record(.availability)
@@ -199,6 +235,9 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
             )
         }
 
+        guard let lifecycle = claimGeneration() else {
+            return fallback(rawText: rawText, reason: .priorGenerationBusy)
+        }
         instrumentation.record(.cleanupStart)
         var chunks = TranscriptChunker.split(rawText)
         let start = DispatchTime.now().uptimeNanoseconds
@@ -210,9 +249,8 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
         while chunkIndex < chunks.count {
             let chunk = chunks[chunkIndex]
             let now = DispatchTime.now().uptimeNanoseconds
-            guard now < deadline else {
-                instrumentation.record(.timeout)
-                return fallback(rawText: rawText, reason: .timeout)
+            guard now < deadline, lifecycle.accepts(lifecycle.generation) else {
+                return timeoutFallback(rawText: rawText, start: start, chunkCount: chunks.count)
             }
 
             let generationResult: TranscriptCleanupGeneration
@@ -221,6 +259,8 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
             } else {
                 generationResult = await TranscriptCleanupDeadline.run(
                     deadlineNanoseconds: deadline,
+                    generation: lifecycle.generation,
+                    lifecycle: lifecycle,
                     cancel: cleaner.cancel
                 ) {
                     await cleaner.clean(
@@ -228,6 +268,9 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
                         deadlineNanoseconds: deadline - now
                     )
                 }
+            }
+            guard lifecycle.accepts(lifecycle.generation) else {
+                return timeoutFallback(rawText: rawText, start: start, chunkCount: chunks.count)
             }
             let generation: TranscriptCleanupGeneration = DispatchTime.now().uptimeNanoseconds < deadline
                 ? generationResult
@@ -261,10 +304,9 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
                     chunkCount: chunks.count
                 )
             case .timedOut:
-                instrumentation.record(.timeout)
-                return fallback(
+                return timeoutFallback(
                     rawText: rawText,
-                    reason: .timeout,
+                    start: start,
                     chunkCount: chunks.count
                 )
             case .cancelled:
@@ -329,6 +371,18 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
         )
     }
 
+    private func timeoutFallback(
+        rawText: String,
+        start: UInt64,
+        chunkCount: Int
+    ) -> TranscriptCleanupDecision {
+        instrumentation.record(.timeout)
+        instrumentation.recordTimeoutReturnLatency(
+            nanoseconds: DispatchTime.now().uptimeNanoseconds &- start
+        )
+        return fallback(rawText: rawText, reason: .timeout, chunkCount: chunkCount)
+    }
+
     private func fallback(
         rawText: String,
         reason: TranscriptCleanupFallbackReason,
@@ -343,6 +397,27 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
             fallbackReason: reason,
             chunkCount: chunkCount
         )
+    }
+
+    private func claimGeneration() -> TranscriptCleanupLifecycle? {
+        withLock {
+            if let activeLifecycle, activeLifecycle.holdsModelResources {
+                return nil
+            }
+            currentGeneration &+= 1
+            let lifecycle = TranscriptCleanupLifecycle(
+                generation: currentGeneration,
+                instrumentation: instrumentation
+            )
+            activeLifecycle = lifecycle
+            return lifecycle
+        }
+    }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
     }
 }
 
@@ -728,43 +803,199 @@ public enum TranscriptChunker {
 }
 
 @available(macOS 26.0, *)
+private final class TranscriptCleanupRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: TranscriptCleanupGeneration?
+    private var continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>?
+
+    func install(_ continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>) {
+        let existing: TranscriptCleanupGeneration? = withLock {
+            if let result {
+                return result
+            }
+            self.continuation = continuation
+            return nil
+        }
+        if let existing {
+            continuation.resume(returning: existing)
+        }
+    }
+
+    func complete(_ result: TranscriptCleanupGeneration) -> Bool {
+        let won: Bool
+        let continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>?
+        (won, continuation) = withLock {
+            guard self.result == nil else {
+                return (false, nil)
+            }
+            self.result = result
+            let continuation = self.continuation
+            self.continuation = nil
+            return (true, continuation)
+        }
+        continuation?.resume(returning: result)
+        return won
+    }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+}
+
+@available(macOS 26.0, *)
+private final class TranscriptCleanupLifecycle: @unchecked Sendable {
+    let generation: UInt64
+    private let lock = NSLock()
+    private var valid = true
+    private var released = false
+    private var task: Task<Void, Never>?
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var timeoutAt: UInt64?
+    private let instrumentation: TranscriptCleanupInstrumentation
+
+    init(
+        generation: UInt64,
+        instrumentation: TranscriptCleanupInstrumentation
+    ) {
+        self.generation = generation
+        self.instrumentation = instrumentation
+    }
+
+    var holdsModelResources: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !released && task != nil
+    }
+
+    var wasInvalidated: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !valid
+    }
+
+    func attach(_ task: Task<Void, Never>) {
+        lock.lock()
+        self.task = task
+        lock.unlock()
+    }
+
+    func accepts(_ generation: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return valid && self.generation == generation
+    }
+
+    func invalidate() {
+        lock.lock()
+        valid = false
+        if timeoutAt == nil {
+            timeoutAt = DispatchTime.now().uptimeNanoseconds
+        }
+        lock.unlock()
+    }
+
+    func markReleased() {
+        let timeoutAt: UInt64?
+        let waiters: [CheckedContinuation<Void, Never>]
+        lock.lock()
+        if released {
+            lock.unlock()
+            return
+        }
+        released = true
+        timeoutAt = self.timeoutAt
+        waiters = self.waiters
+        self.waiters.removeAll(keepingCapacity: true)
+        lock.unlock()
+        if let timeoutAt {
+            let elapsed = DispatchTime.now().uptimeNanoseconds &- timeoutAt
+            instrumentation.record(.resourceRelease)
+            instrumentation.recordResourceReleaseLatency(nanoseconds: elapsed)
+        }
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    func waitForRelease() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if released {
+                lock.unlock()
+                continuation.resume()
+                return
+            }
+            waiters.append(continuation)
+            lock.unlock()
+        }
+    }
+}
+
+@available(macOS 26.0, *)
 private enum TranscriptCleanupDeadline {
     static func run(
         deadlineNanoseconds: UInt64,
+        generation: UInt64,
+        lifecycle: TranscriptCleanupLifecycle,
         cancel: @escaping @Sendable () -> Void,
         operation: @escaping @Sendable () async -> TranscriptCleanupGeneration
     ) async -> TranscriptCleanupGeneration {
-        return await withTaskCancellationHandler(operation: {
-            await withTaskGroup(of: TranscriptCleanupGeneration.self) { group in
-                group.addTask {
-                    await operation()
+        let race = TranscriptCleanupRace()
+        let operationTask = Task<Void, Never> {
+            let result = await operation()
+            if lifecycle.accepts(generation) {
+                _ = race.complete(result)
+            }
+            lifecycle.markReleased()
+        }
+        lifecycle.attach(operationTask)
+
+        let timeoutTask = Task<Void, Never> {
+            let now = DispatchTime.now().uptimeNanoseconds
+            if now < deadlineNanoseconds {
+                do {
+                    try await Task.sleep(nanoseconds: deadlineNanoseconds - now)
+                } catch {
+                    return
                 }
-                group.addTask {
-                    let now = DispatchTime.now().uptimeNanoseconds
-                    guard now < deadlineNanoseconds else {
-                        cancel()
-                        return .timedOut
-                    }
-                    do {
-                        try await Task.sleep(nanoseconds: deadlineNanoseconds - now)
-                        guard !Task.isCancelled else {
-                            return .cancelled
-                        }
-                        cancel()
-                        return .timedOut
-                    } catch {
-                        return .cancelled
-                    }
-                }
-                let result = await group.next() ?? .cancelled
-                group.cancelAll()
-                return result
+            }
+            guard !Task.isCancelled else {
+                return
+            }
+            if race.complete(.timedOut) {
+                cancel()
+                lifecycle.invalidate()
+                operationTask.cancel()
+            }
+        }
+
+        let result = await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                race.install(continuation)
             }
         }, onCancel: {
+            if race.complete(.cancelled) {
+                cancel()
+                lifecycle.invalidate()
+                operationTask.cancel()
+                timeoutTask.cancel()
+            }
+        })
+
+        timeoutTask.cancel()
+        if case .timedOut = result {
             cancel()
+            lifecycle.invalidate()
+            operationTask.cancel()
+        } else if case .cancelled = result {
+            cancel()
+            lifecycle.invalidate()
+            operationTask.cancel()
         }
-    )
-}
+        return result
+    }
 }
 
 @available(macOS 26.0, *)
@@ -799,6 +1030,8 @@ public struct TranscriptCleanupMetricSnapshot: Equatable, Sendable {
     public let timeoutCount: Int
     public let fallbackCount: Int
     public let resourceReleaseCount: Int
+    public let timeoutReturnLatencyNanoseconds: [UInt64]
+    public let resourceReleaseLatencyNanoseconds: [UInt64]
 
     public init(
         availabilityCount: Int = 0,
@@ -806,7 +1039,9 @@ public struct TranscriptCleanupMetricSnapshot: Equatable, Sendable {
         cleanupCompletionCount: Int = 0,
         timeoutCount: Int = 0,
         fallbackCount: Int = 0,
-        resourceReleaseCount: Int = 0
+        resourceReleaseCount: Int = 0,
+        timeoutReturnLatencyNanoseconds: [UInt64] = [],
+        resourceReleaseLatencyNanoseconds: [UInt64] = []
     ) {
         self.availabilityCount = availabilityCount
         self.cleanupStartCount = cleanupStartCount
@@ -814,6 +1049,8 @@ public struct TranscriptCleanupMetricSnapshot: Equatable, Sendable {
         self.timeoutCount = timeoutCount
         self.fallbackCount = fallbackCount
         self.resourceReleaseCount = resourceReleaseCount
+        self.timeoutReturnLatencyNanoseconds = timeoutReturnLatencyNanoseconds
+        self.resourceReleaseLatencyNanoseconds = resourceReleaseLatencyNanoseconds
     }
 }
 
@@ -821,6 +1058,8 @@ public struct TranscriptCleanupMetricSnapshot: Equatable, Sendable {
 public final class TranscriptCleanupMetrics: TranscriptCleanupInstrumentation, @unchecked Sendable {
     private let lock = NSLock()
     private var counts: [TranscriptCleanupEvent: Int] = [:]
+    private var timeoutReturnLatencyNanoseconds: [UInt64] = []
+    private var resourceReleaseLatencyNanoseconds: [UInt64] = []
     private let forwarding: TranscriptCleanupInstrumentation
 
     public init(
@@ -836,6 +1075,20 @@ public final class TranscriptCleanupMetrics: TranscriptCleanupInstrumentation, @
         forwarding.record(event)
     }
 
+    public func recordTimeoutReturnLatency(nanoseconds: UInt64) {
+        lock.lock()
+        timeoutReturnLatencyNanoseconds.append(nanoseconds)
+        lock.unlock()
+        forwarding.recordTimeoutReturnLatency(nanoseconds: nanoseconds)
+    }
+
+    public func recordResourceReleaseLatency(nanoseconds: UInt64) {
+        lock.lock()
+        resourceReleaseLatencyNanoseconds.append(nanoseconds)
+        lock.unlock()
+        forwarding.recordResourceReleaseLatency(nanoseconds: nanoseconds)
+    }
+
     public func snapshot() -> TranscriptCleanupMetricSnapshot {
         lock.lock()
         let snapshot = TranscriptCleanupMetricSnapshot(
@@ -844,7 +1097,9 @@ public final class TranscriptCleanupMetrics: TranscriptCleanupInstrumentation, @
             cleanupCompletionCount: counts[.cleanupCompletion, default: 0],
             timeoutCount: counts[.timeout, default: 0],
             fallbackCount: counts[.fallback, default: 0],
-            resourceReleaseCount: counts[.resourceRelease, default: 0]
+            resourceReleaseCount: counts[.resourceRelease, default: 0],
+            timeoutReturnLatencyNanoseconds: timeoutReturnLatencyNanoseconds,
+            resourceReleaseLatencyNanoseconds: resourceReleaseLatencyNanoseconds
         )
         lock.unlock()
         return snapshot

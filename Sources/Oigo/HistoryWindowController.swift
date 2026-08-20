@@ -461,12 +461,16 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func setActionButtons(enabled: Bool, entry: SessionHistoryEntry?) {
-        let canUseTranscript = enabled && entry.map {
-            !$0.session.metadata.state.isUnfinished
-                && FileManager.default.fileExists(atPath: $0.session.rawTextURL.path)
-        } == true
+        let capabilities = entry.map { entry in
+            DictationHistoryActions.capabilities(
+                sessionState: entry.session.metadata.state,
+                hasValidRaw: FileManager.default.fileExists(atPath: entry.session.rawTextURL.path),
+                hasAudio: FileManager.default.fileExists(atPath: entry.session.audioURL.path)
+            )
+        }
+        let canUseTranscript = enabled && capabilities?.copyAvailable == true
         copyButton.isEnabled = canUseTranscript
-        pasteAgainButton.isEnabled = canUseTranscript
+        pasteAgainButton.isEnabled = enabled && capabilities?.pasteAgainAvailable == true
         let canUseCleanTranscript = canUseTranscript && entry.map {
             FileManager.default.fileExists(atPath: $0.session.cleanTextURL.path)
         } == true
@@ -475,10 +479,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         pasteCleanAgainButton.isEnabled = canUseCleanTranscript
         cleanAgainButton.isEnabled = canUseTranscript
         playButton.isEnabled = enabled && entry.map { FileManager.default.fileExists(atPath: $0.session.audioURL.path) } == true
-        retryButton.isEnabled = enabled && entry.map {
-            [.failed, .interrupted].contains($0.session.metadata.state)
-                && FileManager.default.fileExists(atPath: $0.session.audioURL.path)
-        } == true
+        retryButton.isEnabled = enabled && capabilities?.savedAudioRetryAvailable == true
         revealButton.isEnabled = enabled && entry != nil
         deleteButton.isEnabled = enabled && entry.map { !$0.session.metadata.state.isUnfinished } == true
     }
@@ -537,7 +538,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         case .secureRejected:
             "Secure field"
         case .failed:
-            "Failed"
+            "Paste failed"
         }
     }
 }

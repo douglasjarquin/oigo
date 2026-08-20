@@ -777,7 +777,257 @@ public enum OigoHUDProcessingState: String, CaseIterable, Sendable {
     case pasteAttempted = "Paste attempted"
     case pasted = "Pasted"
     case copied = "Copied"
+    case completedPasteFailed = "Dictation completed; paste failed"
     case failed = "Failed"
+}
+
+public struct DictationHistoryCapabilities: Equatable, Sendable {
+    public let copyAvailable: Bool
+    public let pasteAgainAvailable: Bool
+    public let savedAudioRetryAvailable: Bool
+
+    public init(
+        copyAvailable: Bool,
+        pasteAgainAvailable: Bool,
+        savedAudioRetryAvailable: Bool
+    ) {
+        self.copyAvailable = copyAvailable
+        self.pasteAgainAvailable = pasteAgainAvailable
+        self.savedAudioRetryAvailable = savedAudioRetryAvailable
+    }
+}
+
+public enum DictationHistoryActions {
+    public static func capabilities(
+        sessionState: DictationSessionState,
+        hasValidRaw: Bool,
+        hasAudio: Bool
+    ) -> DictationHistoryCapabilities {
+        let transcriptActions = !sessionState.isUnfinished && hasValidRaw
+        return DictationHistoryCapabilities(
+            copyAvailable: transcriptActions,
+            pasteAgainAvailable: transcriptActions,
+            savedAudioRetryAvailable: [.failed, .interrupted].contains(sessionState) && hasAudio
+        )
+    }
+}
+
+public enum DictationTerminalKind: String, CaseIterable, Equatable, Sendable {
+    case captureFailed
+    case speechFailed
+    case speechTimedOut
+    case cleanupFallback
+    case insertionPasted
+    case insertionDispatched
+    case insertionCopied
+    case insertionSecureRejected
+    case insertionFailed
+    case cancelledBeforeRaw
+    case cancelledAfterRaw
+    case interrupted
+    case applicationShutdown
+}
+
+public struct DictationTerminalPath: Equatable, Sendable {
+    public let kind: DictationTerminalKind
+    public let coordinatorState: DictationState
+    public let sessionState: DictationSessionState
+    public let insertionOutcome: InsertionOutcome?
+    public let hasValidRaw: Bool
+    public let hasAudio: Bool
+    public let statusCopy: String
+    public let history: DictationHistoryCapabilities
+
+    public init(
+        kind: DictationTerminalKind,
+        coordinatorState: DictationState,
+        sessionState: DictationSessionState,
+        insertionOutcome: InsertionOutcome?,
+        hasValidRaw: Bool,
+        hasAudio: Bool,
+        statusCopy: String
+    ) {
+        self.kind = kind
+        self.coordinatorState = coordinatorState
+        self.sessionState = sessionState
+        self.insertionOutcome = insertionOutcome
+        self.hasValidRaw = hasValidRaw
+        self.hasAudio = hasAudio
+        self.statusCopy = statusCopy
+        self.history = DictationHistoryActions.capabilities(
+            sessionState: sessionState,
+            hasValidRaw: hasValidRaw,
+            hasAudio: hasAudio
+        )
+    }
+}
+
+public enum DictationTerminalContract {
+    public static func statusCopy(
+        sessionState: DictationSessionState,
+        insertionOutcome: InsertionOutcome?
+    ) -> String {
+        if sessionState == .completed, insertionOutcome == .failed {
+            return "Dictation completed; paste failed"
+        }
+        switch sessionState {
+        case .completed:
+            return "Complete"
+        case .failed:
+            return "Failed"
+        case .cancelled:
+            return "Cancelled"
+        case .interrupted:
+            return "Interrupted"
+        case .preparing, .recording, .stopping:
+            return "Active"
+        case .retrying:
+            return "Retrying"
+        }
+    }
+
+    public static func coordinatorState(
+        sessionState: DictationSessionState
+    ) -> DictationState {
+        switch sessionState {
+        case .completed:
+            .complete
+        case .failed:
+            .failed
+        case .cancelled:
+            .cancelled
+        case .interrupted:
+            .interrupted
+        case .preparing:
+            .preparing
+        case .recording:
+            .recording
+        case .stopping:
+            .finalizing
+        case .retrying:
+            .failed
+        }
+    }
+
+    public static let legalPaths: [DictationTerminalPath] = [
+        DictationTerminalPath(
+            kind: .captureFailed,
+            coordinatorState: .failed,
+            sessionState: .failed,
+            insertionOutcome: nil,
+            hasValidRaw: false,
+            hasAudio: true,
+            statusCopy: "Failed"
+        ),
+        DictationTerminalPath(
+            kind: .speechFailed,
+            coordinatorState: .failed,
+            sessionState: .failed,
+            insertionOutcome: nil,
+            hasValidRaw: false,
+            hasAudio: true,
+            statusCopy: "Failed"
+        ),
+        DictationTerminalPath(
+            kind: .speechTimedOut,
+            coordinatorState: .failed,
+            sessionState: .failed,
+            insertionOutcome: nil,
+            hasValidRaw: false,
+            hasAudio: true,
+            statusCopy: "Failed"
+        ),
+        DictationTerminalPath(
+            kind: .cleanupFallback,
+            coordinatorState: .complete,
+            sessionState: .completed,
+            insertionOutcome: .pasted,
+            hasValidRaw: true,
+            hasAudio: true,
+            statusCopy: "Complete"
+        ),
+        DictationTerminalPath(
+            kind: .insertionPasted,
+            coordinatorState: .complete,
+            sessionState: .completed,
+            insertionOutcome: .pasted,
+            hasValidRaw: true,
+            hasAudio: true,
+            statusCopy: "Complete"
+        ),
+        DictationTerminalPath(
+            kind: .insertionDispatched,
+            coordinatorState: .complete,
+            sessionState: .completed,
+            insertionOutcome: .dispatched,
+            hasValidRaw: true,
+            hasAudio: true,
+            statusCopy: "Complete"
+        ),
+        DictationTerminalPath(
+            kind: .insertionCopied,
+            coordinatorState: .complete,
+            sessionState: .completed,
+            insertionOutcome: .copied,
+            hasValidRaw: true,
+            hasAudio: true,
+            statusCopy: "Complete"
+        ),
+        DictationTerminalPath(
+            kind: .insertionSecureRejected,
+            coordinatorState: .complete,
+            sessionState: .completed,
+            insertionOutcome: .secureRejected,
+            hasValidRaw: true,
+            hasAudio: true,
+            statusCopy: "Complete"
+        ),
+        DictationTerminalPath(
+            kind: .insertionFailed,
+            coordinatorState: .complete,
+            sessionState: .completed,
+            insertionOutcome: .failed,
+            hasValidRaw: true,
+            hasAudio: true,
+            statusCopy: "Dictation completed; paste failed"
+        ),
+        DictationTerminalPath(
+            kind: .cancelledBeforeRaw,
+            coordinatorState: .cancelled,
+            sessionState: .cancelled,
+            insertionOutcome: nil,
+            hasValidRaw: false,
+            hasAudio: true,
+            statusCopy: "Cancelled"
+        ),
+        DictationTerminalPath(
+            kind: .cancelledAfterRaw,
+            coordinatorState: .complete,
+            sessionState: .completed,
+            insertionOutcome: .failed,
+            hasValidRaw: true,
+            hasAudio: true,
+            statusCopy: "Dictation completed; paste failed"
+        ),
+        DictationTerminalPath(
+            kind: .interrupted,
+            coordinatorState: .interrupted,
+            sessionState: .interrupted,
+            insertionOutcome: nil,
+            hasValidRaw: false,
+            hasAudio: true,
+            statusCopy: "Interrupted"
+        ),
+        DictationTerminalPath(
+            kind: .applicationShutdown,
+            coordinatorState: .interrupted,
+            sessionState: .interrupted,
+            insertionOutcome: nil,
+            hasValidRaw: false,
+            hasAudio: true,
+            statusCopy: "Interrupted"
+        )
+    ]
 }
 
 public enum OigoHUDPreviewPolicy {

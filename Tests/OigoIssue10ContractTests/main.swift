@@ -26,6 +26,7 @@ private struct OigoIssue10ContractTests {
             ("cancellation terminalizes processing without paste", testCancellationTerminalizesProcessingWithoutPaste),
             ("cancellation metadata failure retains terminal state", testCancellationMetadataFailureRetainsTerminalState),
             ("cancellation covers every active processing state", testCancellationCoversEveryActiveProcessingState),
+            ("legal terminal paths stay consistent", testLegalTerminalPaths),
             ("fault injection matrix is isolated", testFaultInjectionMatrix),
             ("shutdown waits for registered task", testShutdownWaitsForRegisteredTask),
             ("transcription shutdown waits for registered task", testTranscriptionShutdownWaitsForRegisteredTask),
@@ -185,9 +186,18 @@ private struct OigoIssue10ContractTests {
         await processingTask.value
         let terminal = coordinator.currentSession
         let saved = try store.load(id: session.id)
+        let history = DictationHistoryActions.capabilities(
+            sessionState: saved.metadata.state,
+            hasValidRaw: saved.metadata.rawTextByteCount != nil,
+            hasAudio: FileManager.default.fileExists(atPath: saved.audioURL.path)
+        )
         guard terminal?.metadata.insertionOutcome == .failed,
               saved.metadata.insertionOutcome == .failed,
-              coordinator.state == .failed,
+              saved.metadata.state == .completed,
+              coordinator.state == .complete,
+              history.copyAvailable,
+              history.pasteAgainAvailable,
+              !history.savedAudioRetryAvailable,
               !coordinator.hasActiveWork else {
             throw ContractFailure(message: "processing cancellation left work active or insertable")
         }
@@ -222,8 +232,10 @@ private struct OigoIssue10ContractTests {
         let saved = try store.load(id: session.id)
         guard terminal?.metadata.insertionOutcome == .failed,
               terminal?.metadata.insertionFailureReason == "dictation operation cancelled",
+              terminal?.metadata.state == .completed,
               saved.metadata.insertionOutcome == nil,
-              coordinator.state == .failed,
+              coordinator.state == .complete,
+              coordinator.lastTerminalMetadataWriteFailed,
               !coordinator.hasActiveWork else {
             throw ContractFailure(message: "cancellation metadata failure did not retain an in-memory terminal insertion result")
         }
@@ -299,11 +311,301 @@ private struct OigoIssue10ContractTests {
         _ = try await insertingCoordinator.stopRecordingWithTranscription()
         _ = try insertingCoordinator.beginInsertion(using: insertingStore, requiresCleanup: false)
         await insertingCoordinator.cancelActiveWork()
-        guard insertingCoordinator.state == .failed,
+        guard insertingCoordinator.state == .complete,
               insertingCoordinator.currentSession?.id == insertingSession.id,
+              insertingCoordinator.currentSession?.metadata.state == .completed,
               insertingCoordinator.currentSession?.metadata.insertionOutcome == .failed,
               !insertingCoordinator.hasActiveWork else {
-            throw ContractFailure(message: "inserting cancellation did not leave a terminal failed insertion")
+            throw ContractFailure(message: "inserting cancellation did not leave a completed dictation with failed insertion")
+        }
+    }
+
+    private static func testLegalTerminalPaths() async throws {
+        for path in DictationTerminalContract.legalPaths {
+            let history = DictationHistoryActions.capabilities(
+                sessionState: path.sessionState,
+                hasValidRaw: path.hasValidRaw,
+                hasAudio: path.hasAudio
+            )
+            guard DictationTerminalContract.coordinatorState(sessionState: path.sessionState)
+                    == path.coordinatorState,
+                  DictationTerminalContract.statusCopy(
+                    sessionState: path.sessionState,
+                    insertionOutcome: path.insertionOutcome
+                  ) == path.statusCopy,
+                  history == path.history else {
+                throw ContractFailure(
+                    message: "terminal contract row " + path.kind.rawValue + " is internally inconsistent"
+                )
+            }
+            if path.hasValidRaw {
+                guard path.history.copyAvailable,
+                      path.history.pasteAgainAvailable,
+                      path.coordinatorState == .complete,
+                      path.sessionState == .completed else {
+                    throw ContractFailure(
+                        message: "valid raw text must remain a completed recoverable dictation for "
+                            + path.kind.rawValue
+                    )
+                }
+            }
+            if path.insertionOutcome == .failed {
+                guard !path.history.savedAudioRetryAvailable else {
+                    throw ContractFailure(
+                        message: "insertion-only failure offered saved-audio retry for "
+                            + path.kind.rawValue
+                    )
+                }
+            }
+        }
+
+        let captureRoot = try temporaryDirectory()
+        defer { cleanup(captureRoot) }
+        try await assertTerminalPath(
+            .captureFailed,
+            in: captureRoot
+        ) { coordinator, store, capture in
+            let started = try coordinator.startRecording(using: capture, store: store)
+            capture.writePartialCapture()
+            capture.emitFailure("audio file write failed: disk full")
+            await Task.yield()
+            return coordinator.currentSession ?? started
+        }
+
+        let cancelRoot = try temporaryDirectory()
+        defer { cleanup(cancelRoot) }
+        try await assertTerminalPath(
+            .cancelledBeforeRaw,
+            in: cancelRoot
+        ) { coordinator, store, capture in
+            _ = try coordinator.startRecording(using: capture, store: store)
+            return try coordinator.cancelRecording()
+        }
+
+        let interruptRoot = try temporaryDirectory()
+        defer { cleanup(interruptRoot) }
+        try await assertTerminalPath(
+            .interrupted,
+            in: interruptRoot
+        ) { coordinator, store, capture in
+            let session = try coordinator.startRecording(using: capture, store: store)
+            capture.writePartialCapture()
+            capture.emitInterruption("default input device changed: AirPods connected")
+            await Task.yield()
+            return session
+        }
+
+        let insertionRoot = try temporaryDirectory()
+        defer { cleanup(insertionRoot) }
+        try await assertRawInsertionPath(
+            .insertionFailed,
+            outcome: .failed,
+            in: insertionRoot
+        ) { coordinator, store, session in
+            _ = coordinator.failInsertion(reason: "paste event failed")
+            return session
+        }
+
+        let pastedRoot = try temporaryDirectory()
+        defer { cleanup(pastedRoot) }
+        try await assertRawInsertionPath(
+            .insertionPasted,
+            outcome: .pasted,
+            in: pastedRoot
+        ) { coordinator, store, session in
+            _ = try coordinator.finishInsertion(outcome: .pasted)
+            return session
+        }
+
+        let copiedRoot = try temporaryDirectory()
+        defer { cleanup(copiedRoot) }
+        try await assertRawInsertionPath(
+            .insertionCopied,
+            outcome: .copied,
+            in: copiedRoot
+        ) { coordinator, store, session in
+            _ = try coordinator.finishInsertion(outcome: .copied)
+            return session
+        }
+
+        let dispatchedRoot = try temporaryDirectory()
+        defer { cleanup(dispatchedRoot) }
+        try await assertRawInsertionPath(
+            .insertionDispatched,
+            outcome: .dispatched,
+            in: dispatchedRoot
+        ) { coordinator, store, session in
+            _ = try coordinator.finishInsertion(outcome: .dispatched)
+            return session
+        }
+
+        let secureRoot = try temporaryDirectory()
+        defer { cleanup(secureRoot) }
+        try await assertRawInsertionPath(
+            .insertionSecureRejected,
+            outcome: .secureRejected,
+            in: secureRoot
+        ) { coordinator, store, session in
+            _ = try coordinator.finishInsertion(outcome: .secureRejected)
+            return session
+        }
+
+        let fallbackRoot = try temporaryDirectory()
+        defer { cleanup(fallbackRoot) }
+        try await assertRawInsertionPath(
+            .cleanupFallback,
+            outcome: .pasted,
+            in: fallbackRoot
+        ) { coordinator, store, session in
+            _ = try coordinator.finishInsertion(
+                outcome: .pasted,
+                insertionSource: .raw,
+                cleanupFallbackReason: "automatic cleanup exceeded its deadline"
+            )
+            return session
+        }
+
+        let afterRawRoot = try temporaryDirectory()
+        defer { cleanup(afterRawRoot) }
+        try await assertRawInsertionPath(
+            .cancelledAfterRaw,
+            outcome: .failed,
+            in: afterRawRoot
+        ) { coordinator, store, session in
+            await coordinator.cancelActiveWork()
+            return session
+        }
+
+        let duplicateRoot = try temporaryDirectory()
+        defer { cleanup(duplicateRoot) }
+        let duplicateStore = try SessionStore(rootDirectory: duplicateRoot)
+        let duplicateCapture = ScriptedAudioCapture()
+        let duplicateCoordinator = DictationCoordinator()
+        let duplicateTranscription = ProcessingTranscriptionController()
+        _ = try await duplicateCoordinator.startRecordingWithTranscription(
+            using: duplicateCapture,
+            store: duplicateStore,
+            transcription: duplicateTranscription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        _ = try await duplicateCoordinator.stopRecordingWithTranscription()
+        _ = try duplicateCoordinator.beginInsertion(using: duplicateStore, requiresCleanup: false)
+        let first = duplicateCoordinator.failInsertion(reason: "first paste failure")
+        let second = duplicateCoordinator.failInsertion(reason: "stale paste failure")
+        let finished = try duplicateCoordinator.finishInsertion(outcome: .pasted)
+        guard duplicateCoordinator.state == .complete,
+              first?.metadata.insertionOutcome == .failed,
+              second?.metadata.insertionOutcome == .failed,
+              second?.metadata.insertionFailureReason == "first paste failure",
+              finished.metadata.insertionOutcome == .failed,
+              finished.metadata.insertionFailureReason == "first paste failure" else {
+            throw ContractFailure(message: "duplicate terminal callbacks rewrote a completed insertion outcome")
+        }
+
+        let staleRoot = try temporaryDirectory()
+        defer { cleanup(staleRoot) }
+        let staleStore = try SessionStore(rootDirectory: staleRoot)
+        let staleCapture = ScriptedAudioCapture()
+        let staleCoordinator = DictationCoordinator()
+        let firstSession = try staleCoordinator.startRecording(using: staleCapture, store: staleStore)
+        _ = try staleCoordinator.cancelRecording()
+        let secondSession = try staleCoordinator.startRecording(using: staleCapture, store: staleStore)
+        _ = staleCoordinator.failInsertion(reason: "stale insertion failure")
+        let savedFirst = try staleStore.load(id: firstSession.id)
+        let savedSecond = try staleStore.load(id: secondSession.id)
+        guard savedFirst.metadata.state == .cancelled,
+              savedSecond.metadata.state == .recording,
+              staleCoordinator.state == .recording,
+              savedSecond.metadata.insertionOutcome == nil else {
+            throw ContractFailure(message: "a stale terminal callback rewrote a newer session")
+        }
+        _ = try staleCoordinator.cancelRecording()
+    }
+
+    private static func assertTerminalPath(
+        _ kind: DictationTerminalKind,
+        in root: URL,
+        run: (DictationCoordinator, SessionStore, ScriptedAudioCapture) async throws -> DictationSession
+    ) async throws {
+        guard let path = DictationTerminalContract.legalPaths.first(where: { $0.kind == kind }) else {
+            throw ContractFailure(message: "missing terminal contract row for " + kind.rawValue)
+        }
+        let store = try SessionStore(rootDirectory: root)
+        let capture = ScriptedAudioCapture()
+        let coordinator = DictationCoordinator()
+        let session = try await run(coordinator, store, capture)
+        let saved = try store.load(id: session.id)
+        let history = DictationHistoryActions.capabilities(
+            sessionState: saved.metadata.state,
+            hasValidRaw: saved.metadata.rawTextByteCount != nil
+                || FileManager.default.fileExists(atPath: saved.rawTextURL.path),
+            hasAudio: FileManager.default.fileExists(atPath: saved.audioURL.path)
+                || (saved.metadata.audioByteCount ?? 0) > 0
+        )
+        guard coordinator.state == path.coordinatorState,
+              saved.metadata.state == path.sessionState,
+              DictationTerminalContract.coordinatorState(sessionState: saved.metadata.state)
+                == coordinator.state,
+              DictationTerminalContract.statusCopy(
+                sessionState: saved.metadata.state,
+                insertionOutcome: saved.metadata.insertionOutcome
+              ) == path.statusCopy,
+              history.copyAvailable == path.history.copyAvailable,
+              history.pasteAgainAvailable == path.history.pasteAgainAvailable,
+              history.savedAudioRetryAvailable == path.history.savedAudioRetryAvailable else {
+            throw ContractFailure(
+                message: "live terminal path " + kind.rawValue
+                    + " disagreed with the coordinator/session contract"
+            )
+        }
+    }
+
+    private static func assertRawInsertionPath(
+        _ kind: DictationTerminalKind,
+        outcome: InsertionOutcome,
+        in root: URL,
+        run: (DictationCoordinator, SessionStore, DictationSession) async throws -> DictationSession
+    ) async throws {
+        guard let path = DictationTerminalContract.legalPaths.first(where: { $0.kind == kind }) else {
+            throw ContractFailure(message: "missing terminal contract row for " + kind.rawValue)
+        }
+        let store = try SessionStore(rootDirectory: root)
+        let capture = ScriptedAudioCapture()
+        let coordinator = DictationCoordinator()
+        let transcription = ProcessingTranscriptionController()
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        let completed = try await coordinator.stopRecordingWithTranscription()
+        _ = try coordinator.beginInsertion(using: store, requiresCleanup: false)
+        _ = try await run(coordinator, store, completed)
+        let saved = try store.load(id: completed.id)
+        let inMemory = coordinator.currentSession
+        let history = DictationHistoryActions.capabilities(
+            sessionState: saved.metadata.state,
+            hasValidRaw: saved.metadata.rawTextByteCount != nil,
+            hasAudio: FileManager.default.fileExists(atPath: saved.audioURL.path)
+                || (saved.metadata.audioByteCount ?? 0) > 0
+        )
+        guard coordinator.state == path.coordinatorState,
+              inMemory?.metadata.state == path.sessionState,
+              saved.metadata.state == path.sessionState,
+              inMemory?.metadata.insertionOutcome == outcome,
+              saved.metadata.insertionOutcome == outcome,
+              history.copyAvailable == path.history.copyAvailable,
+              history.pasteAgainAvailable == path.history.pasteAgainAvailable,
+              !history.savedAudioRetryAvailable,
+              DictationTerminalContract.statusCopy(
+                sessionState: saved.metadata.state,
+                insertionOutcome: saved.metadata.insertionOutcome
+              ) == path.statusCopy else {
+            throw ContractFailure(
+                message: "live insertion path " + kind.rawValue
+                    + " disagreed with persisted terminal state"
+            )
         }
     }
 
