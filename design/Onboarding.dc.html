@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>html,body{margin:0}body{background:#0e0e10}a{color:#0a6cff}a:hover{color:#0a5ae0}</style>
+</helmet>
+<div style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;-webkit-font-smoothing:antialiased">
+  <div style="display:flex;align-items:center;gap:16px;padding:10px 16px;background:#161619;color:#c9c9ce;font:11px 'SF Mono',ui-monospace,monospace;border-bottom:1px solid #2a2a2e">
+    <span style="color:#8e8e93">OIGO ONBOARDING · 4 stages + completion</span>
+    <span style="flex:1"></span>
+    <button onClick="{{ setLight }}" style="font:11px 'SF Mono',monospace;padding:3px 10px;border-radius:5px;border:1px solid #3a3a3f;background: {{ lightBtnBg }};color: {{ lightBtnFg }};cursor:pointer">Light</button>
+    <button onClick="{{ setDark }}" style="font:11px 'SF Mono',monospace;padding:3px 10px;border-radius:5px;border:1px solid #3a3a3f;background: {{ darkBtnBg }};color: {{ darkBtnFg }};cursor:pointer">Dark</button>
+  </div>
+  <div style="color-scheme: {{ scheme }};display:flex;align-items:center;justify-content:center;min-height:720px;background:light-dark(#d8d9de,#1f2024);padding:32px">
+    <div style="width:640px;border-radius:10px;overflow:hidden;box-shadow:0 22px 60px rgba(0,0,0,.35),0 0 0 1px light-dark(rgba(0,0,0,.12),rgba(255,255,255,.12));background:light-dark(#ececee,#2a2a2e)">
+      <div style="display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border-bottom:1px solid light-dark(rgba(0,0,0,.08),rgba(255,255,255,.07))">
+        <span style="display:flex;gap:7px"><span style="width:12px;height:12px;border-radius:6px;background:#ff5f57"></span><span style="width:12px;height:12px;border-radius:6px;background:light-dark(#d9d9dd,#4a4a4e)"></span><span style="width:12px;height:12px;border-radius:6px;background:light-dark(#d9d9dd,#4a4a4e)"></span></span>
+        <span style="flex:1;text-align:center;font-size:13px;font-weight:600;color:light-dark(#3c3c43,#d8d8dc);margin-right:52px">Set Up Oigo</span>
+      </div>
+      <div style="padding:24px 32px 20px;min-height:400px;background:light-dark(#f5f5f7,#2a2a2e)">
+        <div style="display:flex;align-items:baseline;margin-bottom:4px">
+          <span style="font-size:20px;font-weight:600;color:light-dark(#1d1d1f,#f5f5f7)">{{ stageTitle }}</span>
+          <span style="flex:1"></span>
+          <sc-if value="{{ stepShown }}" hint-placeholder-val="{{ true }}"><span style="font-size:11px;color:light-dark(#8e8e93,#8e8e93)">Step {{ stage }} of 4</span></sc-if>
+        </div>
+        <div style="font-size:12px;color:light-dark(#6e6e73,#98989d);margin-bottom:18px">{{ stageSub }}</div>
+
+        <sc-if value="{{ is1 }}" hint-placeholder-val="{{ true }}">
+          <div style="border-radius:8px;background:light-dark(#ffffff,#333337);box-shadow:0 0 0 1px light-dark(rgba(0,0,0,.08),rgba(255,255,255,.08));display:flex;flex-direction:column">
+            <sc-for list="{{ readiness }}" as="r" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid light-dark(rgba(0,0,0,.06),rgba(255,255,255,.06))">
+                <span style="font-size:12px;color: {{ r.color }};width:14px;text-align:center">{{ r.icon }}</span>
+                <span style="font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">{{ r.title }}</span>
+                <span style="flex:1"></span>
+                <span style="font-size:12px;color:light-dark(#6e6e73,#98989d)">{{ r.value }}</span>
+              </div>
+            </sc-for>
+            <div style="padding:11px 14px;font-size:11.5px;line-height:1.5;color:light-dark(#6e6e73,#98989d)">Everything Oigo records and transcribes stays on this Mac. No account, no network, no telemetry.</div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ is2 }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:12px;color:#28a745;width:14px;text-align:center">✓</span>
+              <span style="font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">Microphone permission</span>
+              <span style="flex:1"></span><span style="font-size:12px;color:light-dark(#6e6e73,#98989d)">Granted</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:14px"></span>
+              <span style="font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">Input device</span>
+              <span style="flex:1"></span>
+              <select style="font-size:12px;padding:3px 8px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7)"><option>System Default (MacBook Pro Microphone)</option><option>MacBook Pro Microphone</option><option>Shure MV7 — Channel 1</option></select>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:14px"></span>
+              <span style="font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">Input level</span>
+              <span style="flex:1"></span>
+              <span style="display:flex;gap:2.5px;align-items:flex-end">
+                <span style="width:5px;height:12px;border-radius:1.5px;background:#28a745"></span><span style="width:5px;height:12px;border-radius:1.5px;background:#28a745"></span><span style="width:5px;height:12px;border-radius:1.5px;background:#28a745"></span><span style="width:5px;height:12px;border-radius:1.5px;background:#28a745"></span><span style="width:5px;height:12px;border-radius:1.5px;background:light-dark(rgba(0,0,0,.12),rgba(255,255,255,.14))"></span><span style="width:5px;height:12px;border-radius:1.5px;background:light-dark(rgba(0,0,0,.12),rgba(255,255,255,.14))"></span><span style="width:5px;height:12px;border-radius:1.5px;background:light-dark(rgba(0,0,0,.12),rgba(255,255,255,.14))"></span><span style="width:5px;height:12px;border-radius:1.5px;background:light-dark(rgba(0,0,0,.12),rgba(255,255,255,.14))"></span>
+              </span>
+            </div>
+            <div style="font-size:11px;color:light-dark(#8e8e93,#8e8e93);margin:-8px 0 0 24px">Live only while this step is visible. Nothing is stored.</div>
+            <div style="border-top:1px solid light-dark(rgba(0,0,0,.08),rgba(255,255,255,.08))"></div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:14px"></span>
+              <span style="font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">Language</span>
+              <span style="flex:1"></span>
+              <select onChange="{{ langChange }}" style="font-size:12px;padding:3px 8px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7)"><option>English (United States)</option><option>Spanish (Mexico)</option><option>Spanish (Spain)</option></select>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:12px;color: {{ assetColor }};width:14px;text-align:center">{{ assetIcon }}</span>
+              <span style="font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">On-device speech assets</span>
+              <span style="flex:1"></span>
+              <span style="font-size:12px;color: {{ assetColor }}">{{ assetValue }}</span>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ is3 }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">Dictation shortcut</span>
+              <span style="flex:1"></span>
+              <span style="font-family:'SF Mono',ui-monospace,monospace;font-size:13px;padding:4px 14px;border-radius:6px;background:light-dark(rgba(0,0,0,.06),rgba(255,255,255,.1));color:light-dark(#1d1d1f,#f5f5f7)">⌥Space</span>
+              <button style="font-size:12px;padding:4px 12px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Change…</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:12px;color:#28a745;width:14px;text-align:center">✓</span>
+              <span style="font-size:12px;color:light-dark(#6e6e73,#98989d)">Registered. Hold to dictate, release to finish. The previous shortcut stays active until a new one registers.</span>
+            </div>
+            <div style="border-top:1px solid light-dark(rgba(0,0,0,.08),rgba(255,255,255,.08))"></div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="font-size:12px;color:#ff9500;width:14px;text-align:center">⚠</span>
+              <span style="flex:1;display:flex;flex-direction:column;gap:2px">
+                <span style="font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">Accessibility permission — not granted</span>
+                <span style="font-size:11.5px;line-height:1.5;color:light-dark(#6e6e73,#98989d)">Required only for automatic paste. Without it, Oigo still records durably and copies the result to the clipboard.</span>
+              </span>
+              <button style="flex:none;font-size:12px;padding:4px 12px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Open System Settings…</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ is4 }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;gap:20px">
+            <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+              <div style="font-size:12px;color:light-dark(#6e6e73,#98989d)">1. Click the field below&ensp;2. Hold <span style="font-family:'SF Mono',monospace">⌥Space</span>&ensp;3. Speak&ensp;4. Release</div>
+              <textarea placeholder="Dictate into this field" value="{{ testFieldText }}" onChange="{{ noop }}" style="height:120px;resize:none;padding:10px;border-radius:6px;border:1px solid light-dark(rgba(0,0,0,.18),rgba(255,255,255,.2));background:light-dark(#ffffff,#1e1e20);color:light-dark(#1d1d1f,#f0f0f2);font:13px/1.5 -apple-system,sans-serif;outline-color:#0a84ff"></textarea>
+              <button onClick="{{ runTest }}" disabled="{{ testRunning }}" style="align-self:flex-start;font-size:12px;padding:4px 12px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">{{ testBtnLabel }}</button>
+            </div>
+            <div style="width:230px;display:flex;flex-direction:column;gap:5px">
+              <sc-for list="{{ checklist }}" as="c" hint-placeholder-count="9">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-size:11px;width:13px;text-align:center;color: {{ c.color }}">{{ c.icon }}</span>
+                  <span style="font-size:12px;color:light-dark(#3c3c43,#d1d1d6)">{{ c.name }}</span>
+                </div>
+              </sc-for>
+              <sc-if value="{{ testDone }}" hint-placeholder-val="{{ false }}">
+                <div style="margin-top:8px;font-size:12px;font-weight:600;color:#28a745">✓ Automatic paste verified</div>
+              </sc-if>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ is5 }}" hint-placeholder-val="{{ false }}">
+          <div style="border-radius:8px;background:light-dark(#ffffff,#333337);box-shadow:0 0 0 1px light-dark(rgba(0,0,0,.08),rgba(255,255,255,.08));display:flex;flex-direction:column">
+            <sc-for list="{{ summary }}" as="r" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;padding:11px 14px;border-bottom:1px solid light-dark(rgba(0,0,0,.06),rgba(255,255,255,.06))">
+                <span style="font-size:13px;color:light-dark(#1d1d1f,#f5f5f7);width:160px">{{ r.title }}</span>
+                <span style="font-size:13px;color:light-dark(#6e6e73,#98989d)">{{ r.value }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:14px 20px;border-top:1px solid light-dark(rgba(0,0,0,.08),rgba(255,255,255,.08));background:light-dark(#ececee,#2a2a2e)">
+        <sc-if value="{{ is4 }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ next }}" style="font-size:13px;border:none;background:none;padding:0;cursor:pointer;color:light-dark(#6e6e73,#98989d)">Skip Test</button>
+        </sc-if>
+        <span style="flex:1"></span>
+        <sc-if value="{{ backShown }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ back }}" style="font-size:13px;padding:5px 16px;border-radius:6px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Back</button>
+        </sc-if>
+        <button onClick="{{ next }}" disabled="{{ nextDisabled }}" style="font-size:13px;font-weight:600;padding:5px 18px;border-radius:6px;border:none;background: {{ nextBg }};color: {{ nextFg }};cursor:pointer">{{ nextLabel }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { scheme: 'light', stage: 1, assets: 'ready', testStep: -1, testRunning: false, testDone: false };
+  timers = [];
+  t(ms, fn) { this.timers.push(setTimeout(fn, ms)); }
+  componentWillUnmount() { this.timers.forEach(clearTimeout); }
+  checkNames = ['Storage', 'Input signal', 'Durable recording', 'Transcription', 'Cleanup', 'Clipboard', 'Target validation', 'Paste dispatch', 'Destination verification'];
+  runTest = () => {
+    if (this.state.testRunning) return;
+    this.setState({ testRunning: true, testStep: -1, testDone: false });
+    this.checkNames.forEach((_, i) => this.t(350 * (i + 1), () => {
+      this.setState({ testStep: i });
+      if (i === this.checkNames.length - 1) this.setState({ testRunning: false, testDone: true });
+    }));
+  };
+  renderVals() {
+    const s = this.state;
+    const titles = { 1: 'Mac & Storage', 2: 'Microphone & Language', 3: 'Shortcut & Insertion', 4: 'Try It', 5: 'Ready to Dictate' };
+    const subs = {
+      1: 'Oigo checks that this Mac can record durably before anything else.',
+      2: 'Choose what Oigo listens to and which language it transcribes.',
+      3: 'Hold a global shortcut to dictate. Accessibility enables automatic paste.',
+      4: 'One real dictation, end to end, into a field Oigo owns.',
+      5: 'You can change any of this later in Settings.'
+    };
+    const installing = s.assets === 'installing';
+    return {
+      scheme: s.scheme,
+      setLight: () => this.setState({ scheme: 'light' }), setDark: () => this.setState({ scheme: 'dark' }),
+      lightBtnBg: s.scheme === 'light' ? '#e5e5ea' : 'transparent', lightBtnFg: s.scheme === 'light' ? '#1d1d1f' : '#c9c9ce',
+      darkBtnBg: s.scheme === 'dark' ? '#e5e5ea' : 'transparent', darkBtnFg: s.scheme === 'dark' ? '#1d1d1f' : '#c9c9ce',
+      stage: s.stage, stageTitle: titles[s.stage], stageSub: subs[s.stage],
+      stepShown: s.stage <= 4,
+      is1: s.stage === 1, is2: s.stage === 2, is3: s.stage === 3, is4: s.stage === 4, is5: s.stage === 5,
+      readiness: [
+        { icon: '✓', color: '#28a745', title: 'macOS', value: 'macOS 26 — supported' },
+        { icon: '✓', color: '#28a745', title: 'Processor', value: 'Apple silicon' },
+        { icon: '✓', color: '#28a745', title: 'Durable storage', value: 'Ready' }
+      ],
+      langChange: e => {
+        const es = e.target.value.startsWith('Spanish');
+        if (!es) { this.setState({ assets: 'ready' }); return; }
+        this.setState({ assets: 'installing' });
+        this.t(1600, () => this.setState({ assets: 'ready' }));
+      },
+      assetIcon: installing ? '↓' : '✓', assetColor: installing ? '#ff9500' : '#28a745',
+      assetValue: installing ? 'Installing…' : 'Ready',
+      checklist: this.checkNames.map((name, i) => ({
+        name,
+        icon: i <= s.testStep ? '✓' : '○',
+        color: i <= s.testStep ? '#28a745' : 'light-dark(#aeaeb2,#6e6e73)'
+      })),
+      testFieldText: s.testDone ? 'Testing Oigo one two three.' : '',
+      noop: () => {},
+      testRunning: s.testRunning, testDone: s.testDone,
+      testBtnLabel: s.testRunning ? 'Listening…' : 'Simulate a dictation',
+      runTest: this.runTest,
+      summary: [
+        { title: 'Shortcut', value: '⌥Space — hold to dictate' },
+        { title: 'Microphone', value: 'System Default (MacBook Pro Microphone)' },
+        { title: 'Language', value: 'English (United States)' },
+        { title: 'Default mode', value: 'Clean' },
+        { title: 'Insertion', value: 'Copy-only until Accessibility is granted' }
+      ],
+      backShown: s.stage > 1,
+      back: () => this.setState(p => ({ stage: Math.max(1, p.stage - 1) })),
+      next: () => this.setState(p => ({ stage: Math.min(5, p.stage + 1) })),
+      nextLabel: s.stage === 5 ? 'Done' : s.stage === 4 ? 'Continue' : 'Continue',
+      nextDisabled: installing && s.stage === 2,
+      nextBg: (installing && s.stage === 2) ? 'light-dark(rgba(0,0,0,.08),rgba(255,255,255,.1))' : 'light-dark(#007aff,#0a84ff)',
+      nextFg: (installing && s.stage === 2) ? '#8e8e93' : '#ffffff'
+    };
+  }
+}
+</script>
+</body>
+</html>

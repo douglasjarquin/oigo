@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>html,body{margin:0}body{background:#0e0e10}a{color:#0a6cff}a:hover{color:#0a5ae0}</style>
+</helmet>
+<div style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;-webkit-font-smoothing:antialiased">
+  <div style="display:flex;align-items:center;gap:16px;padding:10px 16px;background:#161619;color:#c9c9ce;font:11px 'SF Mono',ui-monospace,monospace;border-bottom:1px solid #2a2a2e">
+    <span style="color:#8e8e93">OIGO HISTORY · split view · secondary actions in More menu</span>
+    <span style="flex:1"></span>
+    <button onClick="{{ setLight }}" style="font:11px 'SF Mono',monospace;padding:3px 10px;border-radius:5px;border:1px solid #3a3a3f;background: {{ lightBtnBg }};color: {{ lightBtnFg }};cursor:pointer">Light</button>
+    <button onClick="{{ setDark }}" style="font:11px 'SF Mono',monospace;padding:3px 10px;border-radius:5px;border:1px solid #3a3a3f;background: {{ darkBtnBg }};color: {{ darkBtnFg }};cursor:pointer">Dark</button>
+  </div>
+  <div style="color-scheme: {{ scheme }};display:flex;align-items:center;justify-content:center;min-height:760px;background:light-dark(#d8d9de,#1f2024);padding:36px">
+    <div style="width:1000px;border-radius:10px;overflow:hidden;box-shadow:0 22px 60px rgba(0,0,0,.35),0 0 0 1px light-dark(rgba(0,0,0,.12),rgba(255,255,255,.12));background:light-dark(#ececee,#2a2a2e)">
+      <div style="display:flex;align-items:center;gap:8px;height:44px;padding:0 12px;border-bottom:1px solid light-dark(rgba(0,0,0,.1),rgba(255,255,255,.08))">
+        <span style="display:flex;gap:7px"><span style="width:12px;height:12px;border-radius:6px;background:#ff5f57"></span><span style="width:12px;height:12px;border-radius:6px;background:#febc2e"></span><span style="width:12px;height:12px;border-radius:6px;background:#28c840"></span></span>
+        <span style="font-size:13px;font-weight:600;color:light-dark(#3c3c43,#d8d8dc);margin-left:8px">History</span>
+        <span style="flex:1"></span>
+        <button onClick="{{ copyAction }}" style="font-size:12px;padding:4px 12px;border-radius:6px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">{{ copyLabel }}</button>
+        <button style="font-size:12px;padding:4px 12px;border-radius:6px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Paste Again</button>
+        <button onClick="{{ togglePlay }}" disabled="{{ playDisabled }}" style="font-size:12px;padding:4px 12px;border-radius:6px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer;opacity: {{ playOpacity }}">{{ playLabel }}</button>
+        <span style="position:relative">
+          <button onClick="{{ toggleMore }}" style="font-size:14px;padding:2px 10px;border-radius:6px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background: {{ moreBg }};color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">⋯</button>
+          <sc-if value="{{ moreOpen }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute;top:30px;right:0;width:220px;border-radius:8px;padding:5px;background:light-dark(#f4f4f6,#323236);box-shadow:0 10px 30px rgba(0,0,0,.3),0 0 0 1px light-dark(rgba(0,0,0,.12),rgba(255,255,255,.12));display:flex;flex-direction:column;z-index:10">
+              <sc-for list="{{ moreItems }}" as="m" hint-placeholder-count="6">
+                <div onClick="{{ toggleMore }}" style="padding:4.5px 10px;border-radius:5px;font-size:13px;cursor:pointer;color: {{ m.color }}" style-hover="background:light-dark(#007aff,#0a84ff);color:#ffffff">{{ m.name }}</div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </span>
+      </div>
+      <div style="display:flex;height:600px">
+        <div style="width:340px;border-right:1px solid light-dark(rgba(0,0,0,.1),rgba(255,255,255,.08));background:light-dark(#f7f7f9,#232327);display:flex;flex-direction:column">
+          <div style="flex:1;overflow:auto;padding:8px;display:flex;flex-direction:column;gap:2px">
+            <sc-for list="{{ sessions }}" as="row" hint-placeholder-count="8">
+              <div onClick="{{ row.select }}" style="padding:8px 10px;border-radius:7px;cursor:pointer;display:flex;flex-direction:column;gap:2px;background: {{ row.bg }}">
+                <div style="display:flex;align-items:baseline;gap:8px">
+                  <span style="font-size:12px;font-weight:600;color: {{ row.fg }}">{{ row.time }}</span>
+                  <span style="flex:1"></span>
+                  <span style="font-size:11px;font-variant-numeric:tabular-nums;color: {{ row.fg2 }}">{{ row.dur }}</span>
+                </div>
+                <div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color: {{ row.fg }}">{{ row.summary }}</div>
+                <div style="display:flex;align-items:center;gap:5px">
+                  <span style="font-size:10px;color: {{ row.statusColor }}">{{ row.statusIcon }}</span>
+                  <span style="font-size:11px;color: {{ row.fg2 }}">{{ row.status }}</span>
+                </div>
+              </div>
+            </sc-for>
+            <button style="margin:6px auto;font-size:12px;padding:3px 14px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.14),rgba(255,255,255,.18));background:none;color:light-dark(#6e6e73,#98989d);cursor:pointer">Load More</button>
+          </div>
+        </div>
+        <div style="flex:1;padding:20px 24px;background:light-dark(#ffffff,#28282c);display:flex;flex-direction:column;gap:12px;overflow:auto">
+          <div style="display:flex;flex-wrap:wrap;gap:4px 24px">
+            <span style="font-size:12px;color:light-dark(#6e6e73,#98989d)">{{ detailDate }}</span>
+            <span style="font-size:12px;color:light-dark(#6e6e73,#98989d)">{{ detailDur }}</span>
+            <span style="font-size:12px;color:light-dark(#6e6e73,#98989d)">{{ detailMode }} · English (US)</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:12px;color: {{ detailStatusColor }}">{{ detailStatusIcon }}</span>
+            <span style="font-size:13px;font-weight:600;color:light-dark(#1d1d1f,#f5f5f7)">{{ detailStatus }}</span>
+          </div>
+          <sc-if value="{{ detailNote }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;line-height:1.5;color:light-dark(#6e6e73,#98989d);margin-top:-6px">{{ detailNote }}</div>
+          </sc-if>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:2px">
+            <span style="display:flex;background:light-dark(rgba(0,0,0,.06),rgba(255,255,255,.09));border-radius:6px;padding:1.5px">
+              <sc-for list="{{ versions }}" as="v" hint-placeholder-count="3">
+                <button onClick="{{ v.select }}" style="font-size:12px;padding:2.5px 14px;border:none;border-radius:5px;cursor:pointer;background: {{ v.bg }};color:light-dark(#1d1d1f,#f5f5f7);box-shadow: {{ v.shadow }}">{{ v.name }}</button>
+              </sc-for>
+            </span>
+          </div>
+          <div style="flex:1;border-radius:8px;padding:14px 16px;background:light-dark(#fafafa,#1e1e20);box-shadow:0 0 0 1px light-dark(rgba(0,0,0,.08),rgba(255,255,255,.08));font-size:13px;line-height:1.6;color:light-dark(#1d1d1f,#e8e8ec);user-select:text">{{ transcript }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { scheme: 'light', sel: 0, version: 'Clean', playing: false, moreOpen: false, copied: false };
+  timers = [];
+  t(ms, fn) { this.timers.push(setTimeout(fn, ms)); }
+  componentWillUnmount() { this.timers.forEach(clearTimeout); }
+  data = [
+    { time: 'Today, 2:41 PM', dur: '0:18', status: 'Paste attempted', icon: '✓', color: '#28a745', mode: 'Clean', versions: ['Raw', 'Normalized', 'Clean'], audio: true,
+      clean: 'Schedule the design review for Thursday afternoon and send the agenda to the platform team.',
+      raw: 'um schedule the design review for thursday afternoon and uh send the agenda to the platform team' },
+    { time: 'Today, 11:06 AM', dur: '1:42', status: 'Copied', icon: '⧉', color: 'light-dark(#6e6e73,#98989d)', mode: 'Clean', versions: ['Raw', 'Clean'], audio: true,
+      note: 'The focused field was secure, so the result was copied to the clipboard instead of pasted.',
+      clean: 'Draft a short note to facilities about the fourth-floor badge readers failing intermittently since Monday.',
+      raw: 'draft a short note to facilities about the fourth floor badge readers failing intermittently since monday' },
+    { time: 'Today, 9:22 AM', dur: '0:47', status: 'Retry required', icon: '⚠', color: '#ff9500', mode: 'Instant', versions: [], audio: true,
+      note: 'Live transcription degraded mid-dictation. The recording was preserved. Retry Transcription from the More menu.',
+      clean: '', raw: '' },
+    { time: 'Yesterday, 4:15 PM', dur: '0:31', status: 'Paste attempted', icon: '✓', color: '#28a745', mode: 'Instant', versions: ['Raw'], audio: true,
+      raw: 'move the one on one with priya to friday and keep the room booking', clean: '' },
+    { time: 'Yesterday, 1:58 PM', dur: '2:05', status: 'Paste failed', icon: '⚠', color: '#ff9500', mode: 'Clean', versions: ['Raw', 'Normalized', 'Clean'], audio: true,
+      note: 'The target field changed before dispatch. The clean transcript is intact — use Paste Again or Copy.',
+      clean: 'Summary of the incident call: the queue backlog cleared at noon, root cause was a stale feature flag, and the flag hygiene audit is owned by the platform team.',
+      raw: 'summary of the incident call the queue backlog cleared at noon root cause was a stale feature flag and the flag hygiene audit is owned by the platform team' },
+    { time: 'Yesterday, 10:03 AM', dur: '0:09', status: 'Cancelled', icon: '⊘', color: 'light-dark(#8e8e93,#8e8e93)', mode: 'Clean', versions: [], audio: false,
+      note: 'Cancelled before any durable text existed. No transcript was produced.', clean: '', raw: '' },
+    { time: 'Monday, 3:30 PM', dur: '0:56', status: 'Paste attempted', icon: '✓', color: '#28a745', mode: 'Clean', versions: ['Raw', 'Normalized', 'Clean'], audio: true,
+      clean: 'Order replacement cables for the recording booth and add the invoice to the shared expenses folder.',
+      raw: 'order uh replacement cables for the recording booth and add the invoice to the shared expenses folder' },
+    { time: 'Monday, 9:12 AM', dur: '1:14', status: 'Interrupted', icon: '⚠', color: '#ff9500', mode: 'Instant', versions: ['Raw'], audio: true,
+      note: 'The input device disconnected mid-dictation. Audio up to the interruption was preserved.',
+      raw: 'notes from standup the migration script is ready for review and the staging cluster needs', clean: '' }
+  ];
+  renderVals() {
+    const s = this.state;
+    const d = this.data[s.sel];
+    const versions = d.versions;
+    const activeVersion = versions.includes(s.version) ? s.version : (versions[versions.length - 1] || null);
+    const text = activeVersion === 'Raw' ? d.raw : activeVersion === 'Normalized' ? (d.raw ? d.raw.charAt(0).toUpperCase() + d.raw.slice(1) + '.' : '') : d.clean;
+    return {
+      scheme: s.scheme,
+      setLight: () => this.setState({ scheme: 'light' }), setDark: () => this.setState({ scheme: 'dark' }),
+      lightBtnBg: s.scheme === 'light' ? '#e5e5ea' : 'transparent', lightBtnFg: s.scheme === 'light' ? '#1d1d1f' : '#c9c9ce',
+      darkBtnBg: s.scheme === 'dark' ? '#e5e5ea' : 'transparent', darkBtnFg: s.scheme === 'dark' ? '#1d1d1f' : '#c9c9ce',
+      copyLabel: s.copied ? 'Copied' : 'Copy',
+      copyAction: () => { this.setState({ copied: true }); this.t(1200, () => this.setState({ copied: false })); },
+      playLabel: s.playing ? '◼ Stop' : '▶ Play',
+      playDisabled: !d.audio, playOpacity: d.audio ? 1 : .5,
+      togglePlay: () => { if (!d.audio) return; this.setState(p => ({ playing: !p.playing })); if (!s.playing) this.t(4000, () => this.setState({ playing: false })); },
+      moreOpen: s.moreOpen, toggleMore: () => this.setState(p => ({ moreOpen: !p.moreOpen })),
+      moreBg: s.moreOpen ? 'light-dark(rgba(0,0,0,.1),rgba(255,255,255,.16))' : 'light-dark(#fff,#48484c)',
+      moreItems: [
+        { name: 'Copy Raw Transcript', color: 'light-dark(#1d1d1f,#f0f0f2)' },
+        { name: 'Clean Again', color: 'light-dark(#1d1d1f,#f0f0f2)' },
+        { name: 'Reapply Dictionary', color: 'light-dark(#1d1d1f,#f0f0f2)' },
+        { name: 'Retry Transcription', color: 'light-dark(#1d1d1f,#f0f0f2)' },
+        { name: 'Reveal in Finder', color: 'light-dark(#1d1d1f,#f0f0f2)' },
+        { name: 'Delete Session…', color: '#ff3b30' }
+      ],
+      sessions: this.data.map((row, i) => ({
+        time: row.time, dur: row.dur, status: row.status, statusIcon: row.icon,
+        statusColor: i === s.sel ? 'rgba(255,255,255,.9)' : row.color,
+        summary: (row.clean || row.raw) ? (row.clean || row.raw) : '— no transcript —',
+        select: () => this.setState({ sel: i, playing: false, moreOpen: false }),
+        bg: i === s.sel ? 'light-dark(#007aff,#0a84ff)' : 'transparent',
+        fg: i === s.sel ? '#ffffff' : 'light-dark(#1d1d1f,#f0f0f2)',
+        fg2: i === s.sel ? 'rgba(255,255,255,.8)' : 'light-dark(#6e6e73,#98989d)'
+      })),
+      detailDate: d.time, detailDur: 'Duration ' + d.dur, detailMode: d.mode + ' mode',
+      detailStatus: d.status, detailStatusIcon: d.icon, detailStatusColor: d.color,
+      detailNote: d.note || null,
+      versions: versions.map(v => ({
+        name: v, select: () => this.setState({ version: v }),
+        bg: v === activeVersion ? 'light-dark(#ffffff,#6a6a70)' : 'transparent',
+        shadow: v === activeVersion ? '0 1px 2px rgba(0,0,0,.18)' : 'none'
+      })),
+      transcript: text || 'No transcript is available for this dictation.'
+    };
+  }
+}
+</script>
+</body>
+</html>

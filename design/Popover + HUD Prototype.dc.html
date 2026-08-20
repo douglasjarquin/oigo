@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  html,body{margin:0;padding:0}
+  body{background:#0e0e10}
+  a{color:#0a6cff;text-decoration:none}
+  a:hover{color:#0a5ae0;text-decoration:underline}
+  @keyframes oigo-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+  @keyframes oigo-pulse{0%,100%{opacity:1}50%{opacity:.45}}
+</style>
+</helmet>
+<div style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased">
+  <div style="display:flex;align-items:center;gap:16px;padding:10px 16px;background:#161619;color:#c9c9ce;font:11px/1.4 'SF Mono',ui-monospace,monospace;border-bottom:1px solid #2a2a2e">
+    <span style="color:#8e8e93">OIGO PROTOTYPE · popover + recording HUD</span>
+    <span style="flex:1"></span>
+    <span style="display:flex;gap:4px;align-items:center">
+      <button onClick="{{ setLight }}" style="font:11px 'SF Mono',monospace;padding:3px 10px;border-radius:5px;border:1px solid #3a3a3f;background: {{ lightBtnBg }};color: {{ lightBtnFg }};cursor:pointer">Light</button>
+      <button onClick="{{ setDark }}" style="font:11px 'SF Mono',monospace;padding:3px 10px;border-radius:5px;border:1px solid #3a3a3f;background: {{ darkBtnBg }};color: {{ darkBtnFg }};cursor:pointer">Dark</button>
+    </span>
+    <span style="display:flex;gap:6px;align-items:center">
+      <span style="color:#8e8e93">scenario</span>
+      <select onChange="{{ setScenario }}" value="{{ scenario }}" style="font:11px 'SF Mono',monospace;padding:3px 6px;border-radius:5px;border:1px solid #3a3a3f;background:#222226;color:#e5e5ea">
+        <option value="healthy">Healthy idle</option>
+        <option value="storage">Storage unavailable</option>
+        <option value="shortcut">Shortcut inactive</option>
+        <option value="mic">Microphone unavailable</option>
+        <option value="assets">Speech assets required</option>
+        <option value="ax">Accessibility unavailable</option>
+        <option value="retry">Retry transcription</option>
+      </select>
+    </span>
+  </div>
+  <div style="color-scheme: {{ scheme }}; position:relative;height:780px;overflow:hidden;background:light-dark(#d8d9de,#1f2024)">
+    <div style="position:absolute;top:0;left:0;right:0;height:26px;display:flex;align-items:center;padding:0 12px;gap:16px;background:light-dark(rgba(246,246,248,.92),rgba(34,34,38,.92));border-bottom:1px solid light-dark(rgba(0,0,0,.08),rgba(255,255,255,.06));font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">
+      <span style="font-size:14px"></span>
+      <span style="font-weight:600">{{ targetApp }}</span>
+      <span style="opacity:.85">File</span><span style="opacity:.85">Edit</span><span style="opacity:.85">Format</span><span style="opacity:.85">View</span>
+      <span style="flex:1"></span>
+      <span onClick="{{ togglePopover }}" title="Oigo — {{ stateLabel }}" style="position:relative;display:flex;align-items:center;justify-content:center;width:30px;height:22px;border-radius:4px;cursor:pointer;background: {{ statusItemBg }}">
+        <svg width="13" height="17" viewBox="0 0 24 32" style="color: {{ iconColor }}">
+          <path d="M9.4 5.2 C10.2 3.7 11 2.8 12.4 2.8 C17.8 2.8 20.2 8.3 20.2 16 C20.2 23.7 17.6 29.2 12 29.2 C7 29.2 4 25.2 3.8 19.4 C3.7 13.6 5.6 9.6 8.8 8.4 C11.2 7.5 13.1 8.8 12.9 10.9 C12.7 12.9 10.6 13.4 10 15.1 C9.4 16.8 10.6 18.2 12.3 18.1" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"></path>
+        </svg>
+        <sc-if value="{{ attention }}" hint-placeholder-val="{{ false }}">
+          <span style="position:absolute;top:2px;right:2px;width:6px;height:6px;border-radius:3px;background:#ff9500"></span>
+        </sc-if>
+        <sc-if value="{{ isRecording }}" hint-placeholder-val="{{ false }}">
+          <span style="position:absolute;top:2px;right:2px;width:6px;height:6px;border-radius:3px;background:#ff3b30;animation:oigo-pulse 1.6s ease-in-out infinite"></span>
+        </sc-if>
+      </span>
+      <span style="font-size:12px;font-variant-numeric:tabular-nums">Wed Aug 19&nbsp; 9:41 AM</span>
+    </div>
+
+    <div style="position:absolute;left:56px;top:78px;width:560px;border-radius:10px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.28),0 0 0 1px light-dark(rgba(0,0,0,.1),rgba(255,255,255,.12));background:light-dark(#f5f5f5,#2a2a2e)">
+      <div style="display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border-bottom:1px solid light-dark(rgba(0,0,0,.08),rgba(255,255,255,.07))">
+        <span style="display:flex;gap:7px"><span style="width:12px;height:12px;border-radius:6px;background:#ff5f57"></span><span style="width:12px;height:12px;border-radius:6px;background:#febc2e"></span><span style="width:12px;height:12px;border-radius:6px;background:#28c840"></span></span>
+        <span style="flex:1;text-align:center;font-size:13px;font-weight:600;color:light-dark(#3c3c43,#d8d8dc);margin-right:52px">Untitled — {{ targetApp }}</span>
+      </div>
+      <div style="height:340px;padding:18px 22px;background:light-dark(#ffffff,#1e1e20);font-size:14px;line-height:1.55;color:light-dark(#1d1d1f,#e8e8ec)">
+        <div style="font-size:17px;font-weight:700;margin-bottom:10px">Design review notes</div>
+        <div style="color:light-dark(#48484d,#c7c7cc)">Follow-ups from Tuesday's sync are captured below.</div>
+        <div style="margin-top:12px;white-space:pre-wrap">{{ noteText }}<span style="display:inline-block;width:1.5px;height:15px;background:light-dark(#0a6cff,#3f8cff);vertical-align:-2px;animation:oigo-blink 1.1s step-end infinite"></span></div>
+      </div>
+    </div>
+
+    <sc-if value="{{ hudVisible }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;left:78px;top:490px;min-width:224px;max-width:300px;padding:10px 14px;border-radius:12px;background:light-dark(rgba(248,248,250,.97),rgba(46,46,50,.97));box-shadow:0 8px 28px rgba(0,0,0,.3),0 0 0 1px light-dark(rgba(0,0,0,.1),rgba(255,255,255,.1))">
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:light-dark(#1d1d1f,#f0f0f2)">
+          <sc-if value="{{ hudDot }}" hint-placeholder-val="{{ false }}">
+            <span style="width:9px;height:9px;border-radius:5px;background:#ff3b30;flex:none"></span>
+          </sc-if>
+          <sc-if value="{{ hudSpinner }}" hint-placeholder-val="{{ false }}">
+            <span style="width:11px;height:11px;flex:none;border-radius:6px;border:2px solid light-dark(rgba(0,0,0,.18),rgba(255,255,255,.22));border-top-color:light-dark(#666,#ddd);animation:oigo-pulse .9s linear infinite"></span>
+          </sc-if>
+          <sc-if value="{{ hudCheck }}" hint-placeholder-val="{{ false }}">
+            <span style="color:light-dark(#1d1d1f,#f0f0f2);font-size:12px;flex:none">✓</span>
+          </sc-if>
+          <sc-if value="{{ hudTimerShown }}" hint-placeholder-val="{{ false }}">
+            <span style="font-family:'SF Mono',ui-monospace,monospace;font-size:13px;font-variant-numeric:tabular-nums">{{ hudTimer }}</span>
+          </sc-if>
+          <span>{{ hudMain }}</span>
+        </div>
+        <sc-if value="{{ hudSubShown }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:4px;font-size:11px;color:light-dark(#6e6e73,#98989d)">{{ hudSub }}</div>
+        </sc-if>
+        <sc-if value="{{ hudPreviewShown }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:5px;font-size:12px;font-style:italic;color:light-dark(#48484d,#c0c0c6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:270px">&ldquo;{{ previewText }}&rdquo;</div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ popoverOpen }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;top:34px;right:36px;width:340px">
+        <div style="position:absolute;top:-5px;right:52px;width:12px;height:12px;transform:rotate(45deg);background:light-dark(#f4f4f6,#2c2c30);border-left:1px solid light-dark(rgba(0,0,0,.14),rgba(255,255,255,.12));border-top:1px solid light-dark(rgba(0,0,0,.14),rgba(255,255,255,.12))"></div>
+        <div style="border-radius:11px;background:light-dark(#f4f4f6,#2c2c30);box-shadow:0 12px 40px rgba(0,0,0,.32),0 0 0 1px light-dark(rgba(0,0,0,.14),rgba(255,255,255,.12));overflow:hidden">
+          <div style="display:flex;align-items:baseline;padding:13px 16px 0">
+            <span style="font-size:13px;font-weight:600;color:light-dark(#1d1d1f,#f5f5f7)">Oigo</span>
+            <span style="flex:1"></span>
+            <span style="display:flex;align-items:center;gap:5px;font-size:12px;color: {{ stateLabelColor }}">
+              <sc-if value="{{ attention }}" hint-placeholder-val="{{ false }}"><span style="font-size:11px">⚠</span></sc-if>
+              {{ stateLabel }}
+            </span>
+          </div>
+          <div style="padding:12px 16px 0;display:flex;flex-direction:column;gap:5px">
+            <button onClick="{{ primaryAction }}" disabled="{{ primaryDisabled }}" style="width:100%;height:30px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:600;background: {{ primaryBg }};color: {{ primaryFg }};opacity: {{ primaryOpacity }}">{{ primaryLabel }}</button>
+            <div style="font-size:11px;text-align:center;color:light-dark(#6e6e73,#98989d)">Hold <span style="font-family:'SF Mono',ui-monospace,monospace">⌥Space</span> to dictate</div>
+          </div>
+          <div style="margin:12px 16px 0;border-top:1px solid light-dark(rgba(0,0,0,.09),rgba(255,255,255,.09))"></div>
+          <div style="padding:10px 16px 0;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">Mode</span>
+              <span style="flex:1"></span>
+              <span style="display:flex;background:light-dark(rgba(0,0,0,.06),rgba(255,255,255,.09));border-radius:6px;padding:1.5px">
+                <button onClick="{{ setInstant }}" style="font-size:12px;padding:2.5px 12px;border:none;border-radius:5px;cursor:pointer;background: {{ instantBg }};color:light-dark(#1d1d1f,#f5f5f7);box-shadow: {{ instantShadow }}">Instant</button>
+                <button onClick="{{ setClean }}" style="font-size:12px;padding:2.5px 12px;border:none;border-radius:5px;cursor:pointer;background: {{ cleanBg }};color:light-dark(#1d1d1f,#f5f5f7);box-shadow: {{ cleanShadow }}">Clean</button>
+              </span>
+            </div>
+            <sc-if value="{{ modeNoteShown }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11px;text-align:right;color:light-dark(#6e6e73,#98989d);margin-top:-6px">Applies to the next dictation</div>
+            </sc-if>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">Microphone</span>
+              <span style="flex:1"></span>
+              <span style="font-size:13px;color: {{ micValueColor }}">{{ micValue }} <span style="color:light-dark(#aeaeb2,#6e6e73)">›</span></span>
+            </div>
+          </div>
+          <sc-if value="{{ noticeShown }}" hint-placeholder-val="{{ false }}">
+            <div style="margin:12px 16px 0;padding:10px 12px;border-radius:8px;background:light-dark(rgba(0,0,0,.045),rgba(255,255,255,.06));display:flex;gap:10px;align-items:flex-start">
+              <span style="font-size:13px;line-height:1.35;color: {{ noticeColor }};flex:none">{{ noticeIcon }}</span>
+              <span style="flex:1;display:flex;flex-direction:column;gap:2px">
+                <span style="font-size:12.5px;font-weight:600;color:light-dark(#1d1d1f,#f5f5f7)">{{ noticeTitle }}</span>
+                <span style="font-size:11.5px;line-height:1.4;color:light-dark(#515156,#aeaeb2)">{{ noticeBody }}</span>
+              </span>
+              <button onClick="{{ noticeAction }}" style="flex:none;font-size:11.5px;font-weight:500;padding:3px 10px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#ffffff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">{{ noticeButton }}</button>
+            </div>
+          </sc-if>
+          <div style="margin:12px 16px 0;border-top:1px solid light-dark(rgba(0,0,0,.09),rgba(255,255,255,.09))"></div>
+          <div style="padding:10px 16px 12px;display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;align-items:baseline">
+              <span style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:light-dark(#6e6e73,#98989d)">Last dictation</span>
+              <span style="flex:1"></span>
+              <span style="font-size:12px;color:light-dark(#6e6e73,#98989d)">{{ lastTime }}</span>
+            </div>
+            <div style="font-size:12.5px;color:light-dark(#3c3c43,#d1d1d6)">{{ lastStatus }} · {{ lastDuration }} · {{ lastSource }}</div>
+            <div style="display:flex;gap:6px;margin-top:2px">
+              <button onClick="{{ copyLast }}" style="font-size:12px;padding:3.5px 12px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#ffffff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">{{ copyLabel }}</button>
+              <button style="font-size:12px;padding:3.5px 12px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#ffffff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Paste Again</button>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;padding:9px 16px;border-top:1px solid light-dark(rgba(0,0,0,.09),rgba(255,255,255,.09));background:light-dark(rgba(0,0,0,.025),rgba(255,255,255,.03))">
+            <span style="display:flex;gap:14px">
+              <button style="font-size:12.5px;border:none;background:none;padding:0;cursor:pointer;color:light-dark(#3c3c43,#d1d1d6)">History…</button>
+              <button style="font-size:12.5px;border:none;background:none;padding:0;cursor:pointer;color:light-dark(#3c3c43,#d1d1d6)">Settings…</button>
+            </span>
+            <span style="flex:1"></span>
+            <button style="font-size:12.5px;border:none;background:none;padding:0;cursor:pointer;color:light-dark(#3c3c43,#d1d1d6)">Quit Oigo</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;1200px&quot;,&quot;height&quot;:&quot;820px&quot;},&quot;hudPreview&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;HUD&quot;},&quot;targetApp&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Notes&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Scenario&quot;}}">
+class Component extends DCLogic {
+  state = {
+    scheme: 'light', scenario: 'healthy', popoverOpen: true,
+    phase: 'idle', mode: 'clean', seconds: 0, wordCount: 0,
+    modeChangedDuring: false, noteText: '', copied: false,
+    last: { time: '2 minutes ago', dur: '0:18', status: 'Paste attempted', source: 'Clean' }
+  };
+  timers = [];
+  words = 'Schedule the design review for Thursday afternoon and send the agenda to the platform team.'.split(' ');
+  t(ms, fn) { this.timers.push(setTimeout(fn, ms)); }
+  clearTimers() { this.timers.forEach(clearTimeout); if (this.iv) clearInterval(this.iv); if (this.wv) clearInterval(this.wv); this.iv = this.wv = null; this.timers = []; }
+  componentWillUnmount() { this.clearTimers(); }
+  fmt(s) { return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
+  start = () => {
+    if (this.state.phase !== 'idle') return;
+    this.setState({ phase: 'preparing', seconds: 0, wordCount: 0 });
+    this.t(650, () => {
+      this.setState({ phase: 'recording' });
+      this.iv = setInterval(() => this.setState(s => ({ seconds: s.seconds + 1 })), 1000);
+      this.wv = setInterval(() => this.setState(s => ({ wordCount: Math.min(s.wordCount + 1, this.words.length) })), 380);
+    });
+  };
+  stop = () => {
+    if (this.state.phase !== 'recording') return;
+    clearInterval(this.iv); clearInterval(this.wv); this.iv = this.wv = null;
+    this.setState({ phase: 'finalizing' });
+    this.t(750, () => {
+      if (this.state.mode === 'clean') {
+        this.setState({ phase: 'cleaning' });
+        this.t(600, () => this.pasteStep());
+      } else this.pasteStep();
+    });
+  };
+  pasteStep() {
+    this.setState({ phase: 'pasting' });
+    this.t(450, () => {
+      const dur = this.fmt(this.state.seconds).replace(/^0/, '');
+      this.setState(s => ({
+        phase: 'attempted',
+        noteText: (s.noteText ? s.noteText + ' ' : '') + this.words.join(' '),
+        last: { time: 'Just now', dur, status: 'Paste attempted', source: s.mode === 'clean' ? 'Clean' : 'Raw' },
+        modeChangedDuring: false
+      }));
+      this.t(1800, () => this.setState({ phase: 'idle' }));
+    });
+  }
+  renderVals() {
+    const s = this.state;
+    const active = s.phase !== 'idle';
+    const scenarios = {
+      healthy: null,
+      storage: { icon: '⛔', color: '#ff3b30', title: 'Storage unavailable', body: 'Oigo cannot create durable recordings right now.', btn: 'Retry', label: 'Attention Needed' },
+      shortcut: { icon: '⚠', color: '#ff9500', title: 'Shortcut inactive', body: '⌥Space failed to register with the system.', btn: 'Open Settings', label: 'Attention Needed' },
+      mic: { icon: '⚠', color: '#ff9500', title: 'Microphone unavailable', body: 'MacBook Pro Microphone is disconnected.', btn: 'Choose Input', label: 'Attention Needed' },
+      assets: { icon: '⚠', color: '#ff9500', title: 'Speech assets required', body: 'English (US) needs on-device speech assets.', btn: 'Install', label: 'Attention Needed' },
+      ax: { icon: 'ℹ', color: '#0a84ff', title: 'Accessibility unavailable', body: 'Oigo will copy results instead of pasting automatically.', btn: 'Open System Settings', label: 'Ready · Copy-only' },
+      retry: { icon: '⚠', color: '#ff9500', title: 'Recording preserved', body: 'Live transcription degraded. Your audio was saved.', btn: 'Retry Transcription', label: 'Attention Needed' }
+    };
+    const sc = scenarios[s.scenario];
+    const phaseLabels = { preparing: 'Preparing…', recording: 'Recording', finalizing: 'Finalizing…', cleaning: 'Cleaning…', pasting: 'Pasting…', attempted: 'Paste attempted' };
+    const stateLabel = active ? phaseLabels[s.phase] : (sc ? sc.label : 'Ready');
+    const attention = !active && !!sc && s.scenario !== 'ax';
+    const recover = () => this.setState({ scenario: 'healthy' });
+    let primaryLabel = 'Start Dictation', primaryAction = this.start, primaryDisabled = false;
+    if (s.phase === 'recording') { primaryLabel = 'Stop Dictation'; primaryAction = this.stop; }
+    else if (active) { primaryLabel = phaseLabels[s.phase]; primaryDisabled = true; primaryAction = () => {}; }
+    else if (s.scenario === 'storage') { primaryLabel = 'Retry Storage'; primaryAction = recover; }
+    else if (s.scenario === 'retry') { primaryLabel = 'Retry Transcription'; primaryAction = recover; }
+    else if (s.scenario === 'mic' || s.scenario === 'assets' || s.scenario === 'shortcut') { primaryDisabled = true; primaryAction = () => {}; }
+    const isRec = s.phase === 'recording';
+    const hudPreview = this.props.hudPreview ?? true;
+    const preview = this.words.slice(Math.max(0, s.wordCount - 8), s.wordCount).join(' ');
+    const spinnerPhases = { preparing: 1, finalizing: 1, cleaning: 1, pasting: 1 };
+    const sel = 'light-dark(#ffffff,#6a6a70)';
+    return {
+      scheme: s.scheme, scenario: s.scenario, targetApp: this.props.targetApp ?? 'Notes',
+      setLight: () => this.setState({ scheme: 'light' }), setDark: () => this.setState({ scheme: 'dark' }),
+      lightBtnBg: s.scheme === 'light' ? '#e5e5ea' : 'transparent', lightBtnFg: s.scheme === 'light' ? '#1d1d1f' : '#c9c9ce',
+      darkBtnBg: s.scheme === 'dark' ? '#e5e5ea' : 'transparent', darkBtnFg: s.scheme === 'dark' ? '#1d1d1f' : '#c9c9ce',
+      setScenario: e => { if (!active) this.setState({ scenario: e.target.value }); },
+      togglePopover: () => this.setState(p => ({ popoverOpen: !p.popoverOpen })),
+      popoverOpen: s.popoverOpen,
+      statusItemBg: s.popoverOpen ? 'light-dark(rgba(0,0,0,.14),rgba(255,255,255,.18))' : 'transparent',
+      iconColor: isRec ? '#ff3b30' : 'light-dark(#1d1d1f,#f5f5f7)',
+
+      attention, isRecording: isRec,
+      stateLabel,
+      stateLabelColor: isRec ? '#ff3b30' : attention ? '#ff9500' : 'light-dark(#6e6e73,#98989d)',
+      primaryLabel, primaryAction, primaryDisabled,
+      primaryBg: primaryDisabled ? 'light-dark(rgba(0,0,0,.08),rgba(255,255,255,.1))' : isRec ? '#ff3b30' : 'light-dark(#007aff,#0a84ff)',
+      primaryFg: primaryDisabled ? 'light-dark(#8e8e93,#8e8e93)' : '#ffffff',
+      primaryOpacity: 1,
+      setInstant: () => this.setState({ mode: 'instant', modeChangedDuring: active }),
+      setClean: () => this.setState({ mode: 'clean', modeChangedDuring: active }),
+      instantBg: s.mode === 'instant' ? sel : 'transparent',
+      cleanBg: s.mode === 'clean' ? sel : 'transparent',
+      instantShadow: s.mode === 'instant' ? '0 1px 2px rgba(0,0,0,.18)' : 'none',
+      cleanShadow: s.mode === 'clean' ? '0 1px 2px rgba(0,0,0,.18)' : 'none',
+      modeNoteShown: s.modeChangedDuring && active,
+      micValue: s.scenario === 'mic' ? 'MacBook Pro Mic — Unavailable' : 'MacBook Pro Microphone',
+      micValueColor: s.scenario === 'mic' ? '#ff9500' : 'light-dark(#6e6e73,#98989d)',
+      noticeShown: !!sc && !active, noticeIcon: sc ? sc.icon : '', noticeColor: sc ? sc.color : '',
+      noticeTitle: sc ? sc.title : '', noticeBody: sc ? sc.body : '', noticeButton: sc ? sc.btn : '',
+      noticeAction: recover,
+      lastTime: s.last.time, lastStatus: s.last.status, lastDuration: s.last.dur, lastSource: s.last.source,
+      copyLabel: s.copied ? 'Copied' : 'Copy',
+      copyLast: () => { this.setState({ copied: true }); this.t(1200, () => this.setState({ copied: false })); },
+      hudVisible: active,
+      hudDot: isRec,
+      hudSpinner: !!spinnerPhases[s.phase],
+      hudCheck: s.phase === 'attempted',
+      hudTimerShown: isRec, hudTimer: this.fmt(s.seconds),
+      hudMain: isRec ? 'Recording · ' + (this.props.targetApp ?? 'Notes') : phaseLabels[s.phase] || '',
+      hudSubShown: isRec, hudSub: 'Release ⌥Space to finish',
+      hudPreviewShown: isRec && hudPreview && s.wordCount > 0,
+      previewText: preview,
+      noteText: s.noteText
+    };
+  }
+}
+</script>
+</body>
+</html>

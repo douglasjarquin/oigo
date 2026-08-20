@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>html,body{margin:0}body{background:#0e0e10}a{color:#0a6cff}a:hover{color:#0a5ae0}</style>
+</helmet>
+<div style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;-webkit-font-smoothing:antialiased">
+  <div style="display:flex;align-items:center;gap:16px;padding:10px 16px;background:#161619;color:#c9c9ce;font:11px 'SF Mono',ui-monospace,monospace;border-bottom:1px solid #2a2a2e">
+    <span style="color:#8e8e93">OIGO SETTINGS · ⌘, · 4 panes, no global Save</span>
+    <span style="flex:1"></span>
+    <button onClick="{{ setLight }}" style="font:11px 'SF Mono',monospace;padding:3px 10px;border-radius:5px;border:1px solid #3a3a3f;background: {{ lightBtnBg }};color: {{ lightBtnFg }};cursor:pointer">Light</button>
+    <button onClick="{{ setDark }}" style="font:11px 'SF Mono',monospace;padding:3px 10px;border-radius:5px;border:1px solid #3a3a3f;background: {{ darkBtnBg }};color: {{ darkBtnFg }};cursor:pointer">Dark</button>
+  </div>
+  <div style="color-scheme: {{ scheme }};display:flex;align-items:flex-start;justify-content:center;min-height:760px;background:light-dark(#d8d9de,#1f2024);padding:40px 32px">
+    <div style="width:720px;border-radius:10px;overflow:hidden;box-shadow:0 22px 60px rgba(0,0,0,.35),0 0 0 1px light-dark(rgba(0,0,0,.12),rgba(255,255,255,.12));background:light-dark(#ececee,#2a2a2e);position:relative">
+      <div style="display:flex;align-items:center;gap:8px;height:38px;padding:0 12px">
+        <span style="display:flex;gap:7px"><span style="width:12px;height:12px;border-radius:6px;background:#ff5f57"></span><span style="width:12px;height:12px;border-radius:6px;background:#febc2e"></span><span style="width:12px;height:12px;border-radius:6px;background:light-dark(#d9d9dd,#4a4a4e)"></span></span>
+        <span style="flex:1;text-align:center;font-size:13px;font-weight:600;color:light-dark(#3c3c43,#d8d8dc);margin-right:52px">{{ paneName }}</span>
+      </div>
+      <div style="display:flex;justify-content:center;gap:6px;padding:0 12px 8px;border-bottom:1px solid light-dark(rgba(0,0,0,.1),rgba(255,255,255,.08))">
+        <sc-for list="{{ panes }}" as="p" hint-placeholder-count="4">
+          <div onClick="{{ p.select }}" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 12px;border-radius:7px;cursor:pointer;background: {{ p.bg }}">
+            <span style="font-size:17px;line-height:1;color: {{ p.iconColor }}">{{ p.icon }}</span>
+            <span style="font-size:11px;color:light-dark(#3c3c43,#d1d1d6)">{{ p.name }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="padding:22px 40px 28px;min-height:420px;background:light-dark(#f0f0f2,#28282c)">
+
+        <sc-if value="{{ isGeneral }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:180px;text-align:right;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">Dictation shortcut:</span>
+              <span style="font-family:'SF Mono',ui-monospace,monospace;font-size:13px;padding:3px 12px;border-radius:6px;background:light-dark(rgba(0,0,0,.06),rgba(255,255,255,.1));color:light-dark(#1d1d1f,#f5f5f7)">⌥Space</span>
+              <button style="font-size:12px;padding:3px 12px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Change…</button>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="width:180px;text-align:right;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7);padding-top:1px">Launch at login:</span>
+              <span style="display:flex;flex-direction:column;gap:4px">
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer"><input type="checkbox" checked="{{ launchChecked }}" onChange="{{ toggleLaunch }}" style="accent-color:#0a84ff"></input>Open Oigo automatically</label>
+                <sc-if value="{{ launchApproval }}" hint-placeholder-val="{{ false }}">
+                  <span style="display:flex;align-items:center;gap:8px">
+                    <span style="font-size:11.5px;color:#ff9500">⚠ Requires approval in System Settings</span>
+                    <button style="font-size:11px;padding:2px 9px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Open System Settings…</button>
+                  </span>
+                </sc-if>
+              </span>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="width:180px;text-align:right;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7);padding-top:1px">Recording HUD:</span>
+              <span style="display:flex;flex-direction:column;gap:4px">
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer"><input type="checkbox" defaultChecked="{{ true }}" style="accent-color:#0a84ff"></input>Show live transcript preview</label>
+                <span style="font-size:11px;color:light-dark(#8e8e93,#8e8e93)">One line of in-progress text beneath the timer. Never stored.</span>
+              </span>
+            </div>
+            <div style="border-top:1px solid light-dark(rgba(0,0,0,.08),rgba(255,255,255,.08));margin:2px 0"></div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:180px;text-align:right;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">Setup:</span>
+              <button style="font-size:12px;padding:3px 12px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Run Setup Assistant Again…</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isDictation }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="width:180px;text-align:right;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7);padding-top:2px">Processing mode:</span>
+              <span style="display:flex;flex-direction:column;gap:6px">
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer"><input type="radio" name="mode" style="accent-color:#0a84ff"></input>Instant — paste the raw transcript immediately</label>
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer"><input type="radio" name="mode" defaultChecked="{{ true }}" style="accent-color:#0a84ff"></input>Clean — tidy punctuation and filler before pasting</label>
+                <span style="font-size:11px;color:light-dark(#8e8e93,#8e8e93)">Changes apply to the next dictation. Cleaning always keeps the raw transcript.</span>
+              </span>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="width:180px;text-align:right;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7);padding-top:1px">Microphone:</span>
+              <span style="display:flex;flex-direction:column;gap:4px">
+                <select style="font-size:12px;padding:3px 8px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7)"><option>Shure MV7 — Unavailable</option><option>System Default (MacBook Pro Microphone)</option><option>MacBook Pro Microphone</option></select>
+                <span style="font-size:11px;color:#ff9500">⚠ Shure MV7 is disconnected. Oigo will not substitute another device.</span>
+              </span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:180px;text-align:right;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">Channel:</span>
+              <select style="font-size:12px;padding:3px 8px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7)"><option>Automatic (mix to mono)</option><option>Channel 1</option><option>Channel 2</option></select>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="width:180px;text-align:right;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7);padding-top:1px">Language:</span>
+              <span style="display:flex;flex-direction:column;gap:4px">
+                <select style="font-size:12px;padding:3px 8px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7)"><option>English (United States)</option><option>Spanish (Mexico)</option></select>
+                <span style="font-size:11px;color:#28a745">✓ On-device speech assets ready</span>
+              </span>
+            </div>
+            <div style="border-top:1px solid light-dark(rgba(0,0,0,.08),rgba(255,255,255,.08));margin:2px 0"></div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="width:180px;text-align:right;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7);padding-top:1px">Audio retention:</span>
+              <span style="display:flex;flex-direction:column;gap:6px">
+                <select style="font-size:12px;padding:3px 8px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);align-self:flex-start"><option>Keep audio for 7 days</option><option>Keep audio for 30 days</option><option>Keep audio until deleted</option></select>
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer"><input type="checkbox" style="accent-color:#0a84ff"></input>Keep audio for successful dictations indefinitely</label>
+              </span>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isDictionary }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;gap:0;height:400px;margin:-6px -16px 0;border-radius:8px;overflow:hidden;box-shadow:0 0 0 1px light-dark(rgba(0,0,0,.1),rgba(255,255,255,.1))">
+            <div style="width:200px;display:flex;flex-direction:column;background:light-dark(#fafafa,#232327);border-right:1px solid light-dark(rgba(0,0,0,.1),rgba(255,255,255,.1))">
+              <input placeholder="Search" style="margin:10px 10px 6px;padding:4px 8px;border-radius:6px;border:1px solid light-dark(rgba(0,0,0,.14),rgba(255,255,255,.16));background:light-dark(#fff,#1c1c1e);color:light-dark(#1d1d1f,#f0f0f2);font-size:12px;outline-color:#0a84ff"></input>
+              <div style="flex:1;overflow:auto;display:flex;flex-direction:column;padding:4px 6px">
+                <sc-for list="{{ terms }}" as="t" hint-placeholder-count="4">
+                  <div onClick="{{ t.select }}" style="padding:5px 9px;border-radius:5px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px;background: {{ t.bg }};color: {{ t.fg }}">
+                    <span style="flex:1">{{ t.name }}</span>
+                    <sc-if value="{{ t.disabled }}" hint-placeholder-val="{{ false }}"><span style="font-size:10px;opacity:.7">off</span></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display:flex;gap:2px;padding:6px 8px;border-top:1px solid light-dark(rgba(0,0,0,.08),rgba(255,255,255,.08))">
+                <button style="width:24px;height:20px;border-radius:4px;border:none;background:none;cursor:pointer;font-size:14px;color:light-dark(#3c3c43,#d1d1d6)">+</button>
+                <button style="width:24px;height:20px;border-radius:4px;border:none;background:none;cursor:pointer;font-size:14px;color:light-dark(#3c3c43,#d1d1d6)">−</button>
+              </div>
+            </div>
+            <div style="flex:1;padding:16px 20px;background:light-dark(#ffffff,#28282c);display:flex;flex-direction:column;gap:12px;overflow:auto">
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="font-size:12px;color:light-dark(#6e6e73,#98989d);width:70px;text-align:right">Canonical:</span>
+                <input value="{{ termName }}" readOnly="{{ true }}" style="flex:1;padding:4px 8px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.14),rgba(255,255,255,.16));background:light-dark(#fff,#1c1c1e);color:light-dark(#1d1d1f,#f0f0f2);font-size:13px"></input>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="font-size:12px;color:light-dark(#6e6e73,#98989d);width:70px;text-align:right">Locale:</span>
+                <select style="font-size:12px;padding:3px 8px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7)"><option>All languages</option><option>English (United States)</option></select>
+                <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer;margin-left:8px"><input type="checkbox" checked="{{ termEnabled }}" onChange="{{ noop }}" style="accent-color:#0a84ff"></input>Enabled</label>
+              </div>
+              <div style="display:flex;align-items:flex-start;gap:10px">
+                <span style="font-size:12px;color:light-dark(#6e6e73,#98989d);width:70px;text-align:right;padding-top:4px">Aliases:</span>
+                <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+                  <sc-for list="{{ aliases }}" as="a" hint-placeholder-count="3">
+                    <div style="display:flex;align-items:center;gap:8px;padding:3px 8px;border-radius:5px;background:light-dark(rgba(0,0,0,.04),rgba(255,255,255,.06))">
+                      <span style="flex:1;font-size:12.5px;color:light-dark(#1d1d1f,#f0f0f2)">{{ a }}</span>
+                      <span style="font-size:12px;color:light-dark(#8e8e93,#8e8e93);cursor:pointer">−</span>
+                    </div>
+                  </sc-for>
+                  <button style="align-self:flex-start;font-size:11.5px;padding:2.5px 10px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">+ Add Alias</button>
+                </div>
+              </div>
+              <div style="border-top:1px solid light-dark(rgba(0,0,0,.08),rgba(255,255,255,.08))"></div>
+              <div style="display:flex;align-items:flex-start;gap:10px">
+                <span style="font-size:12px;color:light-dark(#6e6e73,#98989d);width:70px;text-align:right;padding-top:4px">Test:</span>
+                <div style="flex:1;display:flex;flex-direction:column;gap:5px">
+                  <input onInput="{{ testInput }}" placeholder="Type a sentence with an alias" style="padding:4px 8px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.14),rgba(255,255,255,.16));background:light-dark(#fff,#1c1c1e);color:light-dark(#1d1d1f,#f0f0f2);font-size:12.5px;outline-color:#0a84ff"></input>
+                  <span style="font-size:12px;color:light-dark(#6e6e73,#98989d)">Result: <span style="color:light-dark(#1d1d1f,#f0f0f2)">{{ testResult }}</span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isPrivacy }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <sc-for list="{{ privacyRows }}" as="r" hint-placeholder-count="3">
+              <div style="display:flex;align-items:flex-start;gap:10px">
+                <span style="font-size:12px;width:14px;text-align:center;padding-top:1px;color: {{ r.color }}">{{ r.icon }}</span>
+                <span style="flex:1;display:flex;flex-direction:column;gap:1px">
+                  <span style="font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">{{ r.title }} — {{ r.state }}</span>
+                  <span style="font-size:11.5px;color:light-dark(#6e6e73,#98989d)">{{ r.effect }}</span>
+                </span>
+                <sc-if value="{{ r.action }}" hint-placeholder-val="{{ false }}">
+                  <button style="flex:none;font-size:11.5px;padding:3px 10px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">{{ r.action }}</button>
+                </sc-if>
+              </div>
+            </sc-for>
+            <div style="border-top:1px solid light-dark(rgba(0,0,0,.08),rgba(255,255,255,.08))"></div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="flex:1;font-size:12px;color:light-dark(#6e6e73,#98989d)">142 dictations · 89 MB audio · audio kept 7 days, transcripts until deleted</span>
+              <button style="font-size:12px;padding:3px 12px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Open History</button>
+              <button style="font-size:12px;padding:3px 12px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Open Data Folder</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="flex:1;font-size:12px;color:light-dark(#6e6e73,#98989d)">Diagnostics never include transcripts, audio, dictionary entries, or paths.</span>
+              <button style="font-size:12px;padding:3px 12px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Export Diagnostics…</button>
+            </div>
+            <div style="border-top:1px solid light-dark(rgba(0,0,0,.08),rgba(255,255,255,.08))"></div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="flex:1;font-size:12px;color:light-dark(#6e6e73,#98989d)">Removes all recordings and transcripts. Dictionary entries are kept.</span>
+              <button onClick="{{ openDeleteSheet }}" style="font-size:12px;padding:3px 12px;border-radius:5px;border:1px solid rgba(255,59,48,.4);background:none;color:#ff3b30;cursor:pointer">Delete All History…</button>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+
+      <sc-if value="{{ sheetOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,.18);display:flex;align-items:flex-start;justify-content:center">
+          <div style="margin-top:38px;width:420px;border-radius:0 0 10px 10px;background:light-dark(#ececee,#323236);box-shadow:0 18px 50px rgba(0,0,0,.4);padding:20px 20px 16px;display:flex;flex-direction:column;gap:10px">
+            <span style="font-size:13px;font-weight:600;color:light-dark(#1d1d1f,#f5f5f7)">Delete all history?</span>
+            <span style="font-size:12px;line-height:1.5;color:light-dark(#515156,#aeaeb2)">This permanently removes 142 dictations, including audio and every transcript version. Your dictionary is not affected. This cannot be undone.</span>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
+              <button onClick="{{ closeDeleteSheet }}" style="font-size:13px;padding:4px 16px;border-radius:6px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Cancel</button>
+              <button onClick="{{ closeDeleteSheet }}" style="font-size:13px;font-weight:600;padding:4px 16px;border-radius:6px;border:none;background:#ff3b30;color:#fff;cursor:pointer">Delete All</button>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { scheme: 'light', pane: 'General', launch: true, term: 'Consigliere', sheetOpen: false, testResult: '…' };
+  termData = {
+    'ChatGPT': { aliases: ['chat gpt', 'chat g p t'], enabled: true },
+    'Claude Code': { aliases: ['cloud code', 'clod code'], enabled: true },
+    'Consigliere': { aliases: ['consiliary', 'conciliere', 'con silly air'], enabled: true },
+    'n8n': { aliases: ['n eight n', 'nathan'], enabled: false }
+  };
+  renderVals() {
+    const s = this.state;
+    const paneList = [
+      { name: 'General', icon: '⚙' },
+      { name: 'Dictation', icon: '◎' },
+      { name: 'Dictionary', icon: 'Aa' },
+      { name: 'Data & Privacy', icon: '⛨' }
+    ];
+    const td = this.termData[s.term];
+    return {
+      scheme: s.scheme,
+      setLight: () => this.setState({ scheme: 'light' }), setDark: () => this.setState({ scheme: 'dark' }),
+      lightBtnBg: s.scheme === 'light' ? '#e5e5ea' : 'transparent', lightBtnFg: s.scheme === 'light' ? '#1d1d1f' : '#c9c9ce',
+      darkBtnBg: s.scheme === 'dark' ? '#e5e5ea' : 'transparent', darkBtnFg: s.scheme === 'dark' ? '#1d1d1f' : '#c9c9ce',
+      paneName: s.pane === 'General' ? 'General' : s.pane,
+      panes: paneList.map(p => ({
+        name: p.name, icon: p.icon,
+        select: () => this.setState({ pane: p.name }),
+        bg: s.pane === p.name ? 'light-dark(rgba(0,0,0,.08),rgba(255,255,255,.12))' : 'transparent',
+        iconColor: s.pane === p.name ? 'light-dark(#007aff,#0a84ff)' : 'light-dark(#6e6e73,#98989d)'
+      })),
+      isGeneral: s.pane === 'General', isDictation: s.pane === 'Dictation',
+      isDictionary: s.pane === 'Dictionary', isPrivacy: s.pane === 'Data & Privacy',
+      launchChecked: s.launch, launchApproval: s.launch,
+      toggleLaunch: () => this.setState(p => ({ launch: !p.launch })),
+      terms: Object.keys(this.termData).map(name => ({
+        name, disabled: !this.termData[name].enabled,
+        select: () => this.setState({ term: name, testResult: '…' }),
+        bg: s.term === name ? 'light-dark(#007aff,#0a84ff)' : 'transparent',
+        fg: s.term === name ? '#ffffff' : 'light-dark(#1d1d1f,#f0f0f2)'
+      })),
+      termName: s.term, termEnabled: td.enabled, noop: () => {},
+      aliases: td.aliases,
+      testInput: e => {
+        let v = e.target.value;
+        td.aliases.forEach(a => { const i = v.toLowerCase().indexOf(a); if (i >= 0) v = v.slice(0, i) + s.term + v.slice(i + a.length); });
+        this.setState({ testResult: v || '…' });
+      },
+      testResult: s.testResult,
+      privacyRows: [
+        { icon: '✓', color: '#28a745', title: 'Microphone', state: 'Granted', effect: 'Required to record dictations.', action: null },
+        { icon: '⚠', color: '#ff9500', title: 'Accessibility', state: 'Not granted', effect: 'Without it, results are copied instead of pasted automatically.', action: 'Open System Settings…' },
+        { icon: '✓', color: '#28a745', title: 'Durable storage', state: 'Ready', effect: 'Recordings are written to disk before transcription begins.', action: null }
+      ],
+      sheetOpen: s.sheetOpen,
+      openDeleteSheet: () => this.setState({ sheetOpen: true }),
+      closeDeleteSheet: () => this.setState({ sheetOpen: false })
+    };
+  }
+}
+</script>
+</body>
+</html>
