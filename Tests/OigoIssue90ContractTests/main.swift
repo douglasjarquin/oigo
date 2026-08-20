@@ -32,7 +32,14 @@ private struct OigoIssue90ContractTests {
             ("pipeline-overflow", testPipelineOverflow),
             ("pipeline-writer-failure-vs-speech", testWriterFailureVersusSpeech),
             ("pipeline-stale-generation", testStaleGeneration),
-            ("pipeline-start-stop-cycles", testStartStopCycles)
+            ("pipeline-start-stop-cycles", testStartStopCycles),
+            ("unsupported-pcm-rejected-at-init", testUnsupportedPCMRejectedAtInit),
+            ("cancel-preserves-caf-prefix", testCancelPreservesCAFPrefix),
+            ("interrupt-preserves-caf-prefix", testInterruptPreservesCAFPrefix),
+            ("slow-speech-does-not-overflow", testSlowSpeechDoesNotOverflow),
+            ("recorder-startup-interruption", testRecorderStartupInterruption),
+            ("recorder-stop-after-overflow", testRecorderStopAfterOverflow),
+            ("recorder-concurrent-terminalize", testRecorderConcurrentTerminalize)
         ]
 
         let selected = tests.filter { filter == nil || $0.0.contains(filter ?? "") }
@@ -254,6 +261,19 @@ private struct OigoIssue90ContractTests {
         }
         writer.close()
 
+        let readDescriptor = try store.openAudioFileDescriptor(for: session)
+        do {
+            let reader = try CAFReader(descriptor: readDescriptor, ownsDescriptor: true)
+            let readerFrames = try reader.frameLength()
+            reader.close()
+            guard readerFrames == Int64(samples.count),
+                  reader.usesPathExtensionInference == false else {
+                throw ContractFailure(message: "CAF reader did not reopen the explicit CAF descriptor")
+            }
+        } catch let error as CAFReaderError {
+            print("INCONCLUSIVE: native CAF reader unavailable: " + String(describing: error))
+        }
+
         var pathInfo = stat()
         guard lstat(session.audioURL.path, &pathInfo) == 0,
               pathInfo.st_dev == descriptorInfo.st_dev,
@@ -360,6 +380,7 @@ private struct OigoIssue90ContractTests {
             _ = pipeline.tryAccept(buffer, generation: 4)
         }
         pipeline.stopAndWait()
+        pipeline.waitForSpeechHandoff()
         guard writer.writeCount == 2,
               writer.failures.contains(where: { $0.contains("injected writer failure") }),
               speech.count >= 1 else {
@@ -449,6 +470,223 @@ private struct OigoIssue90ContractTests {
             throw ContractFailure(
                 message: "100 start/stop cycles leaked descriptors: before=\(before) after=\(after)"
             )
+        }
+    }
+
+    private static func testUnsupportedPCMRejectedAtInit() throws {
+        var asbd = AudioStreamBasicDescription(
+            mSampleRate: 16_000,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 3,
+            mFramesPerPacket: 1,
+            mBytesPerFrame: 3,
+            mChannelsPerFrame: 1,
+            mBitsPerChannel: 24,
+            mReserved: 0
+        )
+        let format = try requiredFormat(AVAudioFormat(streamDescription: &asbd))
+        do {
+            _ = try CanonicalMonoAdapter(sourceFormat: format, selectedChannel: 0)
+            throw ContractFailure(message: "24-bit PCM was accepted at adapter init")
+        } catch CanonicalMonoAdapterError.unsupportedLayout {
+            return
+        }
+    }
+
+    private static func testCancelPreservesCAFPrefix() throws {
+        try assertTerminalPreservesCAFPrefix(cancel: true)
+    }
+
+    private static func testInterruptPreservesCAFPrefix() throws {
+        try assertTerminalPreservesCAFPrefix(cancel: false)
+    }
+
+    private static func assertTerminalPreservesCAFPrefix(cancel: Bool) throws {
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let session = try store.createSession(now: Date(timeIntervalSince1970: cancel ? 11_000 : 11_100))
+        let descriptor = try store.createAudioFileDescriptor(for: session)
+        let format = try monoFormat()
+        let cafWriter: CAFWriter
+        do {
+            cafWriter = try CAFWriter(descriptor: descriptor, format: format)
+        } catch {
+            descriptor.close()
+            print("INCONCLUSIVE: native CAF writer unavailable: " + String(describing: error))
+            return
+        }
+        let writer = GatedCAFWriter(inner: cafWriter)
+        let pipeline = try makePipeline(writer: writer, generation: 21, capacity: 8)
+        let first = try makeSineBuffer(frames: 32, seed: 1)
+        let second = try makeSineBuffer(frames: 32, seed: 2)
+        guard pipeline.tryAccept(first, generation: 21) == .accepted else {
+            throw ContractFailure(message: "first buffer was not accepted")
+        }
+        let wroteFirst = Date().addingTimeInterval(0.5)
+        while writer.writeCount < 1 && Date() < wroteFirst {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        guard writer.writeCount == 1 else {
+            pipeline.cancelAndWait()
+            throw ContractFailure(message: "first buffer was not committed before the second was queued")
+        }
+        guard pipeline.tryAccept(second, generation: 21) == .accepted else {
+            throw ContractFailure(message: "second buffer was not accepted")
+        }
+        if cancel {
+            pipeline.cancelAndWait()
+        } else {
+            pipeline.interruptAndWait("test interruption")
+        }
+        let readerDescriptor = try store.openAudioFileDescriptor(for: session)
+        let reader = try CAFReader(descriptor: readerDescriptor, ownsDescriptor: true)
+        let frames = try reader.frameLength()
+        reader.close()
+        guard frames == 32 else {
+            throw ContractFailure(
+                message: "cancel/interrupt did not preserve only the committed CAF prefix, frames=\(frames)"
+            )
+        }
+    }
+
+    private static func testSlowSpeechDoesNotOverflow() throws {
+        let writer = ScriptedWriter()
+        let speech = SpeechSink()
+        speech.blockOnConsume = true
+        let pipeline = try makePipeline(
+            writer: writer,
+            generation: 22,
+            capacity: 8,
+            onBuffer: { buffer in
+                speech.consume(buffer)
+            }
+        )
+        let buffer = try makeSineBuffer(frames: 16, seed: 9)
+        for _ in 0..<6 {
+            let result = pipeline.tryAccept(buffer, generation: 22)
+            guard result == .accepted else {
+                speech.unblock()
+                throw ContractFailure(message: "slow Speech overflowed durable capture: " + String(describing: result))
+            }
+        }
+        speech.unblock()
+        pipeline.stopAndWait()
+        guard writer.frameCounts.count == 6,
+              writer.failures.isEmpty else {
+            throw ContractFailure(message: "slow Speech terminalized or truncated durable CAF writes")
+        }
+    }
+
+    private static func testRecorderStartupInterruption() throws {
+        let writer = ScriptedWriter()
+        let recorder = AudioRecorder(
+            deviceMonitor: EmptyDeviceMonitor(),
+            inputRouter: FailingInputRouter()
+        )
+        let generation = try recorder.testClaimStart()
+        let pipeline = try makePipeline(writer: writer, generation: generation, capacity: 4)
+        recorder.testInstallPipeline(pipeline)
+        recorder.testNoteInterruption("audio input configuration changed", generation: generation)
+        recorder.testApplyEngineStart(generation: generation)
+        guard !recorder.testIsStarting,
+              !recorder.isRecording,
+              pipeline.isFinalized else {
+            throw ContractFailure(message: "startup interruption returned success and left capture starting")
+        }
+        guard recorder.testLatchedFailure?.contains("configuration") == true else {
+            throw ContractFailure(message: "startup interruption was not latched")
+        }
+    }
+
+    private static func testRecorderStopAfterOverflow() throws {
+        let writer = ScriptedWriter()
+        writer.blockWrites = true
+        let recorder = AudioRecorder(
+            deviceMonitor: EmptyDeviceMonitor(),
+            inputRouter: FailingInputRouter()
+        )
+        let generation = try recorder.testClaimStart()
+        let format = try monoFormat()
+        let adapter = try CanonicalMonoAdapter(sourceFormat: format, selectedChannel: 0)
+        let pipeline = CapturePipeline(
+            generation: generation,
+            adapter: adapter,
+            writer: writer,
+            capacity: 2,
+            maxFrames: 1_024,
+            maxBytes: 2 * 1_024 * MemoryLayout<Float>.size,
+            onBuffer: { _ in },
+            onFinish: {},
+            onInterruption: { _ in },
+            onFailure: { reason in
+                writer.failures.append(reason)
+                recorder.testNotifyFailure(reason, generation: generation)
+            },
+            teardownHandler: {},
+            onTerminalized: {
+                recorder.testNotifyTerminalized(generation: generation)
+            }
+        )
+        recorder.testInstallPipeline(pipeline, recording: true)
+        let buffer = try makeSineBuffer(frames: 8, seed: 3)
+        var overflowed = false
+        for _ in 0..<6 {
+            if pipeline.tryAccept(buffer, generation: generation) == .overflow {
+                overflowed = true
+            }
+        }
+        writer.unblock()
+        let deadline = Date().addingTimeInterval(1)
+        while !pipeline.isFinalized && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        guard overflowed else {
+            throw ContractFailure(message: "overflow was not produced")
+        }
+        do {
+            try recorder.stop()
+            throw ContractFailure(message: "stop after overflow succeeded and could mark the session complete")
+        } catch let error as AudioRecorderError {
+            guard case .captureFailed(let reason) = error,
+                  reason == CapturePipelineFailure.overflow.rawValue else {
+                throw ContractFailure(message: "stop after overflow did not report audio_pipeline_overflow")
+            }
+        }
+        guard !recorder.isRecording, !recorder.testIsFinishing else {
+            throw ContractFailure(message: "overflow left the recorder active")
+        }
+    }
+
+    private static func testRecorderConcurrentTerminalize() throws {
+        let writer = ScriptedWriter()
+        let recorder = AudioRecorder(
+            deviceMonitor: EmptyDeviceMonitor(),
+            inputRouter: FailingInputRouter()
+        )
+        let generation = try recorder.testClaimStart()
+        let pipeline = try makePipeline(writer: writer, generation: generation, capacity: 4)
+        recorder.testInstallPipeline(pipeline, recording: true)
+        let buffer = try makeSineBuffer(frames: 8, seed: 4)
+        _ = pipeline.tryAccept(buffer, generation: generation)
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global().async {
+            recorder.cancel()
+            group.leave()
+        }
+        group.enter()
+        DispatchQueue.global().async {
+            recorder.testNoteInterruption("system sleep interrupted recording", generation: generation)
+            group.leave()
+        }
+        group.wait()
+        guard !recorder.isRecording,
+              !recorder.testIsStarting,
+              !recorder.testIsFinishing,
+              pipeline.isFinalized else {
+            throw ContractFailure(message: "concurrent terminalize left finishing set or capture live")
         }
     }
 
@@ -680,13 +918,75 @@ private final class ScriptedWriter: CanonicalAudioWriting, @unchecked Sendable {
 
 private final class SpeechSink: @unchecked Sendable {
     var failOnBuffer: Int?
+    var blockOnConsume = false
+    private let gate = DispatchSemaphore(value: 0)
     private(set) var count = 0
 
     func consume(_ buffer: AudioCaptureBuffer) {
+        if blockOnConsume {
+            gate.wait()
+        }
         count += 1
         if failOnBuffer == count {
             return
         }
         _ = buffer
+    }
+
+    func unblock() {
+        blockOnConsume = false
+        gate.signal()
+        gate.signal()
+        gate.signal()
+        gate.signal()
+        gate.signal()
+        gate.signal()
+        gate.signal()
+        gate.signal()
+    }
+}
+
+private final class GatedCAFWriter: CanonicalAudioWriting, @unchecked Sendable {
+    private let inner: CAFWriter
+    private let lock = NSLock()
+    private(set) var writeCount = 0
+
+    init(inner: CAFWriter) {
+        self.inner = inner
+    }
+
+    func writeCanonicalMono(samples: UnsafePointer<Float>, frameCount: Int) throws {
+        lock.lock()
+        writeCount += 1
+        let current = writeCount
+        lock.unlock()
+        try inner.writeCanonicalMono(samples: samples, frameCount: frameCount)
+        if current == 1 {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+    }
+
+    func close() {
+        inner.close()
+    }
+}
+
+private final class EmptyDeviceMonitor: AudioDeviceMonitoring {
+    func currentDevices() throws -> [OigoInputDevice] {
+        []
+    }
+
+    func start(onChange: @escaping @Sendable ([OigoInputDevice]) -> Void) {
+        _ = onChange
+    }
+
+    func stop() {}
+}
+
+private final class FailingInputRouter: AudioInputDeviceRouting {
+    func route(inputNode: AVAudioInputNode, to deviceID: UInt32) throws {
+        _ = inputNode
+        _ = deviceID
+        throw AudioRecorderError.inputDeviceRouteFailed
     }
 }

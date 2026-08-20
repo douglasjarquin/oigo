@@ -98,7 +98,7 @@ let package = Package(
         ),
         .target(
             name: "OigoTranscription",
-            dependencies: ["OigoCore"],
+            dependencies: ["OigoCore", "OigoCapture"],
             path: "Sources/OigoTranscription",
             linkerSettings: [
                 .linkedFramework("AVFAudio"),

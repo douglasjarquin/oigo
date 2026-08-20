@@ -28,6 +28,7 @@ public final class CapturePipeline: @unchecked Sendable {
     private let adapter: CanonicalMonoAdapter
     private let writer: CanonicalAudioWriting
     private let workQueue: DispatchQueue
+    private let speechQueue: DispatchQueue
     private let lock = NSLock()
     private let finishedGroup = DispatchGroup()
 
@@ -80,6 +81,7 @@ public final class CapturePipeline: @unchecked Sendable {
         self.onTerminalized = onTerminalized
         self.permissionCheck = permissionCheck
         self.workQueue = DispatchQueue(label: "com.oigo.capture.producer")
+        self.speechQueue = DispatchQueue(label: "com.oigo.capture.speech")
         self.slots = (0..<max(1, capacity)).map { _ in
             Slot(sampleCapacity: max(1, maxFrames))
         }
@@ -201,6 +203,11 @@ public final class CapturePipeline: @unchecked Sendable {
         return finalized
     }
 
+    @_spi(Testing)
+    public func waitForSpeechHandoff() {
+        speechQueue.sync(flags: .barrier) {}
+    }
+
     private func requestTerminal(_ kind: TerminalKind) {
         lock.lock()
         if finalized {
@@ -278,19 +285,19 @@ public final class CapturePipeline: @unchecked Sendable {
             channelCount: 1,
             pcmData: pcmData
         )
-        let markFirst: Bool = {
-            lock.lock()
-            defer { lock.unlock() }
-            guard firstBuffer else {
-                return false
-            }
-            firstBuffer = false
-            return true
-        }()
+        lock.lock()
+        let callback = onBuffer
+        let markFirst = firstBuffer
         if markFirst {
-            instrumentation?.mark(.firstAudioBuffer)
+            firstBuffer = false
         }
-        onBuffer?(captureBuffer)
+        lock.unlock()
+        speechQueue.async { [instrumentation] in
+            if markFirst {
+                instrumentation?.mark(.firstAudioBuffer)
+            }
+            callback?(captureBuffer)
+        }
         return true
     }
 
@@ -321,9 +328,11 @@ public final class CapturePipeline: @unchecked Sendable {
         discarded.forEach(recycle)
         teardownHandler?()
         writer.close()
-        onFinish?()
         switch kind {
-        case .none, .userStop, .cancel:
+        case .userStop, .cancel:
+            speechQueue.sync(flags: .barrier) {}
+            onFinish?()
+        case .none:
             break
         case .interrupt(let reason):
             onInterruption?(reason)

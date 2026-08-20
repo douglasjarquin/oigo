@@ -14,6 +14,7 @@ public enum AudioRecorderError: Error, CustomStringConvertible, Sendable {
     case inputDeviceRouteFailed
     case invalidInputFormat
     case selectedChannelUnavailable
+    case captureFailed(String)
     case engineStartFailed(String)
 
     public var description: String {
@@ -36,6 +37,8 @@ public enum AudioRecorderError: Error, CustomStringConvertible, Sendable {
             "microphone input format is unavailable"
         case .selectedChannelUnavailable:
             "the selected input channel is not available on this microphone; choose another channel in Settings"
+        case .captureFailed(let reason):
+            reason
         case .engineStartFailed(let reason):
             "audio engine could not start: " + reason
         }
@@ -531,6 +534,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private let inputRouter: AudioInputDeviceRouting
     private let instrumentation: PerformanceInstrumentation
     private let callbackDeliveryGate = AudioRecordingCallbackGate()
+    private let controlQueue = DispatchQueue(label: "com.oigo.capture.control")
     private var engine: AVAudioEngine?
     private var preparedEngine: AVAudioEngine?
     private var pipeline: CapturePipeline?
@@ -539,8 +543,11 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     private var recording = false
     private var starting = false
     private var finishing = false
+    private var terminalWaiters = 0
     private var pendingInterruptionReason: String?
     private var failureReported = false
+    private var latchedTerminal: LatchedTerminal?
+    private var boundPipelineGeneration: UInt64 = 0
     private var selectedInput: OigoInputSelection = .systemDefault
     private var selectedChannel: Int = OigoInputChannelPolicy.defaultIndex
     private var activeSelection: OigoInputSelection?
@@ -715,13 +722,28 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             instrumentation: instrumentation,
             onBuffer: onBuffer,
             onFinish: onFinish,
-            onInterruption: onInterruption,
-            onFailure: onFailure,
+            onInterruption: { [weak self] reason in
+                self?.latchTerminal(.interrupt(reason), generation: recordingGeneration)
+                onInterruption(reason)
+            },
+            onFailure: { [weak self] reason in
+                self?.latchTerminal(.failure(reason), generation: recordingGeneration)
+                onFailure(reason)
+            },
             teardownHandler: { [weak self] in
                 self?.beginEngineTeardown()
             },
             onTerminalized: { [weak self] in
-                self?.markCaptureIdle()
+                guard let self else {
+                    return
+                }
+                self.lock.lock()
+                let current = self.pipeline
+                self.lock.unlock()
+                guard let current else {
+                    return
+                }
+                self.markCaptureIdle(generation: recordingGeneration, pipeline: current)
             },
             permissionCheck: {
                 AVAudioApplication.shared.recordPermission == .granted
@@ -736,12 +758,14 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         }
         self.engine = engine
         self.pipeline = pipeline
+        boundPipelineGeneration = recordingGeneration
         pendingInterruptionReason = nil
         failureReported = false
+        latchedTerminal = nil
         lock.unlock()
 
         do {
-            let interruptedDuringStartup = try callbackDeliveryGate.performExclusively {
+            let startupInterruption = try callbackDeliveryGate.performExclusively { () -> String? in
                 inputNode.installTap(onBus: 0, bufferSize: 1_024, format: nil) { [weak self] buffer, _ in
                     self?.handle(buffer, generation: recordingGeneration)
                 }
@@ -750,16 +774,26 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                     object: engine,
                     queue: nil
                 ) { [weak self] _ in
-                    self?.handleInterruption(
-                        "audio input configuration changed",
-                        generation: recordingGeneration
-                    )
+                    guard let recorder = self else {
+                        return
+                    }
+                    recorder.controlQueue.async {
+                        recorder.handleInterruption(
+                            "audio input configuration changed",
+                            generation: recordingGeneration
+                        )
+                    }
                 }
                 lock.lock()
                 configurationObserver = observer
                 lock.unlock()
                 deviceMonitor.start { [weak self] devices in
-                    self?.handleDeviceChange(devices, generation: recordingGeneration)
+                    guard let recorder = self else {
+                        return
+                    }
+                    recorder.controlQueue.async {
+                        recorder.handleDeviceChange(devices, generation: recordingGeneration)
+                    }
                 }
                 let workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
                 let lifecycleNames = [
@@ -775,7 +809,12 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                         let reason = notification.name.rawValue.contains("Sleep")
                             ? "system sleep interrupted recording"
                             : "screen lock interrupted recording"
-                        self?.handleInterruption(reason, generation: recordingGeneration)
+                        guard let recorder = self else {
+                            return
+                        }
+                        recorder.controlQueue.async {
+                            recorder.handleInterruption(reason, generation: recordingGeneration)
+                        }
                     }
                 }
                 lock.lock()
@@ -785,30 +824,13 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                 defer { instrumentation.mark(.audioEngineStartEnd) }
                 engine.prepare()
                 try engine.start()
-                lock.lock()
-                let startupInterruption = pendingInterruptionReason
-                pendingInterruptionReason = nil
-                let startupIsCurrent = starting
-                    && recordingFence.accepts(recordingGeneration)
-                    && startupInterruption == nil
-                if startupIsCurrent {
-                    starting = false
-                    recording = true
-                }
-                lock.unlock()
-                if let startupInterruption {
-                    handleInterruption(startupInterruption, generation: recordingGeneration)
-                    return true
-                }
-                guard startupIsCurrent else {
-                    throw AudioRecorderError.inputDeviceUnavailable
-                }
-                return false
+                return applyEngineStartResult(generation: recordingGeneration)
             }
-            startCompleted = true
-            if interruptedDuringStartup {
+            if let startupInterruption {
+                terminalize(.interrupt(startupInterruption), generation: recordingGeneration)
                 return
             }
+            startCompleted = true
         } catch {
             cancel()
             throw AudioRecorderError.engineStartFailed(String(describing: error))
@@ -825,6 +847,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             starting = true
             pendingInterruptionReason = nil
             failureReported = false
+            latchedTerminal = nil
             return recordingFence.begin()
         }
         guard let generation else {
@@ -938,6 +961,15 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
     public func stop() throws {
         terminalize(.userStop, generation: nil)
+        lock.lock()
+        let latched = latchedTerminal
+        lock.unlock()
+        switch latched {
+        case .failure(let reason), .interrupt(let reason):
+            throw AudioRecorderError.captureFailed(reason)
+        case .none:
+            break
+        }
     }
 
     public func cancel() {
@@ -990,60 +1022,130 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         case interrupt(String)
     }
 
+    private enum LatchedTerminal: Equatable {
+        case failure(String)
+        case interrupt(String)
+    }
+
+    private enum TerminalClaim {
+        case won(CapturePipeline, UInt64)
+        case engineOnly(UInt64)
+        case alreadyFinishing
+        case idle
+    }
+
+    private func applyEngineStartResult(generation: UInt64) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        let reason = pendingInterruptionReason
+        pendingInterruptionReason = nil
+        let startupIsCurrent = starting
+            && recordingFence.accepts(generation)
+            && reason == nil
+        if startupIsCurrent {
+            starting = false
+            recording = true
+        }
+        return reason
+    }
+
+    private func latchTerminal(_ terminal: LatchedTerminal, generation: UInt64) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard recordingFence.accepts(generation) || boundPipelineGeneration == generation else {
+            return
+        }
+        if latchedTerminal == nil {
+            latchedTerminal = terminal
+        }
+        failureReported = true
+        recording = false
+        starting = false
+        finishing = true
+    }
+
     private func terminalize(
         _ action: TerminalAction,
         generation: UInt64?
     ) {
-        let pipeline: CapturePipeline? = callbackDeliveryGate.performExclusively {
+        let claim: TerminalClaim = callbackDeliveryGate.performExclusively {
             lock.lock()
             defer { lock.unlock() }
-            guard recording || starting,
-                  generation.map(recordingFence.accepts) ?? true else {
-                return nil
+            if let generation, !recordingFence.accepts(generation) {
+                return .idle
+            }
+            if finishing {
+                return .alreadyFinishing
+            }
+            guard recording || starting else {
+                return .idle
             }
             recording = false
             starting = false
             finishing = true
+            terminalWaiters += 1
             pendingInterruptionReason = nil
-            recordingFence.invalidate()
             activeSelection = nil
             activeDeviceUID = nil
-            let pipeline = self.pipeline
-            return pipeline
+            guard let pipeline else {
+                return .engineOnly(boundPipelineGeneration)
+            }
+            return .won(pipeline, boundPipelineGeneration)
         }
-        guard let pipeline else {
-            teardownEngineAndObservers()
-            lock.lock()
-            finishing = false
-            lock.unlock()
+        switch claim {
+        case .alreadyFinishing, .idle:
             return
+        case .engineOnly(let pipelineGeneration):
+            teardownEngineAndObservers()
+            finishTerminalWait(generation: pipelineGeneration, pipeline: nil)
+        case .won(let pipeline, let pipelineGeneration):
+            switch action {
+            case .userStop:
+                pipeline.stopAndWait()
+            case .cancel:
+                pipeline.cancelAndWait()
+            case .interrupt(let reason):
+                latchTerminal(.interrupt(reason), generation: pipelineGeneration)
+                pipeline.interruptAndWait(reason)
+            }
+            finishTerminalWait(generation: pipelineGeneration, pipeline: pipeline)
         }
-        switch action {
-        case .userStop:
-            pipeline.stopAndWait()
-        case .cancel:
-            pipeline.cancelAndWait()
-        case .interrupt(let reason):
-            pipeline.interruptAndWait(reason)
-        }
-        markCaptureIdle()
     }
 
-    private func markCaptureIdle() {
+    private func finishTerminalWait(generation: UInt64, pipeline: CapturePipeline?) {
         lock.lock()
+        terminalWaiters = max(0, terminalWaiters - 1)
+        if terminalWaiters == 0 {
+            if pipeline == nil || self.pipeline === pipeline {
+                self.pipeline = nil
+            }
+            finishing = false
+            if recordingFence.accepts(generation) {
+                recordingFence.invalidate()
+            }
+        }
+        lock.unlock()
+    }
+
+    private func markCaptureIdle(generation: UInt64, pipeline: CapturePipeline) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard self.pipeline === pipeline else {
+            return
+        }
+        self.pipeline = nil
         recording = false
         starting = false
-        finishing = false
-        recordingFence.invalidate()
-        pipeline = nil
-        activeSelection = nil
-        activeDeviceUID = nil
-        lock.unlock()
+        if terminalWaiters == 0 {
+            finishing = false
+            if recordingFence.accepts(generation) {
+                recordingFence.invalidate()
+            }
+        }
     }
 
     private func beginEngineTeardown() {
         lock.lock()
-        recordingFence.invalidate()
         recording = false
         starting = false
         lock.unlock()
@@ -1092,5 +1194,78 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         }
         lock.unlock()
         terminalize(.interrupt(reason), generation: generation)
+    }
+
+    @_spi(Testing)
+    public var testIsStarting: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return starting
+    }
+
+    @_spi(Testing)
+    public var testIsFinishing: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return finishing
+    }
+
+    @_spi(Testing)
+    public var testLatchedFailure: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        switch latchedTerminal {
+        case .failure(let reason), .interrupt(let reason):
+            return reason
+        case .none:
+            return nil
+        }
+    }
+
+    @_spi(Testing)
+    public func testClaimStart() throws -> UInt64 {
+        try claimStart()
+    }
+
+    @_spi(Testing)
+    public func testInstallPipeline(_ pipeline: CapturePipeline, recording: Bool = false) {
+        lock.lock()
+        self.pipeline = pipeline
+        boundPipelineGeneration = pipeline.generation
+        failureReported = false
+        latchedTerminal = nil
+        if recording {
+            starting = false
+            self.recording = true
+        }
+        lock.unlock()
+    }
+
+    @_spi(Testing)
+    public func testNotifyFailure(_ reason: String, generation: UInt64) {
+        latchTerminal(.failure(reason), generation: generation)
+    }
+
+    @_spi(Testing)
+    public func testNotifyTerminalized(generation: UInt64) {
+        lock.lock()
+        let pipeline = self.pipeline
+        lock.unlock()
+        guard let pipeline else {
+            return
+        }
+        markCaptureIdle(generation: generation, pipeline: pipeline)
+    }
+
+    @_spi(Testing)
+    public func testNoteInterruption(_ reason: String, generation: UInt64) {
+        handleInterruption(reason, generation: generation)
+    }
+
+    @_spi(Testing)
+    public func testApplyEngineStart(generation: UInt64) {
+        if let reason = applyEngineStartResult(generation: generation) {
+            terminalize(.interrupt(reason), generation: generation)
+        }
     }
 }

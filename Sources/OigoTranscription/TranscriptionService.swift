@@ -3,6 +3,7 @@ import CoreMedia
 import Darwin
 import Foundation
 @_spi(Testing) import OigoCore
+import OigoCapture
 import Speech
 
 private final class AudioPCMBufferBox: @unchecked Sendable {
@@ -677,7 +678,11 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         } catch {
             throw remember(.malformedAudio(url, String(describing: error)))
         }
-        let audioFile = securedAudioFile.file
+        let reader = securedAudioFile.reader
+        let captureFormat = AudioCaptureFormat(
+            sampleRate: reader.processingFormat.sampleRate,
+            channelCount: 1
+        )
         let staging: RawTextStaging
         do {
             staging = try store.beginRawTextStaging(for: session)
@@ -693,6 +698,27 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         }
         defer { clearRetryResources() }
 
+        let audioFormat: AVAudioFormat
+        let audioConverter: AVAudioConverter
+        do {
+            guard let analyzerFormat = await Self.analyzerAudioFormat(
+                for: captureFormat,
+                compatibleWith: module
+            ),
+            let converter = AVAudioConverter(
+                from: reader.processingFormat,
+                to: analyzerFormat
+            ) else {
+                throw TranscriptionError.invalidCaptureFormat
+            }
+            converter.primeMethod = .none
+            audioFormat = analyzerFormat
+            audioConverter = converter
+        } catch {
+            await SpeechModels.endRetention()
+            throw remember(Self.map(error))
+        }
+
         var createdAnalyzer: SpeechAnalyzer?
         do {
             createdAnalyzer = try await BoundedOperation.run(
@@ -701,15 +727,15 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 timeout: timeoutPolicy.budget(for: .retry),
                 registry: operationRegistry
             ) {
-                try await SpeechAnalyzer(
-                    inputAudioFile: audioFile,
+                let analyzer = SpeechAnalyzer(
                     modules: [module],
                     options: SpeechAnalyzer.Options(
                         priority: .userInitiated,
                         modelRetention: .whileInUse
-                    ),
-                    finishAfterFile: true
+                    )
                 )
+                try await analyzer.prepareToAnalyze(in: audioFormat)
+                return analyzer
             }
             try checkCancellationRequested()
         } catch {
@@ -779,13 +805,20 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
 
         do {
             try Task.checkCancellation()
+            let streamPair = AsyncStream<AnalyzerInput>.makeStream()
+            try feedRetryStream(
+                reader: reader,
+                converter: audioConverter,
+                analyzerFormat: audioFormat,
+                continuation: streamPair.continuation
+            )
             try await BoundedOperation.run(
                 operationID: operationID,
                 stage: .retry,
                 timeout: timeoutPolicy.budget(for: .retry),
                 registry: operationRegistry
             ) {
-                try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+                try await analyzer.start(inputSequence: streamPair.stream)
             }
             try checkCancellationRequested()
             try await BoundedOperation.run(
@@ -1443,6 +1476,35 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             return .cancelled
         }
         return .analysisFailed(String(describing: error))
+    }
+
+    private func feedRetryStream(
+        reader: CAFReader,
+        converter: AVAudioConverter,
+        analyzerFormat: AVAudioFormat,
+        continuation: AsyncStream<AnalyzerInput>.Continuation
+    ) throws {
+        defer { continuation.finish() }
+        while let source = try reader.read(frameCount: 1_024) {
+            guard let samples = source.floatChannelData?.pointee else {
+                throw TranscriptionError.malformedAudio(
+                    URL(fileURLWithPath: "<retry-caf>"),
+                    "saved CAF frames are not canonical Float32 mono"
+                )
+            }
+            let captureBuffer = AudioCaptureBuffer(
+                frameCount: Int(source.frameLength),
+                sampleRate: source.format.sampleRate,
+                channelCount: 1,
+                pcmData: Data(bytes: samples, count: Int(source.frameLength) * MemoryLayout<Float>.size)
+            )
+            let pcmBuffer = try makePCMBuffer(
+                captureBuffer,
+                format: analyzerFormat,
+                converter: converter
+            )
+            continuation.yield(AnalyzerInput(buffer: pcmBuffer))
+        }
     }
 
     private func makePCMBuffer(

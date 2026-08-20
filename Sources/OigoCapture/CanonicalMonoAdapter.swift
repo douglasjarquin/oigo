@@ -36,6 +36,14 @@ public final class CanonicalMonoAdapter: @unchecked Sendable {
               sourceFormat.channelCount > 0 else {
             throw CanonicalMonoAdapterError.invalidSourceFormat
         }
+        switch sourceFormat.commonFormat {
+        case .pcmFormatFloat32, .pcmFormatInt16, .pcmFormatInt32:
+            break
+        default:
+            throw CanonicalMonoAdapterError.unsupportedLayout(
+                "sample format is not a supported linear PCM layout"
+            )
+        }
         let channelCount = Int(sourceFormat.channelCount)
         guard OigoInputChannelPolicy.isValid(selectedChannel, channelCount: channelCount) else {
             throw CanonicalMonoAdapterError.selectedChannelOutOfRange(
