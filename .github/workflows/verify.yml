@@ -93,6 +93,8 @@ jobs:
         run: swift run oigo-issue102-contract-tests
       - name: Issue thirteen dictionary contract harness
         run: swift run oigo-issue13-dictionary-contract-tests
+      - name: Issue fourteen release packaging contract harness
+        run: swift run oigo-issue14-contract-tests
       - name: Issue ninety-two playback lifecycle contract harness
         run: swift run oigo-issue92-contract-tests
 

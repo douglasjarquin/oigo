@@ -113,6 +113,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var targetSnapshot: InsertionTargetSnapshot?
     private var insertionDisplayStatus: OigoHUDProcessingState?
     private var failureDetail: String?
+    private var lastFailureCode: String?
     private lazy var insertionTargetHandoff = InsertionTargetHandoff(
         waitForDestination: { [weak self] in
             await self?.waitForDestinationHandoff()
@@ -336,6 +337,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             },
             deleteAllHistory: { [weak self] in
                 self?.deleteAllHistory()
+            },
+            exportDiagnostics: { [weak self] in
+                guard let self else {
+                    throw OigoSettingsStoreError.storeUnavailable
+                }
+                return try self.makeDiagnosticsExport()
             },
             dictionaryDocument: dictionaryDocument,
             saveDictionary: { [weak self] document in
@@ -937,6 +944,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             case .idle, .complete, .failed, .cancelled, .interrupted:
                 insertionDisplayStatus = nil
                 failureDetail = nil
+                lastFailureCode = nil
                 shortcutFeedbackDetail = nil
                 let microphoneStateBeforeRequest = microphonePermissionState()
                 targetSnapshot = try await insertion.captureTargetBeforeMicrophonePermission {
@@ -947,6 +955,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     clearTargetSnapshot()
                     shortcutBridge.reset()
                     failureDetail = "microphone_permission_retry_required"
+                    lastFailureCode = "microphone_permission_retry_required"
                     shortcutFeedbackDetail = "Microphone permission granted. Press the shortcut again to start dictation."
                     historyWindow?.showMessage(shortcutFeedbackDetail ?? "Press the shortcut again to start dictation.")
                     reportOnboardingTestFailure()
@@ -2699,6 +2708,38 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(root)
     }
 
+    private func makeDiagnosticsExport() throws -> Data {
+        let sessionCount: Int
+        if let sessionStore {
+            sessionCount = (try? sessionStore.listSessions().count) ?? 0
+        } else {
+            sessionCount = 0
+        }
+        let shortcutRegistration: OigoDiagnosticsShortcutRegistration
+        if shortcutRegistrar.status.isActive {
+            shortcutRegistration = .present
+        } else {
+            shortcutRegistration = .inactive
+        }
+        let snapshot = OigoDiagnosticsSnapshot(
+            appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0",
+            build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1",
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.oigo.app",
+            macOSVersion: OigoDiagnosticsExport.currentMacOSVersion(),
+            architecture: OigoDiagnosticsExport.currentArchitecture(),
+            storageHealth: displayedStorageHealth,
+            dictationState: coordinator.state,
+            lastFailureCode: lastFailureCode,
+            settings: settings,
+            shortcutRegistration: shortcutRegistration,
+            shortcutDisplayName: settings.globalShortcut.displayName,
+            dictionaryEntryCount: dictionaryDocument.entries.count,
+            sessionCount: sessionCount,
+            lastMaintenance: maintenanceCoordinator.sanitizedLastSummary
+        )
+        return try OigoDiagnosticsExport.make(snapshot).jsonData()
+    }
+
     private func deleteAllHistory() {
         guard let store = sessionStore else {
             return
@@ -2891,6 +2932,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 sessionState: .completed,
                 insertionOutcome: .failed
             )
+            lastFailureCode = "insertion.failed"
             historyWindow?.showMessage(failureDetail ?? "Dictation completed; paste failed")
             return
         }
@@ -2899,10 +2941,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 insertionDisplayStatus = nil
             }
             failureDetail = nil
+            lastFailureCode = "cancelled"
             return
         }
         insertionDisplayStatus = .failed
         if let error {
+            lastFailureCode = OigoDiagnosticsFailureCode.code(for: error)
             failureDetail = Self.friendlyError("Dictation failed", error)
             historyWindow?.showMessage(failureDetail ?? Self.friendlyError("Dictation failed", error))
         }

@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import OigoCore
 import OigoHotKey
 
@@ -33,6 +34,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
     private let openDataFolder: () -> Void
     private let retryStorage: () -> Void
     private let deleteAllHistory: () -> Void
+    private let exportDiagnostics: () throws -> Data
     private let saveDictionary: (DictionaryDocument) -> String?
     private let previewDictionary: (String) -> String
     private let addStarterTerms: () -> (DictionaryDocument, String?)
@@ -83,6 +85,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         openDataFolder: @escaping () -> Void,
         retryStorage: @escaping () -> Void,
         deleteAllHistory: @escaping () -> Void,
+        exportDiagnostics: @escaping () throws -> Data,
         dictionaryDocument: DictionaryDocument,
         saveDictionary: @escaping (DictionaryDocument) -> String?,
         previewDictionary: @escaping (String) -> String,
@@ -109,6 +112,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         self.openDataFolder = openDataFolder
         self.retryStorage = retryStorage
         self.deleteAllHistory = deleteAllHistory
+        self.exportDiagnostics = exportDiagnostics
         self.saveDictionary = saveDictionary
         self.previewDictionary = previewDictionary
         self.addStarterTerms = addStarterTerms
@@ -123,13 +127,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         shortcutRecorder = ShortcutRecorderControl(shortcut: settings.globalShortcut)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 880),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Oigo Settings"
-        window.minSize = NSSize(width: 520, height: 640)
+        window.minSize = NSSize(width: 520, height: 720)
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
@@ -223,6 +227,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         let dataButton = NSButton(title: "Open Oigo data folder", target: self, action: #selector(openDataFolderAction))
         let deleteButton = NSButton(title: "Delete All History…", target: self, action: #selector(deleteAllHistoryAction))
         deleteButton.hasDestructiveAction = true
+        let exportButton = NSButton(title: "Export Diagnostics…", target: self, action: #selector(exportDiagnosticsAction))
+        let helpTitle = NSTextField(labelWithString: "About")
+        helpTitle.font = .boldSystemFont(ofSize: 13)
+        let helpBody = NSTextField(
+            wrappingLabelWithString: "Oigo is a menu-bar dictation app for macOS 26 or later on Apple silicon. Microphone and Accessibility permissions are required. Instant inserts the recognized transcript; Clean optionally rewrites it on this Mac. Recordings, transcripts, and the custom dictionary live in Application Support/Oigo. The README and privacy statement ship with the download."
+        )
+        helpBody.textColor = .secondaryLabelColor
         let saveButton = NSButton(title: "Save", target: self, action: #selector(saveSettings))
         saveButton.keyEquivalent = "\r"
 
@@ -297,7 +308,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         storageStack.alignment = .leading
         storageStack.spacing = 6
 
-        let actionStack = NSStackView(views: [rerunButton, historyButton, storageStack, deleteButton])
+        let actionStack = NSStackView(views: [rerunButton, historyButton, storageStack, deleteButton, exportButton])
         actionStack.orientation = .vertical
         actionStack.alignment = .leading
         actionStack.spacing = 8
@@ -329,6 +340,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
             permissionsTitle,
             permissionStack,
             actionStack,
+            helpTitle,
+            helpBody,
             messageLabel,
             saveButton
         ])
@@ -355,6 +368,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
             sampleRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             previewLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             dictionaryMessage.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            helpBody.widthAnchor.constraint(equalTo: stack.widthAnchor),
             saveButton.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
             localePopup.widthAnchor.constraint(equalToConstant: 260),
             inputPopup.widthAnchor.constraint(equalTo: localePopup.widthAnchor),
@@ -529,6 +543,28 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
 
     @objc private func retryStorageAction() {
         retryStorage()
+    }
+
+    @objc private func exportDiagnosticsAction() {
+        guard let window else {
+            return
+        }
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "oigo-diagnostics.json"
+        panel.allowedContentTypes = [.json]
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else {
+                return
+            }
+            do {
+                let data = try self.exportDiagnostics()
+                try data.write(to: url, options: .atomic)
+                self.messageLabel.stringValue = "Diagnostics exported."
+            } catch {
+                self.messageLabel.stringValue = "Diagnostics export failed."
+            }
+        }
     }
 
     @objc private func deleteAllHistoryAction() {

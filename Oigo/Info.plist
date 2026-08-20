@@ -13,13 +13,15 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>1.0.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>26.0</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Oigo needs microphone access to save your dictation audio.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Oigo uses Accessibility and Apple Events to paste dictation into the app you were using, after you grant permission.</string>
     <key>LSUIElement</key>
     <true/>
 </dict>
