@@ -89,6 +89,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var sessionStore: SessionStore?
     private var dictionaryStore: DictionaryStore?
     private var dictionaryDocument = DictionaryDocument.empty
+    private var dictionaryLoadError: String?
     private var lastSession: DictationSession?
     private var pendingSessionBoundary: DictationSession?
     private var reportedMalformedSessionCount = 0
@@ -360,6 +361,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         )
         settingsSessionID = sessionID
         settingsWindow = window
+        window.setDictionaryStatus(dictionaryLoadError)
         window.showWindow(nil)
         window.window?.center()
         window.window?.makeKeyAndOrderFront(nil)
@@ -1520,25 +1522,23 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             guard storageCapability.health.isReady else {
                 return
             }
-            let rawText = try store.readRawText(for: current)
             let locale = current.metadata.configurationSnapshot?.resolvedLocaleIdentifier
                 ?? settings.localeIdentifier
-            let snapshot = compiledDictionary(for: locale)
-            let normalizer = TerminologyNormalizer(snapshot: snapshot)
-            let normalizedText = normalizer.normalize(rawText)
-            if !FileManager.default.fileExists(atPath: current.normalizedTextURL.path) {
-                current = try store.persistNormalizedText(normalizedText, for: current)
-            }
-            let decision = await transcriptCleanup.resolve(
+            let finalized = try await DictionaryTranscriptFinalizer.resolve(
                 mode: .clean,
-                rawText: normalizedText,
+                session: current,
+                store: store,
+                snapshot: compiledDictionary(for: locale),
+                cleanup: transcriptCleanup,
                 deadlineNanoseconds: 4_000_000_000
             )
+            current = finalized.session
+            let decision = finalized.decision
             try Task.checkCancellation()
             guard storageCapability.health.isReady else {
                 return
             }
-            guard let cleanText = decision.cleanText else {
+            if decision.cleanText == nil {
                 let fallbackReason = decision.fallbackReason?.description
                     ?? "cleanup did not complete"
                 try Task.checkCancellation()
@@ -1548,40 +1548,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     cleanupFallbackReason: fallbackReason
                 )
                 historyWindow?.showMessage(
-                    "Clean Again used no output. Raw transcript remains available: "
-                        + fallbackReason
-                )
-                refreshHistory()
-                return
-            }
-            try Task.checkCancellation()
-            do {
-                _ = try store.persistCleanText(
-                    normalizer.normalize(cleanText),
-                    for: current
-                )
-            } catch let error as SessionStoreError {
-                if case .rawTextChanged = error {
-                    throw error
-                }
-                if case .normalizedTextChanged = error {
-                    throw error
-                }
-                if Self.storageFailureCategory(error) != nil {
-                    throw error
-                }
-                let fallbackReason = TranscriptCleanupFallbackReason
-                    .persistenceFailure(Self.failureReason(for: error))
-                    .description
-                try Task.checkCancellation()
-                _ = try store.update(
-                    current,
-                    state: current.metadata.state,
-                    insertionTextSource: current.metadata.insertionTextSource,
-                    cleanupFallbackReason: fallbackReason
-                )
-                historyWindow?.showMessage(
-                    "Clean Again could not save clean.txt. Raw transcript remains available: "
+                    "Clean Again used no output. Normalized transcript remains available: "
                         + fallbackReason
                 )
                 refreshHistory()
@@ -2323,10 +2290,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         guard let dictionaryStore else {
             dictionaryDocument = .empty
+            dictionaryLoadError = nil
             return
         }
         let loaded = dictionaryStore.load()
         dictionaryDocument = loaded.document
+        dictionaryLoadError = loaded.error?.userMessage
     }
 
     private func compiledDictionary(for localeIdentifier: String) -> CompiledDictionarySnapshot {

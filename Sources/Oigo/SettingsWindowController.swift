@@ -799,6 +799,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         previewSampleChanged()
     }
 
+    func setDictionaryStatus(_ message: String?) {
+        dictionaryMessage.stringValue = message ?? ""
+    }
+
     private func persistDictionaryEntries() {
         if let error = saveDictionary(DictionaryDocument(entries: dictionaryEntries)) {
             dictionaryMessage.stringValue = error

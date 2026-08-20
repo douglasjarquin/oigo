@@ -1844,24 +1844,29 @@ public final class SessionStore: @unchecked Sendable {
                 at: current.normalizedTextURL,
                 allowMissing: true
             )
-            try invalidateCleanText(for: current, in: directoryFD)
+            try atomicWrite(
+                data,
+                named: "normalized.txt",
+                in: directoryFD,
+                at: current.normalizedTextURL
+            )
             var metadata = current.metadata
             metadata.updatedAt = date
             metadata.normalizedTextRevision += 1
             metadata.normalizedFromRawRevision = current.metadata.rawTextRevision
             metadata.cleanFromNormalizedRevision = nil
-            try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
             do {
-                try atomicWrite(
-                    data,
+                try writeMetadata(metadata, at: current.metadataURL, directoryFD: directoryFD)
+            } catch {
+                try? removeEntry(
                     named: "normalized.txt",
                     in: directoryFD,
-                    at: current.normalizedTextURL
+                    at: current.normalizedTextURL,
+                    allowMissing: true
                 )
-            } catch {
-                try? writeMetadata(current.metadata, at: current.metadataURL, directoryFD: directoryFD)
                 throw error
             }
+            try? invalidateCleanText(for: current, in: directoryFD)
             return DictationSession(metadata: metadata, directoryURL: current.directoryURL)
         }
     }

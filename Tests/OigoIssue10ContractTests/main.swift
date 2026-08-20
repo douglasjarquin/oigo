@@ -1217,7 +1217,7 @@ private final class BlockingTranscriptionController: TranscriptionController, @u
         }
         if shouldBlock {
             while true {
-                let cancelled = withState { cancellationRequested }
+                let cancelled = withState { cancellationRequested } || Task.isCancelled
                 if cancelled {
                     withState { starting = false }
                     throw TranscriptionError.cancelled
@@ -1247,7 +1247,7 @@ private final class BlockingTranscriptionController: TranscriptionController, @u
         }
         if shouldBlock {
             while true {
-                let cancelled = withState { cancellationRequested }
+                let cancelled = withState { cancellationRequested } || Task.isCancelled
                 if cancelled {
                     withState {
                         finishing = false
