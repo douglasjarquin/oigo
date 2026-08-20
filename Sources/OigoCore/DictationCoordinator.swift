@@ -286,7 +286,6 @@ public final class DictationCoordinator {
     public private(set) var lastFailureReason: String?
     public private(set) var lastFailureCode: DictationFailureCode?
     public private(set) var lastTerminalMetadataWriteFailed = false
-    private var terminalizedSessionID: UUID?
 
     public var state: DictationState {
         machine.state
@@ -423,7 +422,6 @@ public final class DictationCoordinator {
             lastFailureReason = nil
             lastFailureCode = nil
             lastTerminalMetadataWriteFailed = false
-            terminalizedSessionID = nil
             diagnostics.record("audio capture started")
             return preparedSession
         } catch {
@@ -593,7 +591,6 @@ public final class DictationCoordinator {
             lastFailureReason = nil
             lastFailureCode = nil
             lastTerminalMetadataWriteFailed = false
-            terminalizedSessionID = nil
             diagnostics.record("audio capture and transcription started")
             return preparedSession
         } catch {
@@ -975,8 +972,15 @@ public final class DictationCoordinator {
         reason: String? = nil,
         insertionSource: TranscriptInsertionSource? = nil,
         cleanupFallbackReason: String? = nil,
+        sessionID: UUID? = nil,
         at date: Date = Date()
     ) throws -> DictationSession {
+        if let sessionID, currentSession?.id != sessionID {
+            if let terminal = existingCompletedInsertion() {
+                return terminal
+            }
+            throw DictationCoordinatorError.recordingNotActive
+        }
         if let terminal = existingCompletedInsertion() {
             return terminal
         }
@@ -999,8 +1003,12 @@ public final class DictationCoordinator {
     @discardableResult
     public func failInsertion(
         reason: String,
+        sessionID: UUID? = nil,
         at date: Date = Date()
     ) -> DictationSession? {
+        if let sessionID, currentSession?.id != sessionID {
+            return existingCompletedInsertion()
+        }
         if let terminal = existingCompletedInsertion() {
             return terminal
         }
@@ -1023,9 +1031,6 @@ public final class DictationCoordinator {
               let session = currentSession,
               session.metadata.insertionOutcome != nil else {
             return nil
-        }
-        if let terminalizedSessionID, terminalizedSessionID != session.id {
-            return session
         }
         return session
     }
@@ -1061,7 +1066,6 @@ public final class DictationCoordinator {
             _ = try? apply(.inserted)
         }
         currentSession = persisted
-        terminalizedSessionID = persisted.id
         if outcome == .failed {
             lastFailureReason = reason
             lastFailureCode = nil

@@ -823,8 +823,10 @@ public enum DictationTerminalKind: String, CaseIterable, Equatable, Sendable {
     case insertionSecureRejected
     case insertionFailed
     case cancelledBeforeRaw
+    /// Cancellation or shutdown after durable raw text exists, including quit during cleaning or inserting.
     case cancelledAfterRaw
     case interrupted
+    /// Application shutdown during capture or Speech, before durable raw text exists.
     case applicationShutdown
 }
 
@@ -1018,6 +1020,7 @@ public enum DictationTerminalContract {
             hasAudio: true,
             statusCopy: "Interrupted"
         ),
+        // Capture-time shutdown only. Shutdown after raw maps to cancelledAfterRaw.
         DictationTerminalPath(
             kind: .applicationShutdown,
             coordinatorState: .interrupted,

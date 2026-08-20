@@ -39,6 +39,8 @@ private struct OigoIssue8ContractTests {
             print("GREEN: Noncooperative cleanup returns raw fallback by the deadline")
             try await testLateCleanupOutputCannotPersistOrInsert()
             print("GREEN: Late cleanup output cannot persist or change insertion")
+            try await testTwoChunkNoncooperativeDeadlineRetainsLosingGeneration()
+            print("GREEN: Timed-out later chunk retains model resources until release")
             try await testCleanupInstrumentationRecordsLifecycleMetrics()
             print("GREEN: Cleanup availability, start, completion, and fallback metrics are recorded")
             try await testOversizedChunkBoundariesPreserveWhitespace()
@@ -480,6 +482,58 @@ private struct OigoIssue8ContractTests {
               recovered.cleanText == nil,
               !FileManager.default.fileExists(atPath: session.cleanTextURL.path) else {
             throw ContractFailure(message: "a later Clean request published stale model output")
+        }
+    }
+
+    private static func testTwoChunkNoncooperativeDeadlineRetainsLosingGeneration() async throws {
+        let cleaner = NeverReturningCleaner(immediateSuccesses: 1)
+        let metrics = TranscriptCleanupMetrics(forwarding: NoopTranscriptCleanupInstrumentation())
+        let coordinator = TranscriptCleanupCoordinator(
+            cleanerFactory: { cleaner },
+            instrumentation: metrics
+        )
+        let rawText = [
+            (1...140).map { "Sentence \($0) preserves /tmp/file-\($0).json and 42." }.joined(separator: " "),
+            (141...280).map { "Sentence \($0) preserves https://example.com/item/\($0) and 99." }.joined(separator: " ")
+        ].joined(separator: "\n\n")
+        guard TranscriptChunker.split(rawText).count > 1 else {
+            throw ContractFailure(message: "two-chunk fixture did not split")
+        }
+        let deadline: UInt64 = 20_000_000
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let decision = await coordinator.resolve(
+            mode: .clean,
+            rawText: rawText,
+            deadlineNanoseconds: deadline
+        )
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
+        let snapshot = metrics.snapshot()
+        guard decision.fallbackReason == .timeout,
+              decision.insertionSource == .raw,
+              decision.cleanText == nil,
+              elapsedNanoseconds < deadline + 80_000_000,
+              snapshot.resourceReleaseLatencyNanoseconds.isEmpty,
+              coordinator.isRetainingTimedOutGeneration else {
+            throw ContractFailure(message: "later-chunk timeout did not retain the losing generation")
+        }
+
+        let overlapping = await coordinator.resolve(
+            mode: .clean,
+            rawText: rawText,
+            deadlineNanoseconds: deadline
+        )
+        guard overlapping.fallbackReason == .priorGenerationBusy,
+              metrics.snapshot().resourceReleaseLatencyNanoseconds.isEmpty else {
+            throw ContractFailure(message: "second Clean overlapped a timed-out later chunk")
+        }
+
+        cleaner.completeLater(.success("late second-chunk output"))
+        await coordinator.waitForRetainedGenerationRelease()
+        let released = metrics.snapshot()
+        guard !coordinator.isRetainingTimedOutGeneration,
+              released.resourceReleaseLatencyNanoseconds.count == 1,
+              released.timeoutReturnLatencyNanoseconds.count == 1 else {
+            throw ContractFailure(message: "resource-release latency was recorded before the losing later chunk finished")
         }
     }
 
@@ -1125,8 +1179,13 @@ private struct CancellationResistantCleaner: TranscriptCleaner {
 @available(macOS 26.0, *)
 private final class NeverReturningCleaner: TranscriptCleaner, @unchecked Sendable {
     private let lock = NSLock()
+    private var remainingImmediateSuccesses: Int
     private var continuation: CheckedContinuation<TranscriptCleanupGeneration, Never>?
     private(set) var cancelCount = 0
+
+    init(immediateSuccesses: Int = 0) {
+        remainingImmediateSuccesses = immediateSuccesses
+    }
 
     func availability() -> TranscriptCleanupAvailability {
         .available
@@ -1142,13 +1201,25 @@ private final class NeverReturningCleaner: TranscriptCleaner, @unchecked Sendabl
         chunk: String,
         deadlineNanoseconds: UInt64
     ) async -> TranscriptCleanupGeneration {
-        _ = chunk
         _ = deadlineNanoseconds
+        if let immediateText = takeImmediateSuccess(chunk) {
+            return .success(immediateText)
+        }
         return await withCheckedContinuation { continuation in
             lock.lock()
             self.continuation = continuation
             lock.unlock()
         }
+    }
+
+    private func takeImmediateSuccess(_ chunk: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard remainingImmediateSuccesses > 0 else {
+            return nil
+        }
+        remainingImmediateSuccesses -= 1
+        return chunk
     }
 
     func completeLater(_ result: TranscriptCleanupGeneration) {

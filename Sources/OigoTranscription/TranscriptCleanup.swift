@@ -850,6 +850,7 @@ private final class TranscriptCleanupLifecycle: @unchecked Sendable {
     private let lock = NSLock()
     private var valid = true
     private var released = false
+    private var attachToken: UInt64 = 0
     private var task: Task<Void, Never>?
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private var timeoutAt: UInt64?
@@ -866,7 +867,7 @@ private final class TranscriptCleanupLifecycle: @unchecked Sendable {
     var holdsModelResources: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return !released && task != nil
+        return !released
     }
 
     var wasInvalidated: Bool {
@@ -875,9 +876,21 @@ private final class TranscriptCleanupLifecycle: @unchecked Sendable {
         return !valid
     }
 
-    func attach(_ task: Task<Void, Never>) {
+    func beginHold() -> UInt64 {
         lock.lock()
-        self.task = task
+        attachToken &+= 1
+        released = false
+        let token = attachToken
+        lock.unlock()
+        return token
+    }
+
+    func attach(_ task: Task<Void, Never>, token: UInt64) {
+        lock.lock()
+        if token == attachToken {
+            self.task = task
+            released = false
+        }
         lock.unlock()
     }
 
@@ -896,11 +909,11 @@ private final class TranscriptCleanupLifecycle: @unchecked Sendable {
         lock.unlock()
     }
 
-    func markReleased() {
+    func markReleased(token: UInt64) {
         let timeoutAt: UInt64?
         let waiters: [CheckedContinuation<Void, Never>]
         lock.lock()
-        if released {
+        guard token == attachToken, !released else {
             lock.unlock()
             return
         }
@@ -943,14 +956,15 @@ private enum TranscriptCleanupDeadline {
         operation: @escaping @Sendable () async -> TranscriptCleanupGeneration
     ) async -> TranscriptCleanupGeneration {
         let race = TranscriptCleanupRace()
+        let holdToken = lifecycle.beginHold()
         let operationTask = Task<Void, Never> {
             let result = await operation()
             if lifecycle.accepts(generation) {
                 _ = race.complete(result)
             }
-            lifecycle.markReleased()
+            lifecycle.markReleased(token: holdToken)
         }
-        lifecycle.attach(operationTask)
+        lifecycle.attach(operationTask, token: holdToken)
 
         let timeoutTask = Task<Void, Never> {
             let now = DispatchTime.now().uptimeNanoseconds
@@ -993,6 +1007,8 @@ private enum TranscriptCleanupDeadline {
             cancel()
             lifecycle.invalidate()
             operationTask.cancel()
+        } else {
+            lifecycle.markReleased(token: holdToken)
         }
         return result
     }

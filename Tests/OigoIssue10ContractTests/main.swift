@@ -395,6 +395,64 @@ private struct OigoIssue10ContractTests {
             return session
         }
 
+        let speechFailedRoot = try temporaryDirectory()
+        defer { cleanup(speechFailedRoot) }
+        try await assertTerminalPath(
+            .speechFailed,
+            in: speechFailedRoot
+        ) { coordinator, store, capture in
+            let transcription = ProcessingTranscriptionController()
+            let session = try await coordinator.startRecordingWithTranscription(
+                using: capture,
+                store: store,
+                transcription: transcription,
+                format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+            )
+            capture.writePartialCapture()
+            capture.emitFailure("speech analysis failed")
+            for _ in 0..<1_000 where coordinator.state == .recording {
+                await Task.yield()
+            }
+            return coordinator.currentSession ?? session
+        }
+
+        let speechTimeoutRoot = try temporaryDirectory()
+        defer { cleanup(speechTimeoutRoot) }
+        try await assertTerminalPath(
+            .speechTimedOut,
+            in: speechTimeoutRoot,
+            timeoutPolicy: .testing
+        ) { coordinator, store, capture in
+            let transcription = BlockingTranscriptionController(blockFinish: true)
+            let session = try await coordinator.startRecordingWithTranscription(
+                using: capture,
+                store: store,
+                transcription: transcription,
+                format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+            )
+            capture.writePartialCapture()
+            _ = try? await coordinator.stopRecordingWithTranscription()
+            return coordinator.currentSession ?? session
+        }
+
+        let shutdownRoot = try temporaryDirectory()
+        defer { cleanup(shutdownRoot) }
+        try await assertTerminalPath(
+            .applicationShutdown,
+            in: shutdownRoot
+        ) { coordinator, store, capture in
+            let transcription = ProcessingTranscriptionController()
+            let session = try await coordinator.startRecordingWithTranscription(
+                using: capture,
+                store: store,
+                transcription: transcription,
+                format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+            )
+            capture.writePartialCapture()
+            await coordinator.shutdownWithTranscription()
+            return coordinator.currentSession ?? session
+        }
+
         let insertionRoot = try temporaryDirectory()
         defer { cleanup(insertionRoot) }
         try await assertRawInsertionPath(
@@ -476,6 +534,17 @@ private struct OigoIssue10ContractTests {
             return session
         }
 
+        let shutdownAfterRawRoot = try temporaryDirectory()
+        defer { cleanup(shutdownAfterRawRoot) }
+        try await assertRawInsertionPath(
+            .cancelledAfterRaw,
+            outcome: .failed,
+            in: shutdownAfterRawRoot
+        ) { coordinator, store, session in
+            await coordinator.shutdownWithTranscription()
+            return session
+        }
+
         let duplicateRoot = try temporaryDirectory()
         defer { cleanup(duplicateRoot) }
         let duplicateStore = try SessionStore(rootDirectory: duplicateRoot)
@@ -520,11 +589,56 @@ private struct OigoIssue10ContractTests {
             throw ContractFailure(message: "a stale terminal callback rewrote a newer session")
         }
         _ = try staleCoordinator.cancelRecording()
+
+        let staleInsertionRoot = try temporaryDirectory()
+        defer { cleanup(staleInsertionRoot) }
+        let staleInsertionStore = try SessionStore(rootDirectory: staleInsertionRoot)
+        let staleInsertionCapture = ScriptedAudioCapture()
+        let staleInsertionCoordinator = DictationCoordinator()
+        let firstTranscription = ProcessingTranscriptionController()
+        let firstInsertionSession = try await staleInsertionCoordinator.startRecordingWithTranscription(
+            using: staleInsertionCapture,
+            store: staleInsertionStore,
+            transcription: firstTranscription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        _ = try await staleInsertionCoordinator.stopRecordingWithTranscription()
+        _ = try staleInsertionCoordinator.beginInsertion(
+            using: staleInsertionStore,
+            requiresCleanup: false
+        )
+        _ = staleInsertionCoordinator.failInsertion(reason: "first session paste failed")
+        let secondTranscription = ProcessingTranscriptionController()
+        _ = try await staleInsertionCoordinator.startRecordingWithTranscription(
+            using: staleInsertionCapture,
+            store: staleInsertionStore,
+            transcription: secondTranscription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        let secondInsertionSession = try await staleInsertionCoordinator.stopRecordingWithTranscription()
+        _ = try staleInsertionCoordinator.beginInsertion(
+            using: staleInsertionStore,
+            requiresCleanup: false
+        )
+        _ = staleInsertionCoordinator.failInsertion(
+            reason: "stale first-session paste failure",
+            sessionID: firstInsertionSession.id
+        )
+        let savedFirstInsertion = try staleInsertionStore.load(id: firstInsertionSession.id)
+        let savedSecondInsertion = try staleInsertionStore.load(id: secondInsertionSession.id)
+        guard staleInsertionCoordinator.state == .inserting,
+              savedFirstInsertion.metadata.insertionOutcome == .failed,
+              savedSecondInsertion.metadata.insertionOutcome == nil,
+              savedSecondInsertion.metadata.state == .completed else {
+            throw ContractFailure(message: "a stale insertion callback from an older session rewrote the newer session")
+        }
+        _ = staleInsertionCoordinator.failInsertion(reason: "current session paste failed")
     }
 
     private static func assertTerminalPath(
         _ kind: DictationTerminalKind,
         in root: URL,
+        timeoutPolicy: TranscriptionTimeoutPolicy = .production,
         run: (DictationCoordinator, SessionStore, ScriptedAudioCapture) async throws -> DictationSession
     ) async throws {
         guard let path = DictationTerminalContract.legalPaths.first(where: { $0.kind == kind }) else {
@@ -532,7 +646,7 @@ private struct OigoIssue10ContractTests {
         }
         let store = try SessionStore(rootDirectory: root)
         let capture = ScriptedAudioCapture()
-        let coordinator = DictationCoordinator()
+        let coordinator = DictationCoordinator(timeoutPolicy: timeoutPolicy)
         let session = try await run(coordinator, store, capture)
         let saved = try store.load(id: session.id)
         let history = DictationHistoryActions.capabilities(
