@@ -750,6 +750,7 @@ private struct OigoIssue9ContractTests {
         try testMicrophoneProbeReleasesOnStepChange()
         try testFailureIdentifiesStageAndKeepsArtifacts()
         try testEventBoundaryTimeoutCannotPass()
+        try testFieldEditorIsStillTheDestination()
         try testCleanupFailureCannotPass()
         try testMismatchedSessionIsIgnored()
         try testSessionlessFailureDoesNotClaimPriorArtifacts()
@@ -1106,6 +1107,50 @@ private struct OigoIssue9ContractTests {
               machine.failedStage == .destinationTimeout,
               !machine.eventBoundaryCompleted else {
             throw ContractFailure(message: "a timed-out event boundary still passed automatic paste")
+        }
+    }
+
+    private static func testFieldEditorIsStillTheDestination() throws {
+        let fieldObject = NSObject()
+        let editorObject = NSObject()
+        let otherObject = NSObject()
+        let field = ObjectIdentifier(fieldObject)
+        let editor = ObjectIdentifier(editorObject)
+        let other = ObjectIdentifier(otherObject)
+        guard OigoOnboardingDestinationFocus.isStillSelected(
+            firstResponder: field,
+            field: field,
+            fieldEditor: editor
+        ) else {
+            throw ContractFailure(message: "the field itself was not treated as still selected")
+        }
+        guard OigoOnboardingDestinationFocus.isStillSelected(
+            firstResponder: editor,
+            field: field,
+            fieldEditor: editor
+        ) else {
+            throw ContractFailure(message: "the NSTextField field editor was treated as a lost target")
+        }
+        guard !OigoOnboardingDestinationFocus.isStillSelected(
+            firstResponder: other,
+            field: field,
+            fieldEditor: editor
+        ) else {
+            throw ContractFailure(message: "a different responder was treated as the destination")
+        }
+        guard !OigoOnboardingDestinationFocus.isStillSelected(
+            firstResponder: editor,
+            field: field,
+            fieldEditor: nil
+        ) else {
+            throw ContractFailure(message: "an editor that is no longer current was treated as selected")
+        }
+        guard !OigoOnboardingDestinationFocus.isStillSelected(
+            firstResponder: nil,
+            field: field,
+            fieldEditor: editor
+        ) else {
+            throw ContractFailure(message: "a missing first responder was treated as selected")
         }
     }
 

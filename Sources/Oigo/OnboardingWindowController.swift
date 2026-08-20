@@ -936,7 +936,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             guard generation == activeTestGeneration, generation == evidence.generation else {
                 return
             }
-            if window?.firstResponder !== testField {
+            if !isTestFieldStillSelected() {
                 finishDestinationVerification(
                     generation: generation,
                     selectedInsertionText: selectedInsertionText,
@@ -972,6 +972,14 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             selectedInsertionText: selectedInsertionText,
             eventBoundaryCompleted: hasOtherText,
             failure: hasOtherText ? .mismatch : .timeout
+        )
+    }
+
+    private func isTestFieldStillSelected() -> Bool {
+        OigoOnboardingDestinationFocus.isStillSelected(
+            firstResponder: window?.firstResponder.map(ObjectIdentifier.init),
+            field: ObjectIdentifier(testField),
+            fieldEditor: testField.currentEditor().map(ObjectIdentifier.init)
         )
     }
 

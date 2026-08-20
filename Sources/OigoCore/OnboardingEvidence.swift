@@ -32,6 +32,25 @@ public enum OigoOnboardingDestinationFailure: Equatable, Sendable {
     case targetChanged
 }
 
+public enum OigoOnboardingDestinationFocus {
+    public static func isStillSelected(
+        firstResponder: ObjectIdentifier?,
+        field: ObjectIdentifier,
+        fieldEditor: ObjectIdentifier?
+    ) -> Bool {
+        guard let firstResponder else {
+            return false
+        }
+        if firstResponder == field {
+            return true
+        }
+        if let fieldEditor, firstResponder == fieldEditor {
+            return true
+        }
+        return false
+    }
+}
+
 public enum OigoOnboardingSignalHealth: Equatable, Sendable {
     case silent
     case clipped
