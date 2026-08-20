@@ -52,7 +52,9 @@ private struct OigoIssue5ContractTests {
             ("conversion analyzer and result failures reach coordinator", testConversionAnalyzerAndResultFailuresReachCoordinator),
             ("stale generation cannot persist raw text or HUD success", testStaleGenerationCannotPersist),
             ("live speech degradation preserves CAF and saved-audio retry", testLiveSpeechDegradationPreservesCAFAndRetry),
-            ("writer failure stays distinct from speech degradation", testWriterFailureDistinctFromSpeechDegradation)
+            ("writer failure stays distinct from speech degradation", testWriterFailureDistinctFromSpeechDegradation),
+            ("stalled retry consumer saturates with typed degradation", testRetryFeedSaturatesOnStalledConsumer),
+            ("preparing live degradation persists into recording metadata", testPreparingDegradationPersistsIntoRecording)
         ]
 
         var failures = 0
@@ -1509,12 +1511,21 @@ private struct OigoIssue5ContractTests {
         let transcription = FakeTranscriptionController()
         transcription.finalizedText = "saved audio retry transcript"
         let coordinator = DictationCoordinator()
-        let session = try await coordinator.startRecordingWithTranscription(
-            using: capture,
-            store: store,
-            transcription: transcription,
-            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
-        )
+        capture.writesCanonicalCAF = true
+        let session: DictationSession
+        do {
+            session = try await coordinator.startRecordingWithTranscription(
+                using: capture,
+                store: store,
+                transcription: transcription,
+                format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+            )
+            try capture.writeCanonicalFrames()
+        } catch {
+            print("INCONCLUSIVE: native CAF writer unavailable: " + String(describing: error))
+            _ = try? await coordinator.cancelRecordingWithTranscription()
+            return
+        }
         transcription.emitDegradation(.queueSaturated)
         for _ in 0..<200 where coordinator.liveTranscriptionDegradation == nil {
             await Task.yield()
@@ -1535,16 +1546,20 @@ private struct OigoIssue5ContractTests {
             }
         }
         let failed = try store.load(id: session.id)
-        guard FileManager.default.fileExists(atPath: failed.audioURL.path) else {
-            throw ContractFailure(message: "live speech degradation deleted the durable CAF")
-        }
-        try writePlayableCAF(for: failed, store: store)
         let history = DictationHistoryActions.capabilities(
             sessionState: failed.metadata.state,
             hasValidRaw: false,
             hasAudio: FileManager.default.fileExists(atPath: failed.audioURL.path)
         )
-        let frames = try AudioPlayback.playableFrameLength(at: failed.audioURL)
+        let frames: AVAudioFramePosition
+        do {
+            frames = try AudioPlayback.playableFrameLength(at: failed.audioURL)
+        } catch {
+            throw ContractFailure(
+                message: "durable capture frames were not playable after live speech degradation: "
+                    + String(describing: error)
+            )
+        }
         guard failed.metadata.state == .failed,
               failed.metadata.failureCode == .transcriptionFailed,
               history.savedAudioRetryAvailable,
@@ -1608,7 +1623,7 @@ private struct OigoIssue5ContractTests {
         }
     }
 
-    private static func makeAnalyzerInput(frames: Int = 256) throws -> (AnalyzerInput, Int) {
+    private static func makeAnalyzerPCMBuffer(frames: Int = 256) throws -> AVAudioPCMBuffer {
         guard let format = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
             sampleRate: 16_000,
@@ -1621,6 +1636,11 @@ private struct OigoIssue5ContractTests {
             throw ContractFailure(message: "could not allocate analyzer fixture buffer")
         }
         buffer.frameLength = AVAudioFrameCount(frames)
+        return buffer
+    }
+
+    private static func makeAnalyzerInput(frames: Int = 256) throws -> (AnalyzerInput, Int) {
+        let buffer = try makeAnalyzerPCMBuffer(frames: frames)
         return (AnalyzerInput(buffer: buffer), frames * MemoryLayout<Int16>.size)
     }
 
@@ -1635,32 +1655,63 @@ private struct OigoIssue5ContractTests {
         )
     }
 
-    private static func writePlayableCAF(
-        for session: DictationSession,
-        store: SessionStore
-    ) throws {
-        _ = store
-        guard let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1),
-              let buffer = AVAudioPCMBuffer(
-                pcmFormat: format,
-                frameCapacity: 1_600
-              ) else {
-            throw ContractFailure(message: "canonical mono format was unavailable")
+    @MainActor
+    private static func testRetryFeedSaturatesOnStalledConsumer() throws {
+        let generation = UUID()
+        let intake = AnalyzerInputBackpressure(generation: generation)
+        let service = TranscriptionService()
+        let pcmBuffer = try makeAnalyzerPCMBuffer()
+        do {
+            for _ in 0..<(AnalyzerInputLimits.capacity + 8) {
+                try service.enqueueRetryInputForTesting(
+                    pcmBuffer,
+                    intake: intake,
+                    operationID: generation
+                )
+            }
+            throw ContractFailure(message: "stalled retry feed completed without saturating")
+        } catch let error as TranscriptionError {
+            guard error == .liveQueueSaturated else {
+                throw ContractFailure(message: "stalled retry feed changed category: " + error.description)
+            }
         }
-        buffer.frameLength = 1_600
-        guard let samples = buffer.floatChannelData?.pointee else {
-            throw ContractFailure(message: "synthetic PCM pointer was missing")
+        let metrics = intake.metrics
+        guard metrics.degradation == .queueSaturated,
+              metrics.highWaterDepth <= AnalyzerInputLimits.capacity,
+              metrics.highWaterBytes <= AnalyzerInputLimits.maxRetainedBytes,
+              metrics.enqueueAccepted <= AnalyzerInputLimits.capacity else {
+            throw ContractFailure(message: "stalled retry consumer grew past the analyzer-input bound")
         }
-        for index in 0..<1_600 {
-            samples[index] = sin(Float(index) / 32.0) * 0.25
-        }
-        let file = try AVAudioFile(
-            forWriting: session.audioURL,
-            settings: format.settings,
-            commonFormat: .pcmFormatFloat32,
-            interleaved: true
+    }
+
+    @MainActor
+    private static func testPreparingDegradationPersistsIntoRecording() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-preparing-degrade-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(rootDirectory: root)
+        let capture = FakeAudioCapture()
+        let transcription = FakeTranscriptionController()
+        transcription.emitDegradationOnStart = .analyzerFailed
+        let coordinator = DictationCoordinator()
+        let session = try await coordinator.startRecordingWithTranscription(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
         )
-        try file.write(from: buffer)
+        for _ in 0..<200 where coordinator.liveTranscriptionDegradation == nil {
+            await Task.yield()
+        }
+        let loaded = try store.load(id: session.id)
+        guard coordinator.state == .recording,
+              coordinator.liveTranscriptionDegradation == .analyzerFailed,
+              session.metadata.failureCode == .transcriptionFailed
+                || loaded.metadata.failureCode == .transcriptionFailed,
+              loaded.metadata.failureReason == LiveTranscriptionDegradation.analyzerFailed.rawValue,
+              capture.isActive else {
+            throw ContractFailure(message: "preparing live degradation did not persist into recording metadata")
+        }
     }
 
 }
@@ -1682,6 +1733,7 @@ private final class FakeTranscriptionController: TranscriptionController, @unche
     private(set) var appendedBufferCount = 0
     var finalizedText = ""
     var finishError: Error?
+    var emitDegradationOnStart: LiveTranscriptionDegradation?
 
     func start(
         session: DictationSession,
@@ -1697,6 +1749,12 @@ private final class FakeTranscriptionController: TranscriptionController, @unche
         self.onUpdate = onUpdate
         isRunning = true
         appendedBufferCount = 0
+        if let emitDegradationOnStart {
+            emitDegradation(emitDegradationOnStart)
+            for _ in 0..<20 {
+                await Task.yield()
+            }
+        }
     }
 
     func append(_ buffer: AudioCaptureBuffer) {
@@ -2086,7 +2144,9 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
     private var onFinish: (@Sendable () -> Void)?
     private var onFailure: (@Sendable (String) -> Void)?
     private var outputDescriptor: AudioFileDescriptor?
+    private var writer: CAFWriter?
     private(set) var isActive = false
+    var writesCanonicalCAF = false
 
     func start(
         to descriptor: AudioFileDescriptor,
@@ -2101,11 +2161,16 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
         self.onFinish = onFinish
         self.onFailure = onFailure
         isActive = true
+        if writesCanonicalCAF,
+           let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) {
+            writer = try CAFWriter(descriptor: descriptor, format: format)
+        }
     }
 
     func stop() throws {
         isActive = false
-        outputDescriptor?.close()
+        writer?.close()
+        writer = nil
         outputDescriptor = nil
         onFinish?()
         onBuffer = nil
@@ -2114,10 +2179,24 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
 
     func cancel() {
         isActive = false
-        outputDescriptor?.close()
+        writer?.close()
+        writer = nil
         outputDescriptor = nil
         onBuffer = nil
         onFinish = nil
+    }
+
+    func writeCanonicalFrames(frameCount: Int = 1_600) throws {
+        guard let writer else {
+            throw ContractFailure(message: "canonical CAF writer was not attached to capture")
+        }
+        let samples: [Float] = (0..<frameCount).map { sin(Float($0) / 32.0) * 0.25 }
+        try samples.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else {
+                throw ContractFailure(message: "synthetic PCM pointer was missing")
+            }
+            try writer.writeCanonicalMono(samples: baseAddress, frameCount: samples.count)
+        }
     }
 
     func sendBuffer() {

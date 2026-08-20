@@ -1002,20 +1002,29 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
 
         do {
             try Task.checkCancellation()
-            let streamPair = AsyncStream<AnalyzerInput>.makeStream()
-            try feedRetryStream(
-                reader: reader,
-                converter: audioConverter,
-                analyzerFormat: audioFormat,
-                continuation: streamPair.continuation
-            )
+            let intake = AnalyzerInputBackpressure(generation: operationID)
+            withLock { self.intake = intake }
             try await BoundedOperation.run(
                 operationID: operationID,
                 stage: .retry,
                 timeout: timeoutPolicy.budget(for: .retry),
                 registry: operationRegistry
             ) {
-                try await analyzer.start(inputSequence: streamPair.stream)
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        try await analyzer.start(inputSequence: intake.stream)
+                    }
+                    await Task.yield()
+                    try self.feedRetryStream(
+                        reader: reader,
+                        converter: audioConverter,
+                        analyzerFormat: audioFormat,
+                        intake: intake,
+                        operationID: operationID
+                    )
+                    _ = try await group.next()
+                    group.cancelAll()
+                }
             }
             try checkCancellationRequested()
             try await BoundedOperation.run(
@@ -1272,16 +1281,21 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     }
 
     private func clearRetryResources() {
-        withLock {
+        let intakeToFinish: AnalyzerInputBackpressure? = withLock {
+            let intakeToFinish = intake
             transcriber = nil
             analyzer = nil
+            intake = nil
             resultTask = nil
             session = nil
             sessionStore = nil
             analysisError = nil
+            liveDegradation = nil
             acceptsResults = false
             operationID = nil
+            return intakeToFinish
         }
+        intakeToFinish?.finish()
     }
 
     private func finishPreviewTask(
@@ -1725,14 +1739,33 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         return .analysisFailed(String(describing: error))
     }
 
+    @_spi(Testing)
+    public func feedRetryStreamForTesting(
+        reader: CAFReader,
+        converter: AVAudioConverter,
+        analyzerFormat: AVAudioFormat,
+        intake: AnalyzerInputBackpressure,
+        operationID: UUID
+    ) throws {
+        try feedRetryStream(
+            reader: reader,
+            converter: converter,
+            analyzerFormat: analyzerFormat,
+            intake: intake,
+            operationID: operationID
+        )
+    }
+
     private func feedRetryStream(
         reader: CAFReader,
         converter: AVAudioConverter,
         analyzerFormat: AVAudioFormat,
-        continuation: AsyncStream<AnalyzerInput>.Continuation
+        intake: AnalyzerInputBackpressure,
+        operationID: UUID
     ) throws {
-        defer { continuation.finish() }
+        defer { intake.finish() }
         while let source = try reader.read(frameCount: 1_024) {
+            try Task.checkCancellation()
             guard let samples = source.floatChannelData?.pointee else {
                 throw TranscriptionError.malformedAudio(
                     URL(fileURLWithPath: "<retry-caf>"),
@@ -1745,12 +1778,57 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 channelCount: 1,
                 pcmData: Data(bytes: samples, count: Int(source.frameLength) * MemoryLayout<Float>.size)
             )
-            let pcmBuffer = try makePCMBuffer(
-                captureBuffer,
-                format: analyzerFormat,
-                converter: converter
+            let pcmBuffer: AVAudioPCMBuffer
+            do {
+                pcmBuffer = try makePCMBuffer(
+                    captureBuffer,
+                    format: analyzerFormat,
+                    converter: converter
+                )
+            } catch {
+                throw TranscriptionError.liveConversionFailed
+            }
+            try enqueueRetryInput(
+                pcmBuffer,
+                intake: intake,
+                operationID: operationID
             )
-            continuation.yield(AnalyzerInput(buffer: pcmBuffer))
+        }
+    }
+
+    @_spi(Testing)
+    public func enqueueRetryInputForTesting(
+        _ pcmBuffer: AVAudioPCMBuffer,
+        intake: AnalyzerInputBackpressure,
+        operationID: UUID
+    ) throws {
+        try enqueueRetryInput(
+            pcmBuffer,
+            intake: intake,
+            operationID: operationID
+        )
+    }
+
+    private func enqueueRetryInput(
+        _ pcmBuffer: AVAudioPCMBuffer,
+        intake: AnalyzerInputBackpressure,
+        operationID: UUID
+    ) throws {
+        let byteCount = Int(pcmBuffer.frameLength)
+            * Int(pcmBuffer.format.streamDescription.pointee.mBytesPerFrame)
+        switch intake.enqueue(
+            AnalyzerInput(buffer: pcmBuffer),
+            generation: operationID,
+            byteCount: byteCount
+        ) {
+        case .enqueued:
+            return
+        case .saturated:
+            throw TranscriptionError.liveQueueSaturated
+        case .terminated:
+            throw TranscriptionError.liveContinuationTerminated
+        case .rejected:
+            throw TranscriptionError.cancelled
         }
     }
 

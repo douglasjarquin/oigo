@@ -601,9 +601,11 @@ public final class DictationCoordinator {
             })
             try Task.checkCancellation()
             preparedSession = try store.update(
-                persistedSession,
+                currentSession ?? persistedSession,
                 state: .recording,
-                at: now
+                at: now,
+                failureReason: liveTranscriptionDegradation?.rawValue,
+                failureCode: liveTranscriptionDegradation != nil ? .transcriptionFailed : nil
             )
             _ = try apply(.prepared)
             currentSession = preparedSession
@@ -635,10 +637,11 @@ public final class DictationCoordinator {
                     }
                 }
             )
-            lastFailureReason = nil
-            lastFailureCode = nil
+            if liveTranscriptionDegradation == nil {
+                lastFailureReason = nil
+                lastFailureCode = nil
+            }
             lastTerminalMetadataWriteFailed = false
-            liveTranscriptionDegradation = nil
             diagnostics.record("audio capture and transcription started")
             return preparedSession
         } catch {
@@ -1434,12 +1437,12 @@ public final class DictationCoordinator {
         diagnostics.record("live transcription degraded: " + degradation.rawValue)
         guard let session = currentSession,
               let store = sessionStore,
-              session.metadata.state == .recording else {
+              [.preparing, .recording].contains(session.metadata.state) else {
             return
         }
         if let updated = try? store.update(
             session,
-            state: .recording,
+            state: session.metadata.state,
             failureReason: degradation.rawValue,
             failureCode: .transcriptionFailed
         ) {
