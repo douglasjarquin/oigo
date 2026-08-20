@@ -35,5 +35,38 @@
       "NiceBaaS"
     ],
     "reviewStatus": "approved"
+  },
+  {
+    "id": "punctuation-and-casing",
+    "rawTranscript": "hello please send the report now",
+    "modelOutput": "Hello, please send the report now.",
+    "expectedMeaning": "Hello please send the report now.",
+    "protectedTechnicalTokens": [],
+    "reviewStatus": "approved"
+  },
+  {
+    "id": "filler-removal",
+    "rawTranscript": "uh um please open the file and ah check the logs",
+    "modelOutput": "Please open the file and check the logs.",
+    "expectedMeaning": "Please open the file and check the logs.",
+    "protectedTechnicalTokens": [],
+    "reviewStatus": "approved"
+  },
+  {
+    "id": "false-start-restatement",
+    "rawTranscript": "we should actually we should check the logs",
+    "modelOutput": "We should check the logs.",
+    "expectedMeaning": "We should check the logs.",
+    "protectedTechnicalTokens": [],
+    "reviewStatus": "approved"
+  },
+  {
+    "id": "ordinary-substitution",
+    "rawTranscript": "please check the file before sending",
+    "modelOutput": "Please check the document before sending.",
+    "expectedMeaning": "Please check the document before sending.",
+    "protectedTechnicalTokens": [],
+    "reviewStatus": "approved",
+    "allowsOrdinarySubstitution": true
   }
 ]

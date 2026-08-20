@@ -422,10 +422,19 @@ public final class TranscriptCleanupCoordinator: @unchecked Sendable {
 }
 
 @available(macOS 26.0, *)
-private enum TranscriptCleanupOutputGuard {
+@_spi(Testing)
+public enum TranscriptCleanupOutputGuard {
+    public static let maxFalseStartTokens = 6
+    public static let maxAbandonedExtraTokens = 2
+
+    public static func substitutionBudget(ordinaryTokenCount: Int) -> Int {
+        max(1, max(0, ordinaryTokenCount) / 50)
+    }
+
     private struct SemanticToken {
         let text: String
-        let allowsCaseChange: Bool
+        let utf16Location: Int
+        let isProtected: Bool
     }
 
     private static let protectedPatterns = [
@@ -440,42 +449,12 @@ private enum TranscriptCleanupOutputGuard {
         "\\b[A-Z][a-z][A-Za-z0-9_./-]+\\b"
     ]
     private static let removableFillers: Set<String> = ["ah", "er", "hmm", "mm", "uh", "um"]
-    private static let ordinarySentenceStarters: Set<String> = [
-        "a", "an", "and", "are", "check", "clean", "copy", "deploy", "edit", "file",
-        "hello", "here", "how", "i", "let", "open", "paste", "please", "run", "say",
-        "send", "the", "this", "to", "use", "we", "what", "when", "write"
-    ]
+    private static let canonicalTerms: Set<String> = ["oigo"]
 
-    static func accepts(rawText: String, cleanedText: String) -> Bool {
-        let rawTokens = semanticTokenSequence(in: rawText)
-        let cleanedTokens = semanticTokenSequence(in: cleanedText)
-        let cleanedTokensPreserved = isSubsequence(
-            cleanedTokens,
-            of: rawTokens,
-            matching: { cleaned, raw in
-                tokenMatches(raw: raw, cleaned: cleaned)
-            }
-        )
-        let rawTokensPreserved = isSubsequence(
-            rawTokens.filter { !removableFillers.contains($0.text.lowercased()) },
-            of: cleanedTokens,
-            matching: { raw, cleaned in
-                tokenMatches(raw: raw, cleaned: cleaned)
-            }
-        )
-        let punctuationPreserved = isCharacterSubsequence(
-            punctuationSequence(in: rawText),
-            of: punctuationSequence(in: cleanedText)
-        )
-        guard !cleanedTokens.isEmpty,
-              cleanedTokensPreserved,
-              rawTokensPreserved,
-              punctuationPreserved else {
-            return false
-        }
-
+    public static func accepts(rawText: String, cleanedText: String) -> Bool {
+        let protectedSpans = protectedTokens(in: rawText)
         var searchStart = cleanedText.startIndex
-        for token in protectedTokens(in: rawText) {
+        for token in protectedSpans {
             guard let range = cleanedText.range(
                 of: token,
                 options: [.literal],
@@ -485,102 +464,206 @@ private enum TranscriptCleanupOutputGuard {
             }
             searchStart = range.upperBound
         }
+
+        let rawProtectedRanges = protectedRanges(in: rawText)
+        let rawTokens = semanticTokenSequence(in: rawText, protectedRanges: rawProtectedRanges)
+        let cleanedTokens = semanticTokenSequence(in: cleanedText, protectedRanges: [])
+        guard !cleanedTokens.isEmpty else {
+            return false
+        }
+        return aligns(raw: rawTokens, cleaned: cleanedTokens)
+    }
+
+    private static func aligns(raw: [SemanticToken], cleaned: [SemanticToken]) -> Bool {
+        let ordinaryTokenCount = raw.filter(isOrdinaryWord).count
+        let substitutionBudget = substitutionBudget(ordinaryTokenCount: ordinaryTokenCount)
+        var rawIndex = 0
+        var cleanedIndex = 0
+        var substitutionsUsed = 0
+
+        while rawIndex < raw.count || cleanedIndex < cleaned.count {
+            if rawIndex < raw.count,
+               isFiller(raw[rawIndex]),
+               cleanedIndex >= cleaned.count || !tokensMatch(raw: raw[rawIndex], cleaned: cleaned[cleanedIndex]) {
+                rawIndex += 1
+                continue
+            }
+
+            if let skip = falseStartLength(raw: raw, rawIndex: rawIndex, cleaned: cleaned, cleanedIndex: cleanedIndex) {
+                rawIndex += skip
+                continue
+            }
+
+            if rawIndex < raw.count,
+               cleanedIndex < cleaned.count,
+               tokensMatch(raw: raw[rawIndex], cleaned: cleaned[cleanedIndex]) {
+                rawIndex += 1
+                cleanedIndex += 1
+                continue
+            }
+
+            if rawIndex < raw.count,
+               cleanedIndex < cleaned.count,
+               isOrdinarySubstitutionCandidate(raw[rawIndex]),
+               isOrdinarySubstitutionCandidate(cleaned[cleanedIndex]),
+               !isCanonical(cleaned[cleanedIndex]),
+               substitutionsUsed < substitutionBudget {
+                substitutionsUsed += 1
+                rawIndex += 1
+                cleanedIndex += 1
+                continue
+            }
+
+            return false
+        }
         return true
     }
 
-    private static func semanticTokenSequence(in text: String) -> [SemanticToken] {
+    private static func falseStartLength(
+        raw: [SemanticToken],
+        rawIndex: Int,
+        cleaned: [SemanticToken],
+        cleanedIndex: Int
+    ) -> Int? {
+        let remaining = raw.count - rawIndex
+        guard remaining >= 2, cleanedIndex < cleaned.count else {
+            return nil
+        }
+
+        let maxPrefix = min(maxFalseStartTokens, remaining / 2)
+        for prefixLength in stride(from: maxPrefix, through: 1, by: -1) {
+            let extraMax = min(maxAbandonedExtraTokens, remaining - (prefixLength * 2))
+            for extra in 0...max(0, extraMax) {
+                let skip = prefixLength + extra
+                let restatementStart = rawIndex + skip
+                let restatementEnd = restatementStart + prefixLength
+                guard restatementEnd <= raw.count else {
+                    continue
+                }
+                let abandoned = raw[rawIndex..<rawIndex + skip]
+                guard abandoned.allSatisfy({ !$0.isProtected && !isCanonical($0) }) else {
+                    continue
+                }
+                let prefix = raw[rawIndex..<rawIndex + prefixLength]
+                let restatement = raw[restatementStart..<restatementEnd]
+                guard tokensEqualIgnoringCase(prefix, restatement),
+                      tokensMatch(raw: raw[restatementStart], cleaned: cleaned[cleanedIndex]),
+                      (raw.count - restatementStart) >= (cleaned.count - cleanedIndex) else {
+                    continue
+                }
+                return skip
+            }
+        }
+        return nil
+    }
+
+    private static func tokensMatch(raw: SemanticToken, cleaned: SemanticToken) -> Bool {
+        if raw.isProtected || isCanonical(raw) || isCanonical(cleaned) {
+            return raw.text == cleaned.text
+        }
+        guard raw.text.lowercased() == cleaned.text.lowercased() else {
+            return false
+        }
+        if requiresExactCase(raw) {
+            return raw.text == cleaned.text
+        }
+        return true
+    }
+
+    private static func tokensEqualIgnoringCase(
+        _ lhs: ArraySlice<SemanticToken>,
+        _ rhs: ArraySlice<SemanticToken>
+    ) -> Bool {
+        guard lhs.count == rhs.count else {
+            return false
+        }
+        return zip(lhs, rhs).allSatisfy { $0.text.lowercased() == $1.text.lowercased() }
+    }
+
+    private static func isFiller(_ token: SemanticToken) -> Bool {
+        !token.isProtected && removableFillers.contains(token.text.lowercased())
+    }
+
+    private static func isCanonical(_ token: SemanticToken) -> Bool {
+        canonicalTerms.contains(token.text.lowercased())
+    }
+
+    private static func requiresExactCase(_ token: SemanticToken) -> Bool {
+        token.text.contains(where: { $0.isUppercase || $0.isNumber })
+            || token.text.contains("_")
+            || isCanonical(token)
+    }
+
+    private static func isOrdinaryWord(_ token: SemanticToken) -> Bool {
+        !token.isProtected
+            && !isFiller(token)
+            && !isCanonical(token)
+            && token.text.unicodeScalars.allSatisfy { CharacterSet.letters.contains($0) }
+    }
+
+    private static func isOrdinarySubstitutionCandidate(_ token: SemanticToken) -> Bool {
+        isOrdinaryWord(token)
+            && token.text.unicodeScalars.allSatisfy { CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz").contains($0) }
+    }
+
+    private static func semanticTokenSequence(
+        in text: String,
+        protectedRanges: [NSRange]
+    ) -> [SemanticToken] {
         var tokens: [SemanticToken] = []
         var current = ""
-        var allowsCaseChange = true
-        var sentenceTokens: [String] = []
-        var sentenceStart = true
+        var currentLocation = 0
+        var utf16Location = 0
         for character in text {
+            let characterUTF16 = character.utf16.count
             if character.isLetter || character.isNumber || character == "_" {
                 if current.isEmpty {
-                    allowsCaseChange = sentenceStart
-                        || sentenceTokens.allSatisfy {
-                            removableFillers.contains($0.lowercased())
-                        }
+                    currentLocation = utf16Location
                 }
                 current.append(character)
-                sentenceStart = false
-            } else {
-                if !current.isEmpty {
-                    tokens.append(
-                        SemanticToken(
-                            text: current,
-                            allowsCaseChange: allowsCaseChange
-                        )
+            } else if !current.isEmpty {
+                tokens.append(
+                    makeToken(
+                        text: current,
+                        utf16Location: currentLocation,
+                        protectedRanges: protectedRanges
                     )
-                    sentenceTokens.append(current)
-                    current = ""
-                }
-                if ".!?\n".contains(character) {
-                    sentenceStart = true
-                    sentenceTokens.removeAll(keepingCapacity: true)
-                }
+                )
+                current = ""
             }
+            utf16Location += characterUTF16
         }
         if !current.isEmpty {
             tokens.append(
-                SemanticToken(
+                makeToken(
                     text: current,
-                    allowsCaseChange: allowsCaseChange
+                    utf16Location: currentLocation,
+                    protectedRanges: protectedRanges
                 )
             )
         }
         return tokens
     }
 
-    private static func isSubsequence(
-        _ candidate: [SemanticToken],
-        of source: [SemanticToken],
-        matching: (SemanticToken, SemanticToken) -> Bool
-    ) -> Bool {
-        var sourceIndex = source.startIndex
-        for candidateToken in candidate {
-            guard let matchIndex = source[sourceIndex...].firstIndex(where: {
-                matching(candidateToken, $0)
-            }) else {
-                return false
-            }
-            sourceIndex = source.index(after: matchIndex)
-        }
-        return true
-    }
-
-    private static func tokenMatches(raw: SemanticToken, cleaned: SemanticToken) -> Bool {
-        guard raw.text.lowercased() == cleaned.text.lowercased() else {
-            return false
-        }
-        let requiresExactCase = raw.text.contains(where: { $0.isUppercase || $0.isNumber })
-            || raw.text.contains("_")
-        let ordinarySentenceStarter = ordinarySentenceStarters.contains(raw.text.lowercased())
-        return raw.text == cleaned.text
-            || (!requiresExactCase && raw.allowsCaseChange && ordinarySentenceStarter)
-    }
-
-    private static func punctuationSequence(in text: String) -> [Character] {
-        text.filter {
-            !$0.isWhitespace && !$0.isLetter && !$0.isNumber && $0 != "_"
-        }
-    }
-
-    private static func isCharacterSubsequence(
-        _ candidate: [Character],
-        of source: [Character]
-    ) -> Bool {
-        var sourceIndex = source.startIndex
-        for character in candidate {
-            guard let matchIndex = source[sourceIndex...].firstIndex(of: character) else {
-                return false
-            }
-            sourceIndex = source.index(after: matchIndex)
-        }
-        return true
+    private static func makeToken(
+        text: String,
+        utf16Location: Int,
+        protectedRanges: [NSRange]
+    ) -> SemanticToken {
+        let range = NSRange(location: utf16Location, length: (text as NSString).length)
+        let isProtected = protectedRanges.contains { NSIntersectionRange($0, range).length > 0 }
+        return SemanticToken(text: text, utf16Location: utf16Location, isProtected: isProtected)
     }
 
     private static func protectedTokens(in text: String) -> [String] {
+        protectedMatches(in: text).map(\.token)
+    }
+
+    private static func protectedRanges(in text: String) -> [NSRange] {
+        protectedMatches(in: text).map(\.range)
+    }
+
+    private static func protectedMatches(in text: String) -> [(range: NSRange, token: String)] {
         let value = text as NSString
         let matches = protectedPatterns.flatMap { pattern -> [(NSRange, String)] in
             guard let expression = try? NSRegularExpression(pattern: pattern) else {
@@ -597,7 +680,7 @@ private enum TranscriptCleanupOutputGuard {
                 )
             }
         }
-        var protected: [(location: Int, token: String)] = []
+        var protected: [(range: NSRange, token: String)] = []
         var lastEnd = 0
         for match in matches.sorted(by: {
             if $0.0.location == $1.0.location {
@@ -611,10 +694,10 @@ private enum TranscriptCleanupOutputGuard {
             guard match.0.location >= lastEnd else {
                 continue
             }
-            protected.append((location: match.0.location, token: match.1))
+            protected.append((range: match.0, token: match.1))
             lastEnd = NSMaxRange(match.0)
         }
-        return protected.map(\.token)
+        return protected
     }
 }
 

@@ -791,11 +791,80 @@ public enum OigoLaunchAtLoginStatus: String, Sendable {
     case unknown
 }
 
+public struct OigoLaunchAtLoginPresentation: Equatable, Sendable {
+    public let status: OigoLaunchAtLoginStatus
+    public let checkboxOn: Bool
+    public let allowsCheckboxMutation: Bool
+    public let menuStateOn: Bool
+    public let menuTitle: String
+    public let menuToolTip: String
+    public let detail: String
+    public let showsOpenLoginItems: Bool
+
+    public init(status: OigoLaunchAtLoginStatus) {
+        self.status = status
+        checkboxOn = status == .enabled
+        allowsCheckboxMutation = status == .enabled || status == .disabled
+        menuStateOn = status == .enabled
+        showsOpenLoginItems = status == .requiresApproval
+        switch status {
+        case .enabled:
+            menuTitle = "Launch at Login"
+            menuToolTip = "Oigo is enabled in Login Items."
+            detail = "Oigo is enabled in Login Items."
+        case .disabled:
+            menuTitle = "Launch at Login"
+            menuToolTip = "Oigo is not enabled in Login Items."
+            detail = "Oigo is not enabled in Login Items."
+        case .requiresApproval:
+            menuTitle = "Launch at Login (approval required)"
+            menuToolTip = "macOS requires approval in Login Items before Oigo can launch at login."
+            detail = "macOS requires approval in Login Items before Oigo can launch at login."
+        case .notFound:
+            menuTitle = "Launch at Login (service not found)"
+            menuToolTip = "The Launch at Login service could not be found."
+            detail = "The Launch at Login service could not be found."
+        case .unknown:
+            menuTitle = "Launch at Login (status unknown)"
+            menuToolTip = "Launch at Login status is unknown."
+            detail = "Launch at Login status is unknown."
+        }
+    }
+}
+
+public enum OigoLaunchAtLoginReconciliation {
+    public static func shouldMutate(
+        requested: Bool,
+        status: OigoLaunchAtLoginStatus
+    ) -> Bool {
+        if requested {
+            return status != .enabled
+        }
+        return status != .disabled
+    }
+
+    public static func persistableIntent(
+        checkboxOn: Bool,
+        allowsCheckboxMutation: Bool,
+        previousIntent: Bool,
+        status: OigoLaunchAtLoginStatus
+    ) -> Bool {
+        if allowsCheckboxMutation {
+            return checkboxOn
+        }
+        if status == .requiresApproval {
+            return true
+        }
+        return previousIntent
+    }
+}
+
 @MainActor
 public protocol OigoLaunchAtLoginClient: AnyObject {
     var status: OigoLaunchAtLoginStatus { get }
     func register() throws
     func unregister() throws
+    func openLoginItemsSettings()
 }
 
 @MainActor
@@ -806,16 +875,33 @@ public final class OigoLaunchAtLoginController {
         self.client = client
     }
 
-    public var isEnabled: Bool {
-        client.status == .enabled
+    public var status: OigoLaunchAtLoginStatus {
+        client.status
     }
 
-    public func setEnabled(_ enabled: Bool) throws {
+    public var isEnabled: Bool {
+        status == .enabled
+    }
+
+    @discardableResult
+    public func setEnabled(_ enabled: Bool) throws -> OigoLaunchAtLoginStatus {
+        let current = client.status
+        if enabled, current == .enabled {
+            return current
+        }
+        if !enabled, current == .disabled {
+            return current
+        }
         if enabled {
             try client.register()
         } else {
             try client.unregister()
         }
+        return client.status
+    }
+
+    public func openLoginItemsSettings() {
+        client.openLoginItemsSettings()
     }
 }
 

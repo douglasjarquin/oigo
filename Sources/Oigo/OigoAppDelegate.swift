@@ -94,6 +94,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: SettingsWindowController?
     private var settingsSessionID: UUID?
     private var historyWindow: HistoryWindowController?
+    private var historyLoadGeneration = HistoryLoadGeneration()
+    private var historyCursor: SessionHistoryCursor?
+    private var historyHasMore = false
     private var statusItem: NSStatusItem?
     private var toggleItem: NSMenuItem?
     private var shortcutStatusItem: NSMenuItem?
@@ -120,6 +123,56 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var recordingStartedAt: Date?
     private var previewThrottle = OigoHUDPreviewThrottle()
     private let operationGate = AppOperationGate()
+    private var maintenanceHandle: AppOperationHandle?
+    nonisolated(unsafe) private var maintenanceStore: SessionStore?
+    nonisolated(unsafe) private var maintenancePolicy = SessionRetentionPolicy.default
+    private lazy var maintenanceCoordinator = SessionMaintenanceCoordinator(
+        canRun: { [weak self] in
+            guard let self else {
+                return false
+            }
+            return self.commandAvailability.canRunMaintenance
+                && !self.coordinator.hasActiveTranscription
+                && !self.playback.hasActivePlayback
+        },
+        beginRun: { [weak self] in
+            guard let self else {
+                return false
+            }
+            switch self.operationGate.begin(.maintenance) {
+            case .success(let handle):
+                self.maintenanceHandle = handle
+                return true
+            case .failure:
+                return false
+            }
+        },
+        endRun: { [weak self] in
+            guard let self, let handle = self.maintenanceHandle else {
+                return
+            }
+            self.operationGate.complete(handle)
+            self.maintenanceHandle = nil
+        },
+        perform: { [weak self] cursor in
+            guard let self, let store = self.maintenanceStore else {
+                return SessionMaintenanceResult()
+            }
+            return try store.performIdleMaintenance(
+                at: Date(),
+                policy: self.maintenancePolicy,
+                cursor: cursor,
+                shouldContinue: { !Task.isCancelled }
+            )
+        },
+        onComplete: { [weak self] summary in
+            self?.historyWindow?.showMessage(summary.sanitizedMessage)
+            if self?.historyWindow != nil {
+                self?.refreshHistory()
+            }
+            self?.updateSurface()
+        }
+    )
     private var finishRequestedAfterStart = false
     private var shortcutFeedbackDetail: String?
     private var workspaceObservers: [NSObjectProtocol] = []
@@ -132,6 +185,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         super.init()
         storageCapability.onChange = { [weak self] in
             self?.storageCapabilityDidChange()
+        }
+        playback.onStateChange = { [weak self] state in
+            DispatchQueue.main.async {
+                self?.handlePlaybackState(state)
+            }
         }
     }
 
@@ -229,6 +287,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
             storageHealth: displayedStorageHealth,
+            launchAtLoginStatus: launchAtLoginController.status,
+            launchAtLoginStatusProvider: { [weak self] in
+                self?.launchAtLoginController.status ?? .unknown
+            },
+            openLoginItemsSettings: { [weak self] in
+                self?.launchAtLoginController.openLoginItemsSettings()
+            },
             registrationStatus: { [weak self] in
                 self?.shortcutRegistrar.status ?? .inactive("Global shortcut is not registered")
             },
@@ -442,9 +507,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openHistory() {
         if historyWindow == nil {
             historyWindow = HistoryWindowController(
-                loadTranscript: { [weak self] entry, source in
-                    self?.loadTranscript(for: entry, source: source)
-                        ?? .failure(SessionStoreError.missingSession(entry.id))
+                loadTranscript: { [weak self] entry, source, completion in
+                    self?.loadTranscript(for: entry, source: source, completion: completion)
                 },
                 copyRawTranscript: { [weak self] entry in
                     self?.copyRawTranscript(for: entry)
@@ -475,11 +539,26 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 },
                 runIdleMaintenance: { [weak self] in
                     self?.runIdleMaintenance()
+                },
+                loadMore: { [weak self] in
+                    self?.loadMoreHistory()
+                },
+                onClose: { [weak self] in
+                    self?.closeHistoryWindow()
                 }
             )
         }
         refreshHistory()
         historyWindow?.showAndFocus()
+    }
+
+    private func closeHistoryWindow() {
+        playback.stop()
+        _ = historyLoadGeneration.next()
+        historyCursor = nil
+        historyHasMore = false
+        historyWindow = nil
+        maintenanceCoordinator.resumeIfNeeded()
     }
 
     @objc private func quit() {
@@ -720,6 +799,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startDictation(kind: AppOperationKind = .dictation) {
+        maintenanceCoordinator.preempt()
         guard storageCapability.health.isReady else {
             reportOnboardingTestFailure()
             updateSurface()
@@ -972,6 +1052,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             if historyWindow != nil {
                 refreshHistory()
             }
+            scheduleIdleMaintenance(.sessionTerminal)
             updateSurface()
         } catch is CancellationError {
             await coordinator.cancelActiveWork()
@@ -1093,6 +1174,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             if historyWindow != nil {
                 refreshHistory()
             }
+            scheduleIdleMaintenance(.sessionTerminal)
             updateSurface()
         } catch is CancellationError {
             await coordinator.cancelActiveWork()
@@ -1271,26 +1353,40 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             historyWindow?.showMessage(Self.friendlyError("Retry failed", error))
         }
         refreshHistory()
+        scheduleIdleMaintenance(.sessionTerminal)
         updateSurface()
     }
 
     private func loadTranscript(
         for entry: SessionHistoryEntry,
-        source: SessionTextSource
-    ) -> Result<String, Error> {
-        guard let store = sessionStore else {
-            return .failure(SessionStoreError.missingSession(entry.id))
+        source: SessionTextSource,
+        completion: @escaping @Sendable (Result<String, Error>) -> Void
+    ) {
+        guard storageCapability.health.isReady,
+              let store = sessionStore else {
+            completion(.failure(SessionStoreError.missingSession(entry.id)))
+            return
         }
-        do {
-            let transcript = switch source {
-            case .raw:
-                try store.readRawText(for: entry.session)
-            case .processed:
-                try store.readCleanText(for: entry.session)
+        if source == .processed, entry.textSource != .processed {
+            completion(.failure(SessionStoreError.missingSession(entry.id)))
+            return
+        }
+        Task.detached {
+            let result: Result<String, Error>
+            do {
+                let transcript = switch source {
+                case .raw:
+                    try store.readRawText(for: entry.session)
+                case .processed:
+                    try store.readCleanText(for: entry.session)
+                }
+                result = .success(transcript)
+            } catch {
+                result = .failure(error)
             }
-            return .success(transcript)
-        } catch {
-            return .failure(error)
+            await MainActor.run {
+                completion(result)
+            }
         }
     }
 
@@ -1615,8 +1711,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func playRecording(for entry: SessionHistoryEntry) {
+        if playback.isPlaying(sessionID: entry.id) {
+            playback.stop()
+            historyWindow?.showMessage("Playback stopped.")
+            return
+        }
         do {
-            _ = try playback.play(url: entry.session.audioURL)
+            _ = try playback.play(url: entry.session.audioURL, sessionID: entry.id)
             historyWindow?.showMessage("Playing the saved recording.")
         } catch {
             historyWindow?.showMessage(Self.friendlyError("Playback failed", error))
@@ -1658,6 +1759,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
               let store = sessionStore else {
             return
         }
+        if playback.isPlaying(sessionID: entry.id) {
+            playback.stop()
+        }
         do {
             try store.remove(id: entry.id)
             if lastSession?.id == entry.id {
@@ -1665,6 +1769,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             historyWindow?.showMessage("Session deleted.")
             refreshHistory()
+            scheduleIdleMaintenance(.sessionTerminal)
         } catch {
             markStorageUnhealthyIfNeeded(error)
             historyWindow?.showMessage(Self.friendlyError("Delete failed", error))
@@ -1677,22 +1782,101 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
               let store = sessionStore else {
             return
         }
-        do {
-            let report = try store.listHistoryReport()
-            reportedMalformedSessionCount = report.malformedSessionCount
-            lastSession = report.entries.first?.session
-            historyWindow?.reload(entries: report.entries)
-            settingsWindow?.setStorageHealth(displayedStorageHealth)
-            onboardingWindow?.setStorageHealth(displayedStorageHealth)
-        } catch {
-            markStorageUnhealthyIfNeeded(error)
-            historyWindow?.showMessage(
-                storageCapability.health.failureCategory == nil
-                    ? Self.friendlyError("History unavailable", error)
-                    : storageCapability.health.statusMessage
-            )
+        let generation = historyLoadGeneration.next()
+        historyCursor = nil
+        historyHasMore = false
+        historyWindow?.setLoading(true)
+        let historyIsOpen = historyWindow?.window?.isVisible == true
+        Task.detached { [weak self] in
+            do {
+                let latest = try store.listHistoryReport(
+                    limit: 1,
+                    maxDirectoriesToInspect: 64
+                )
+                let page: SessionHistoryEnumeration
+                if historyIsOpen {
+                    page = try store.listHistoryReport(
+                        limit: 50,
+                        maxDirectoriesToInspect: 256
+                    )
+                } else {
+                    page = latest
+                }
+                await MainActor.run {
+                    guard let self, self.historyLoadGeneration.isCurrent(generation) else {
+                        return
+                    }
+                    self.reportedMalformedSessionCount = page.malformedSessionCount
+                    self.lastSession = latest.entries.first?.session
+                    self.historyCursor = page.cursor
+                    self.historyHasMore = page.hasMore
+                    self.historyWindow?.reload(
+                        entries: page.entries,
+                        hasMore: page.hasMore,
+                        isLoading: false
+                    )
+                    self.settingsWindow?.setStorageHealth(self.displayedStorageHealth)
+                    self.onboardingWindow?.setStorageHealth(self.displayedStorageHealth)
+                    self.updateSurface()
+                }
+            } catch {
+                await MainActor.run {
+                    guard let self, self.historyLoadGeneration.isCurrent(generation) else {
+                        return
+                    }
+                    self.historyWindow?.setLoading(false)
+                    self.markStorageUnhealthyIfNeeded(error)
+                    self.historyWindow?.showMessage(
+                        self.storageCapability.health.failureCategory == nil
+                            ? Self.friendlyError("History unavailable", error)
+                            : self.storageCapability.health.statusMessage
+                    )
+                    self.updateSurface()
+                }
+            }
         }
-        updateSurface()
+    }
+
+    private func loadMoreHistory() {
+        guard storageCapability.health.isReady,
+              let store = sessionStore,
+              historyHasMore,
+              let cursor = historyCursor else {
+            return
+        }
+        let generation = historyLoadGeneration.value
+        historyWindow?.setLoading(true)
+        Task.detached { [weak self] in
+            do {
+                let page = try store.listHistoryReport(
+                    limit: 50,
+                    cursor: cursor,
+                    maxDirectoriesToInspect: 256
+                )
+                await MainActor.run {
+                    guard let self, self.historyLoadGeneration.isCurrent(generation) else {
+                        return
+                    }
+                    self.historyCursor = page.cursor
+                    self.historyHasMore = page.hasMore
+                    self.historyWindow?.append(
+                        entries: page.entries,
+                        hasMore: page.hasMore,
+                        isLoading: false
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    guard let self, self.historyLoadGeneration.isCurrent(generation) else {
+                        return
+                    }
+                    self.historyWindow?.setLoading(false)
+                    self.historyWindow?.showMessage(
+                        Self.friendlyError("History unavailable", error)
+                    )
+                }
+            }
+        }
     }
 
     private func runIdleMaintenance() {
@@ -1707,29 +1891,20 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             updateSurface()
             return
         }
-        guard storageCapability.health.isReady,
-              let store = sessionStore else {
+        scheduleIdleMaintenance(.explicit)
+        updateSurface()
+    }
+
+    private func scheduleIdleMaintenance(_ trigger: SessionMaintenanceTrigger) {
+        guard storageCapability.health.isReady, sessionStore != nil else {
             return
         }
-        do {
-            let lifetime = settings.keepSuccessfulAudioIndefinitely
-                ? Double.greatestFiniteMagnitude
-                : settings.audioRetention.duration
-            let policy = SessionRetentionPolicy(
-                successfulAudioLifetime: lifetime
-            )
-            let result = try store.performIdleMaintenance(policy: policy)
-            refreshHistory()
-            let removed = result.removedSessionIDs.count + result.removedAudioSessionIDs.count
-            historyWindow?.showMessage(
-                removed == 0
-                    ? "Idle maintenance found nothing to remove."
-                    : "Idle maintenance removed \(removed) expired artifact set\(removed == 1 ? "" : "s")."
-            )
-        } catch {
-            markStorageUnhealthyIfNeeded(error)
-            historyWindow?.showMessage(Self.friendlyError("Maintenance failed", error))
-        }
+        maintenanceStore = sessionStore
+        let lifetime = settings.keepSuccessfulAudioIndefinitely
+            ? Double.greatestFiniteMagnitude
+            : settings.audioRetention.duration
+        maintenancePolicy = SessionRetentionPolicy(successfulAudioLifetime: lifetime)
+        maintenanceCoordinator.request(trigger)
     }
 
     private func applyTranscriptionUpdate(_ update: TranscriptionUpdate) {
@@ -1775,7 +1950,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         onboardingWindow?.setCommandAvailability(availability)
         storageStatusItem?.title = displayedStorageHealth.statusMessage
         retryStorageItem?.isEnabled = !storageReady && storageCapability.health != .checking
-        launchAtLoginItem?.state = launchAtLoginController.isEnabled ? .on : .off
+        let launchPresentation = OigoLaunchAtLoginPresentation(status: launchAtLoginController.status)
+        launchAtLoginItem?.state = launchPresentation.menuStateOn ? .on : .off
+        launchAtLoginItem?.title = launchPresentation.menuTitle
+        launchAtLoginItem?.toolTip = launchPresentation.menuToolTip
         statusItem?.button?.title = "Oigo"
         switch shortcutRegistrar.status {
         case .active(let shortcut, _):
@@ -1839,11 +2017,25 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleLaunchAtLogin() {
-        let enabled = !launchAtLoginController.isEnabled
+        let status = launchAtLoginController.status
+        if status == .requiresApproval {
+            launchAtLoginController.openLoginItemsSettings()
+            updateSurface()
+            return
+        }
+        if status == .notFound || status == .unknown {
+            showSettingsPersistenceFailure(
+                title: "Launch at Login is unavailable",
+                message: OigoLaunchAtLoginPresentation(status: status).detail
+            )
+            updateSurface()
+            return
+        }
+        let enabled = status != .enabled
         let previousSettings = settings
         let updatedSettings = settings.with(launchAtLogin: enabled)
         do {
-            try launchAtLoginController.setEnabled(enabled)
+            let resolved = try launchAtLoginController.setEnabled(enabled)
             do {
                 try settingsStore.save(updatedSettings)
             } catch {
@@ -1857,12 +2049,15 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             settings = updatedSettings
+            settingsWindow?.setLaunchAtLoginStatus(resolved)
             updateSurface()
         } catch {
             showSettingsPersistenceFailure(
                 title: "Launch at Login could not be changed",
                 message: Self.failureReason(for: error)
             )
+            settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
+            updateSurface()
         }
     }
 
@@ -1870,11 +2065,34 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         guard let session = lastSession else {
             return
         }
-        do {
-            _ = try playback.play(url: session.audioURL)
-        } catch {
-            NSLog("Oigo could not play the last recording: %@", Self.failureReason(for: error))
+        if playback.isPlaying(sessionID: session.id) {
+            playback.stop()
+            return
         }
+        do {
+            _ = try playback.play(url: session.audioURL, sessionID: session.id)
+        } catch {
+            NSLog("Oigo could not play the last recording")
+        }
+    }
+
+    private func handlePlaybackState(_ state: AudioPlaybackState) {
+        historyWindow?.setPlaybackState(
+            playingSessionID: state.sessionID,
+            isPlaying: state.isPlaying
+        )
+        guard !state.isPlaying else {
+            return
+        }
+        switch state.outcome {
+        case .completed:
+            historyWindow?.showMessage("Playback finished.")
+        case .failed:
+            historyWindow?.showMessage("Playback failed.")
+        case .stopped, .replaced, .shutdown, nil:
+            break
+        }
+        maintenanceCoordinator.resumeIfNeeded()
     }
 
     @objc private func revealLastRecording() {
@@ -1917,7 +2135,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 reportedMalformedSessionCount = report.malformedSessionCount
             }
             lastSession = storageCapability.history.first?.session
-            historyWindow?.reload(entries: storageCapability.history)
+            if historyWindow != nil {
+                refreshHistory()
+            }
             if onboardingStore.load().isComplete {
                 registerShortcut()
             }
@@ -1928,6 +2148,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         settingsWindow?.setStorageHealth(displayedStorageHealth)
         onboardingWindow?.setStorageHealth(displayedStorageHealth)
+        if storageCapability.health.isReady {
+            scheduleIdleMaintenance(.startup)
+        }
         updateSurface()
     }
 
@@ -2034,13 +2257,18 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func applySettings(_ newSettings: OigoSettings) -> String? {
         let previousSettings = settings
         let shortcutChanged = previousSettings.globalShortcut != newSettings.globalShortcut
-        let launchAtLoginChanged = previousSettings.launchAtLogin != newSettings.launchAtLogin
+        let currentLaunchStatus = launchAtLoginController.status
+        let launchAtLoginChanged = OigoLaunchAtLoginReconciliation.shouldMutate(
+            requested: newSettings.launchAtLogin,
+            status: currentLaunchStatus
+        )
 
         if launchAtLoginChanged {
             do {
                 try launchAtLoginController.setEnabled(newSettings.launchAtLogin)
             } catch {
                 registerShortcut()
+                settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                 return "Launch at Login could not be changed: " + Self.failureReason(for: error)
             }
         }
@@ -2060,15 +2288,18 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             guard shortcutValidation.isAvailable else {
                 let shortcutError = Self.shortcutValidationMessage(shortcutValidation)
                 guard launchAtLoginChanged else {
+                    settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                     updateSurface()
                     return shortcutError
                 }
                 do {
                     try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
                 } catch {
+                    settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                     updateSurface()
                     return shortcutError + "; Launch at Login could not be restored: " + Self.failureReason(for: error)
                 }
+                settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                 updateSurface()
                 return shortcutError
             }
@@ -2078,6 +2309,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 var message = "Settings could not be saved: \(error)"
                 guard launchAtLoginChanged else {
+                    settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                     updateSurface()
                     return message
                 }
@@ -2086,12 +2318,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 } catch let restoreError {
                     message += "; Launch at Login could not be restored: \(restoreError)"
                 }
+                settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                 updateSurface()
                 return message
             }
         }
 
         settings = newSettings
+        settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
         let operationOwnsCapture = !NextDictationSettingsPolicy.mayReplaceOwnedCapture(
             isOperationActive: coordinator.hasActiveWork
                 || (operationGate.currentKind?.isDictationLifecycle ?? false)
@@ -2110,6 +2344,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         if !shortcutRegistrar.status.isActive {
             registerShortcut()
+        }
+        if previousSettings.audioRetention != settings.audioRetention
+            || previousSettings.keepSuccessfulAudioIndefinitely != settings.keepSuccessfulAudioIndefinitely {
+            scheduleIdleMaintenance(.settingsChanged)
         }
         updateSurface()
         return nil

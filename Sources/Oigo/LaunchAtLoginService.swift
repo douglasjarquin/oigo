@@ -27,4 +27,8 @@ final class SystemLaunchAtLoginClient: OigoLaunchAtLoginClient {
     func unregister() throws {
         try service.unregister()
     }
+
+    func openLoginItemsSettings() {
+        SMAppService.openSystemSettingsLoginItems()
+    }
 }

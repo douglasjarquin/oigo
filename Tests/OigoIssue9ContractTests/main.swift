@@ -27,6 +27,7 @@ private struct OigoIssue9ContractTests {
             ("lifecycle", testLifecycle),
             ("setup", testSetup),
             ("settings", testSettings),
+            ("launch-at-login", testLaunchAtLoginSourceOfTruth),
             ("locale", testLocaleSelection),
             ("hud", testHUD),
             ("history", testHistory),
@@ -628,8 +629,147 @@ private struct OigoIssue9ContractTests {
         let client = RecordingLaunchAtLoginClient()
         let controller = OigoLaunchAtLoginController(client: client)
         try controller.setEnabled(true)
-        guard client.registerCount == 1, controller.isEnabled else {
+        guard client.registerCount == 1, controller.isEnabled, controller.status == .enabled else {
             throw ContractFailure(message: "launch-at-login enable did not call the public service")
+        }
+    }
+
+    private static func testLaunchAtLoginSourceOfTruth() throws {
+        let client = RecordingLaunchAtLoginClient()
+        let controller = OigoLaunchAtLoginController(client: client)
+
+        client.status = .enabled
+        try assertPresentation(
+            controller.status,
+            checkboxOn: true,
+            checkboxEnabled: true,
+            menuStateOn: true,
+            showsOpenLoginItems: false
+        )
+
+        client.status = .disabled
+        try assertPresentation(
+            controller.status,
+            checkboxOn: false,
+            checkboxEnabled: true,
+            menuStateOn: false,
+            showsOpenLoginItems: false
+        )
+
+        client.status = .requiresApproval
+        try assertPresentation(
+            controller.status,
+            checkboxOn: false,
+            checkboxEnabled: false,
+            menuStateOn: false,
+            showsOpenLoginItems: true
+        )
+        guard OigoLaunchAtLoginPresentation(status: .requiresApproval).detail.lowercased().contains("approval"),
+              !OigoLaunchAtLoginPresentation(status: .requiresApproval).menuTitle.lowercased().contains("disabled") else {
+            throw ContractFailure(message: "requiresApproval was presented as ordinary disablement")
+        }
+
+        client.status = .notFound
+        try assertPresentation(
+            controller.status,
+            checkboxOn: false,
+            checkboxEnabled: false,
+            menuStateOn: false,
+            showsOpenLoginItems: false
+        )
+        guard !OigoLaunchAtLoginPresentation(status: .notFound).detail.lowercased().contains("disabled") else {
+            throw ContractFailure(message: "notFound was presented as ordinary disablement")
+        }
+
+        client.status = .unknown
+        try assertPresentation(
+            controller.status,
+            checkboxOn: false,
+            checkboxEnabled: false,
+            menuStateOn: false,
+            showsOpenLoginItems: false
+        )
+        guard !OigoLaunchAtLoginPresentation(status: .unknown).detail.lowercased().contains("disabled") else {
+            throw ContractFailure(message: "unknown was presented as ordinary disablement")
+        }
+
+        let persistedEnabled = OigoSettings(launchAtLogin: true)
+        client.status = .disabled
+        let stalePresentation = OigoLaunchAtLoginPresentation(status: client.status)
+        guard persistedEnabled.launchAtLogin,
+              !stalePresentation.checkboxOn,
+              !stalePresentation.menuStateOn else {
+            throw ContractFailure(message: "persisted true was treated as proof the login item is enabled")
+        }
+
+        client.status = .enabled
+        client.registerCount = 0
+        let enabledStatus = try controller.setEnabled(true)
+        guard enabledStatus == .enabled, client.registerCount == 0 else {
+            throw ContractFailure(message: "already-enabled register was not an idempotent no-op")
+        }
+
+        client.status = .disabled
+        client.unregisterCount = 0
+        let disabledStatus = try controller.setEnabled(false)
+        guard disabledStatus == .disabled, client.unregisterCount == 0 else {
+            throw ContractFailure(message: "already-disabled unregister was not an idempotent no-op")
+        }
+
+        client.status = .disabled
+        let afterEnable = try controller.setEnabled(true)
+        guard afterEnable == .enabled, client.registerCount == 1, client.status == .enabled else {
+            throw ContractFailure(message: "enable did not re-read status after register")
+        }
+
+        client.registerError = LaunchAtLoginFailure()
+        client.status = .disabled
+        do {
+            _ = try controller.setEnabled(true)
+            throw ContractFailure(message: "register error was swallowed")
+        } catch is LaunchAtLoginFailure {
+            guard controller.status == .disabled else {
+                throw ContractFailure(message: "register error invented an enabled status")
+            }
+        }
+
+        client.registerError = nil
+        client.status = .requiresApproval
+        controller.openLoginItemsSettings()
+        guard client.openLoginItemsCount == 1 else {
+            throw ContractFailure(message: "requiresApproval did not route to Login Items")
+        }
+
+        let unrelatedRequested = false
+        let serviceDisabled = OigoLaunchAtLoginStatus.disabled
+        guard OigoLaunchAtLoginReconciliation.shouldMutate(
+            requested: unrelatedRequested,
+            status: serviceDisabled
+        ) == false else {
+            throw ContractFailure(message: "saving unrelated settings mutated an already-disabled login item")
+        }
+        guard OigoLaunchAtLoginReconciliation.shouldMutate(requested: true, status: .disabled),
+              OigoLaunchAtLoginReconciliation.shouldMutate(requested: false, status: .enabled),
+              OigoLaunchAtLoginReconciliation.shouldMutate(requested: true, status: .requiresApproval),
+              !OigoLaunchAtLoginReconciliation.shouldMutate(requested: true, status: .enabled) else {
+            throw ContractFailure(message: "launch-at-login reconciliation compared persisted values instead of service status")
+        }
+    }
+
+    private static func assertPresentation(
+        _ status: OigoLaunchAtLoginStatus,
+        checkboxOn: Bool,
+        checkboxEnabled: Bool,
+        menuStateOn: Bool,
+        showsOpenLoginItems: Bool
+    ) throws {
+        let presentation = OigoLaunchAtLoginPresentation(status: status)
+        guard presentation.checkboxOn == checkboxOn,
+              presentation.allowsCheckboxMutation == checkboxEnabled,
+              presentation.menuStateOn == menuStateOn,
+              presentation.showsOpenLoginItems == showsOpenLoginItems,
+              !presentation.detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ContractFailure(message: "launch-at-login presentation was untruthful for " + status.rawValue)
         }
     }
 
@@ -1292,10 +1432,15 @@ private struct OigoIssue9ContractTests {
 private final class RecordingLaunchAtLoginClient: OigoLaunchAtLoginClient {
     var registerCount = 0
     var unregisterCount = 0
+    var openLoginItemsCount = 0
     var status: OigoLaunchAtLoginStatus = .disabled
+    var registerError: Error?
 
     func register() throws {
         registerCount += 1
+        if let registerError {
+            throw registerError
+        }
         status = .enabled
     }
 
@@ -1303,4 +1448,10 @@ private final class RecordingLaunchAtLoginClient: OigoLaunchAtLoginClient {
         unregisterCount += 1
         status = .disabled
     }
+
+    func openLoginItemsSettings() {
+        openLoginItemsCount += 1
+    }
 }
+
+private struct LaunchAtLoginFailure: Error {}

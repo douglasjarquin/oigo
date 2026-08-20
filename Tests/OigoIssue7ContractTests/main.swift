@@ -29,8 +29,11 @@ private struct OigoIssue7ContractTests {
             ("interrupted discovery isolates malformed sessions", testInterruptedDiscoveryIsolatesMalformedSessions),
             ("active deletion is refused", testActiveDeletionIsRefused),
             ("history metadata is bounded and malformed sessions are isolated", testHistoryMetadataIsBounded),
+            ("history pages are bounded and stale generations are ignored", testHistoryPagesAndStaleGenerations),
             ("retry transition preserves durable audio", testRetryTransitionPreservesDurableAudio),
             ("retention boundaries are explicit and safe", testRetentionBoundaries),
+            ("idle maintenance honors inspect bounds and continuation", testIdleMaintenanceBoundsAndContinuation),
+            ("maintenance coordinator coalesces and preempts", testMaintenanceCoordinatorCoalescesAndPreempts),
             ("deletion removes all session artifacts", testDeletionRemovesAllSessionArtifacts),
             ("paste again recovers a failed insertion", testPasteAgainRecoversFailedInsertion),
             ("relaunch recovery matches raw byte-count and first line", testRelaunchRecoveryMatchesRawMetadata)
@@ -245,6 +248,52 @@ private struct OigoIssue7ContractTests {
             guard case .transcriptTooLarge = error else {
                 throw ContractFailure(message: "oversized transcript returned the wrong error: " + error.description)
             }
+        }
+    }
+
+    private static func testHistoryPagesAndStaleGenerations() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(rootDirectory: root)
+        let base = Date(timeIntervalSince1970: 50_000)
+        var sessions: [DictationSession] = []
+        for index in 0..<6 {
+            let created = try store.createSession(now: base.addingTimeInterval(Double(index)))
+            let persisted = try store.persistRawText("page \(index)", for: created)
+            sessions.append(try store.update(persisted, state: .completed, at: base.addingTimeInterval(Double(index))))
+        }
+        let first = try store.listHistoryReport(
+            limit: 2,
+            maxDirectoriesToInspect: 2
+        )
+        guard first.entries.count == 2,
+              first.inspectedDirectoryCount <= 2,
+              first.hasMore,
+              first.cursor != nil,
+              first.entries[0].id == sessions[5].id else {
+            throw ContractFailure(message: "first history page was not newest-first and bounded")
+        }
+        let second = try store.listHistoryReport(
+            limit: 2,
+            cursor: first.cursor,
+            maxDirectoriesToInspect: 2
+        )
+        guard second.entries.allSatisfy({ entry in
+            !first.entries.contains(where: { $0.id == entry.id })
+        }) else {
+            throw ContractFailure(message: "history page two repeated the first page")
+        }
+        let latest = try store.listHistoryReport(limit: 1, maxDirectoriesToInspect: 4)
+        guard latest.entries.count == 1, latest.entries[0].id == sessions[5].id else {
+            throw ContractFailure(message: "latest-session history path loaded more than one row")
+        }
+
+        var generation = HistoryLoadGeneration()
+        let firstGeneration = generation.next()
+        let secondGeneration = generation.next()
+        guard !generation.isCurrent(firstGeneration),
+              generation.isCurrent(secondGeneration) else {
+            throw ContractFailure(message: "stale history generation replaced the current page")
         }
     }
 
@@ -515,14 +564,30 @@ private struct OigoIssue7ContractTests {
                 oldestOverflowID = cancelled.id
             }
         }
+        let overflowPolicy = SessionRetentionPolicy(
+            maxTranscriptSessions: 100,
+            maxDirectoriesToInspect: 4_096,
+            maxElapsedNanoseconds: 60_000_000_000
+        )
         let overflowResult = try overflowStore.performIdleMaintenance(
             at: base.addingTimeInterval(10_000),
-            policy: SessionRetentionPolicy(maxTranscriptSessions: 100)
+            policy: overflowPolicy
         )
         guard let oldestOverflowID,
-              (try? overflowStore.load(id: oldestOverflowID)) == nil,
-              overflowResult.removedSessionIDs.count == 4_097 else {
-            throw ContractFailure(message: "idle retention stopped at the directory inspection bound")
+              overflowResult.inspectedDirectoryCount <= 4_096,
+              overflowResult.moreWorkRemains,
+              overflowResult.cursor != nil,
+              overflowResult.removedSessionIDs.count <= 4_096 else {
+            throw ContractFailure(message: "idle retention did not honor the directory inspection bound")
+        }
+        let overflowSecond = try overflowStore.performIdleMaintenance(
+            at: base.addingTimeInterval(10_000),
+            policy: overflowPolicy,
+            cursor: overflowResult.cursor
+        )
+        guard (try? overflowStore.load(id: oldestOverflowID)) == nil,
+              overflowResult.removedSessionIDs.count + overflowSecond.removedSessionIDs.count == 4_097 else {
+            throw ContractFailure(message: "idle retention did not continue past the first inspected batch")
         }
 
         let protectedRoot = temporaryDirectory()
@@ -566,6 +631,136 @@ private struct OigoIssue7ContractTests {
               FileManager.default.fileExists(atPath: interruptedSession.audioURL.path),
               FileManager.default.fileExists(atPath: activeSession.audioURL.path) else {
             throw ContractFailure(message: "retention deleted protected audio or kept an empty cancelled session")
+        }
+    }
+
+    private static func testIdleMaintenanceBoundsAndContinuation() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(rootDirectory: root)
+        let base = Date(timeIntervalSince1970: 40_000)
+        var sessions: [DictationSession] = []
+        for index in 0..<8 {
+            let created = try store.createSession(now: base.addingTimeInterval(Double(index)))
+            let persisted = try store.persistRawText("bounded \(index)", for: created)
+            let completed = try store.update(
+                persisted,
+                state: .completed,
+                at: base.addingTimeInterval(Double(index))
+            )
+            try Data([0x41, 0x55]).write(to: completed.audioURL, options: [.atomic])
+            sessions.append(completed)
+        }
+        let malformed = root.appendingPathComponent("malformed-session", isDirectory: true)
+        try FileManager.default.createDirectory(at: malformed, withIntermediateDirectories: false)
+        try Data("not-json".utf8).write(
+            to: malformed.appendingPathComponent("session.json"),
+            options: [.atomic]
+        )
+        let symlink = root.appendingPathComponent("symlink-session", isDirectory: false)
+        _ = symlink.path.withCString { path in
+            "/tmp".withCString { destination in
+                Darwin.symlink(destination, path)
+            }
+        }
+
+        let policy = SessionRetentionPolicy(
+            maxTranscriptSessions: 100,
+            successfulAudioLifetime: 365 * 24 * 60 * 60,
+            maxDirectoriesToInspect: 3
+        )
+        let first = try store.performIdleMaintenance(at: base.addingTimeInterval(100), policy: policy)
+        guard first.inspectedDirectoryCount <= 3,
+              first.moreWorkRemains,
+              first.cursor != nil else {
+            throw ContractFailure(message: "bounded maintenance inspected more than maxDirectoriesToInspect")
+        }
+        let second = try store.performIdleMaintenance(
+            at: base.addingTimeInterval(100),
+            policy: policy,
+            cursor: first.cursor
+        )
+        guard first.cursor?.lastDirectoryName != second.cursor?.lastDirectoryName || !second.moreWorkRemains else {
+            throw ContractFailure(message: "second maintenance pass rescanned the first batch")
+        }
+
+        let indefiniteRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: indefiniteRoot) }
+        let indefiniteStore = try SessionStore(rootDirectory: indefiniteRoot)
+        let firstCreated = try indefiniteStore.createSession(now: base)
+        let firstPersisted = try indefiniteStore.persistRawText("older transcript", for: firstCreated)
+        let older = try indefiniteStore.update(firstPersisted, state: .completed, at: base)
+        try Data([0x41]).write(to: older.audioURL, options: [.atomic])
+        let secondCreated = try indefiniteStore.createSession(now: base.addingTimeInterval(1))
+        let secondPersisted = try indefiniteStore.persistRawText("newer transcript", for: secondCreated)
+        let newer = try indefiniteStore.update(
+            secondPersisted,
+            state: .completed,
+            at: base.addingTimeInterval(1)
+        )
+        try Data([0x42]).write(to: newer.audioURL, options: [.atomic])
+        let indefiniteResult = try indefiniteStore.performIdleMaintenance(
+            at: base.addingTimeInterval(2),
+            policy: SessionRetentionPolicy(
+                maxTranscriptSessions: 1,
+                successfulAudioLifetime: Double.greatestFiniteMagnitude
+            )
+        )
+        guard FileManager.default.fileExists(atPath: older.audioURL.path),
+              FileManager.default.fileExists(atPath: newer.audioURL.path),
+              !FileManager.default.fileExists(atPath: older.rawTextURL.path),
+              FileManager.default.fileExists(atPath: newer.rawTextURL.path),
+              indefiniteResult.removedSessionIDs.isEmpty else {
+            throw ContractFailure(message: "indefinite audio retention pruned audio or kept extra transcripts")
+        }
+    }
+
+    private static func testMaintenanceCoordinatorCoalescesAndPreempts() async throws {
+        let state = MaintenanceCoordinatorState()
+        let coordinator = SessionMaintenanceCoordinator(
+            canRun: { true },
+            perform: { cursor in
+                _ = cursor
+                state.markStarted()
+                state.waitUntilReleased()
+                return SessionMaintenanceResult()
+            }
+        )
+        coordinator.request(.startup)
+        coordinator.request(.sessionTerminal)
+        coordinator.request(.settingsChanged)
+        guard state.waitUntilStarted(),
+              coordinator.coalescedRequestCount >= 3,
+              coordinator.performedPassCount == 0 || coordinator.isRunning else {
+            throw ContractFailure(message: "maintenance coordinator did not coalesce overlapping requests")
+        }
+        state.releaseWork()
+        guard await coordinator.waitUntilIdle() else {
+            throw ContractFailure(message: "maintenance coordinator did not finish the coalesced pass")
+        }
+        guard state.performCount == 1, coordinator.performedPassCount == 1 else {
+            throw ContractFailure(message: "coalesced maintenance ran more than one pass")
+        }
+
+        let gatedState = MaintenanceCoordinatorState()
+        gatedState.blocked = true
+        let gated = SessionMaintenanceCoordinator(
+            canRun: { !gatedState.blocked },
+            perform: { _ in
+                gatedState.markStarted()
+                return SessionMaintenanceResult()
+            }
+        )
+        gated.request(.explicit)
+        _ = await gated.waitUntilIdle()
+        guard gated.hasPendingWork, gatedState.performCount == 0 else {
+            throw ContractFailure(message: "maintenance ran while the operation gate was busy")
+        }
+        gated.preempt()
+        gatedState.blocked = false
+        gated.request(.sessionTerminal)
+        guard await gated.waitUntilIdle(), gatedState.performCount == 1 else {
+            throw ContractFailure(message: "preempted maintenance did not run after the next idle trigger")
         }
     }
 
@@ -795,5 +990,58 @@ private final class Issue7RetryTranscription: TranscriptionController, @unchecke
             finalizedText: finalizedText,
             rawTextByteCount: Int64(finalizedText.utf8.count)
         )
+    }
+}
+
+private final class MaintenanceCoordinatorState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var started = false
+    private var released = false
+    private var runs = 0
+    var blocked = false
+
+    var performCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return runs
+    }
+
+    func markStarted() {
+        lock.lock()
+        started = true
+        runs += 1
+        lock.unlock()
+    }
+
+    func releaseWork() {
+        lock.lock()
+        released = true
+        lock.unlock()
+    }
+
+    func waitUntilStarted(timeoutNanoseconds: UInt64 = 1_000_000_000) -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            lock.lock()
+            let didStart = started
+            lock.unlock()
+            if didStart {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        return false
+    }
+
+    func waitUntilReleased() {
+        while true {
+            lock.lock()
+            let shouldRelease = released
+            lock.unlock()
+            if shouldRelease {
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.001)
+        }
     }
 }
