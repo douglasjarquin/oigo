@@ -1037,10 +1037,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             recordingStartedAt = nil
             clearTargetSnapshot()
             livePreview = ""
-            if !coordinator.hasActiveWork {
-                insertionDisplayStatus = nil
-            }
-            failureDetail = nil
+            applyTerminalDisplay(cancelled: true)
             updateSurface()
         } catch {
             let failureReason = Self.failureReason(for: error)
@@ -1056,13 +1053,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             lastSession = coordinator.currentSession ?? lastSession
             clearTargetSnapshot()
             recordingStartedAt = nil
-            insertionDisplayStatus = .failed
-            failureDetail = Self.friendlyError("Dictation failed", error)
+            applyTerminalDisplay(error: error, cancelled: false)
             if let session = coordinator.currentSession,
                [.failed, .interrupted].contains(session.metadata.state) {
                 lastSession = session
             }
-            historyWindow?.showMessage(failureDetail ?? Self.friendlyError("Dictation failed", error))
             onboardingWindow?.setTestResult(
                 transcript: "",
                 mode: settings.defaultMode,
@@ -1162,9 +1157,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             recordingStartedAt = nil
             clearTargetSnapshot()
             livePreview = ""
-            if !coordinator.hasActiveWork {
-                insertionDisplayStatus = nil
-            }
+            applyTerminalDisplay(cancelled: true)
             updateSurface()
         } catch {
             let failureReason = Self.failureReason(for: error)
@@ -1176,12 +1169,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             lastSession = coordinator.currentSession ?? lastSession
             clearTargetSnapshot()
             recordingStartedAt = nil
-            insertionDisplayStatus = .failed
+            applyTerminalDisplay(error: error, cancelled: false)
             if let session = coordinator.currentSession,
                [.failed, .interrupted].contains(session.metadata.state) {
                 lastSession = session
             }
-            historyWindow?.showMessage(Self.friendlyError("Dictation failed", error))
             onboardingWindow?.setTestResult(
                 transcript: "",
                 mode: settings.defaultMode,
@@ -2304,6 +2296,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             "Transcript inserted"
         case .copied:
             "Copied to clipboard. Open History to retry paste."
+        case .completedPasteFailed:
+            "Dictation completed; paste failed. Open History to copy or paste again."
         case .failed:
             "Failed. Open History to retry the saved recording."
         }
@@ -2345,6 +2339,31 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         return "operation failed"
     }
 
+    private func applyTerminalDisplay(error: Error? = nil, cancelled: Bool) {
+        if coordinator.state == .complete,
+           coordinator.currentSession?.metadata.insertionOutcome == .failed {
+            insertionDisplayStatus = .completedPasteFailed
+            failureDetail = DictationTerminalContract.statusCopy(
+                sessionState: .completed,
+                insertionOutcome: .failed
+            )
+            historyWindow?.showMessage(failureDetail ?? "Dictation completed; paste failed")
+            return
+        }
+        if cancelled {
+            if !coordinator.hasActiveWork {
+                insertionDisplayStatus = nil
+            }
+            failureDetail = nil
+            return
+        }
+        insertionDisplayStatus = .failed
+        if let error {
+            failureDetail = Self.friendlyError("Dictation failed", error)
+            historyWindow?.showMessage(failureDetail ?? Self.friendlyError("Dictation failed", error))
+        }
+    }
+
     private static func displayStatus(for outcome: InsertionOutcome) -> OigoHUDProcessingState {
         switch outcome {
         case .pasted:
@@ -2354,7 +2373,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .copied, .secureRejected:
             .copied
         case .failed:
-            .failed
+            .completedPasteFailed
         }
     }
 }

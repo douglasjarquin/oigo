@@ -285,6 +285,7 @@ public final class DictationCoordinator {
     public private(set) var currentSession: DictationSession?
     public private(set) var lastFailureReason: String?
     public private(set) var lastFailureCode: DictationFailureCode?
+    public private(set) var lastTerminalMetadataWriteFailed = false
 
     public var state: DictationState {
         machine.state
@@ -420,6 +421,7 @@ public final class DictationCoordinator {
             )
             lastFailureReason = nil
             lastFailureCode = nil
+            lastTerminalMetadataWriteFailed = false
             diagnostics.record("audio capture started")
             return preparedSession
         } catch {
@@ -588,6 +590,7 @@ public final class DictationCoordinator {
             )
             lastFailureReason = nil
             lastFailureCode = nil
+            lastTerminalMetadataWriteFailed = false
             diagnostics.record("audio capture and transcription started")
             return preparedSession
         } catch {
@@ -969,61 +972,109 @@ public final class DictationCoordinator {
         reason: String? = nil,
         insertionSource: TranscriptInsertionSource? = nil,
         cleanupFallbackReason: String? = nil,
+        sessionID: UUID? = nil,
         at date: Date = Date()
     ) throws -> DictationSession {
-        if state == .complete,
-           let session = currentSession,
-           session.metadata.insertionOutcome != nil {
-            return session
+        if let sessionID, currentSession?.id != sessionID {
+            if let terminal = existingCompletedInsertion() {
+                return terminal
+            }
+            throw DictationCoordinatorError.recordingNotActive
+        }
+        if let terminal = existingCompletedInsertion() {
+            return terminal
         }
         guard state == .inserting,
               let session = currentSession,
               let sessionStore else {
             throw DictationCoordinatorError.recordingNotActive
         }
-        let completedSession = try sessionStore.update(
-            session,
-            state: .completed,
-            at: date,
-            insertionOutcome: outcome,
-            insertionFailureReason: reason,
-            insertionTextSource: insertionSource,
-            cleanupFallbackReason: cleanupFallbackReason
+        return terminalizeCompletedInsertion(
+            session: session,
+            store: sessionStore,
+            outcome: outcome,
+            reason: reason,
+            insertionSource: insertionSource,
+            cleanupFallbackReason: cleanupFallbackReason,
+            at: date
         )
-        _ = try apply(.inserted)
-        currentSession = completedSession
-        diagnostics.record("transcript insertion finished as " + outcome.rawValue)
-        return completedSession
     }
 
     @discardableResult
     public func failInsertion(
         reason: String,
+        sessionID: UUID? = nil,
         at date: Date = Date()
     ) -> DictationSession? {
-        if state == .complete {
-            return currentSession
+        if let sessionID, currentSession?.id != sessionID {
+            return existingCompletedInsertion()
+        }
+        if let terminal = existingCompletedInsertion() {
+            return terminal
         }
         guard [.cleaning, .inserting].contains(state),
               let session = currentSession,
               let sessionStore else {
             return nil
         }
-        let failedSession = persistTerminalState(
+        return terminalizeCompletedInsertion(
+            session: session,
+            store: sessionStore,
+            outcome: .failed,
+            reason: reason,
+            at: date
+        )
+    }
+
+    private func existingCompletedInsertion() -> DictationSession? {
+        guard state == .complete,
+              let session = currentSession,
+              session.metadata.insertionOutcome != nil else {
+            return nil
+        }
+        return session
+    }
+
+    private func terminalizeCompletedInsertion(
+        session: DictationSession,
+        store: SessionStore,
+        outcome: InsertionOutcome,
+        reason: String?,
+        insertionSource: TranscriptInsertionSource? = nil,
+        cleanupFallbackReason: String? = nil,
+        at date: Date
+    ) -> DictationSession {
+        if let terminal = existingCompletedInsertion() {
+            return terminal
+        }
+        let persisted = persistTerminalState(
             session,
-            in: sessionStore,
+            in: store,
             state: .completed,
             reason: nil,
             failureCode: nil,
-            insertionOutcome: .failed,
+            insertionOutcome: outcome,
             insertionFailureReason: reason,
+            insertionTextSource: insertionSource,
+            cleanupFallbackReason: cleanupFallbackReason,
             at: date
         )
-        _ = try? apply(.fail)
-        currentSession = failedSession
-        lastFailureReason = reason
-        diagnostics.record("transcript insertion failed: " + reason)
-        return failedSession
+        if state == .cleaning {
+            _ = try? apply(.cleaned)
+        }
+        if state == .inserting {
+            _ = try? apply(.inserted)
+        }
+        currentSession = persisted
+        if outcome == .failed {
+            lastFailureReason = reason
+            lastFailureCode = nil
+        } else {
+            lastFailureReason = nil
+            lastFailureCode = nil
+        }
+        diagnostics.record("transcript insertion finished as " + outcome.rawValue)
+        return persisted
     }
 
     @discardableResult
@@ -1084,6 +1135,15 @@ public final class DictationCoordinator {
         if [.cleaning, .inserting].contains(state) {
             _ = failInsertion(reason: reason)
         }
+    }
+
+    private func cancelAfterRawIfNeeded(reason: String) -> Bool {
+        guard [.cleaning, .inserting].contains(state),
+              currentSession?.metadata.rawTextByteCount != nil else {
+            return false
+        }
+        _ = failInsertion(reason: reason)
+        return true
     }
 
     @discardableResult
@@ -1455,9 +1515,12 @@ public final class DictationCoordinator {
         rawTextByteCount: Int64? = nil,
         insertionOutcome: InsertionOutcome? = nil,
         insertionFailureReason: String? = nil,
+        insertionTextSource: TranscriptInsertionSource? = nil,
+        cleanupFallbackReason: String? = nil,
         at date: Date = Date(),
         expectedState: DictationSessionState? = nil
     ) -> DictationSession {
+        lastTerminalMetadataWriteFailed = false
         let audioBytes = audioByteCount()
         do {
             return try store.update(
@@ -1470,6 +1533,8 @@ public final class DictationCoordinator {
                 rawTextByteCount: rawTextByteCount,
                 insertionOutcome: insertionOutcome,
                 insertionFailureReason: insertionFailureReason,
+                insertionTextSource: insertionTextSource,
+                cleanupFallbackReason: cleanupFallbackReason,
                 expectedState: expectedState
             )
         } catch {
@@ -1485,9 +1550,12 @@ public final class DictationCoordinator {
                     rawTextByteCount: rawTextByteCount,
                     insertionOutcome: insertionOutcome,
                     insertionFailureReason: insertionFailureReason,
+                    insertionTextSource: insertionTextSource,
+                    cleanupFallbackReason: cleanupFallbackReason,
                     expectedState: expectedState
                 )
             } catch {
+                lastTerminalMetadataWriteFailed = true
                 diagnostics.record("terminal metadata retry failed: " + Self.failureReason(for: error))
                 return inMemoryTerminalState(
                     session,
@@ -1498,7 +1566,9 @@ public final class DictationCoordinator {
                     audioByteCount: audioBytes,
                     rawTextByteCount: rawTextByteCount,
                     insertionOutcome: insertionOutcome,
-                    insertionFailureReason: insertionFailureReason
+                    insertionFailureReason: insertionFailureReason,
+                    insertionTextSource: insertionTextSource,
+                    cleanupFallbackReason: cleanupFallbackReason
                 )
             }
         }
@@ -1513,7 +1583,9 @@ public final class DictationCoordinator {
         audioByteCount: Int64?,
         rawTextByteCount: Int64?,
         insertionOutcome: InsertionOutcome?,
-        insertionFailureReason: String?
+        insertionFailureReason: String?,
+        insertionTextSource: TranscriptInsertionSource? = nil,
+        cleanupFallbackReason: String? = nil
     ) -> DictationSession {
         var metadata = session.metadata
         metadata.updatedAt = date
@@ -1525,6 +1597,12 @@ public final class DictationCoordinator {
         if let insertionOutcome {
             metadata.insertionOutcome = insertionOutcome
             metadata.insertionFailureReason = insertionFailureReason
+        }
+        if let insertionTextSource {
+            metadata.insertionTextSource = insertionTextSource
+        }
+        if let cleanupFallbackReason {
+            metadata.cleanupFallbackReason = cleanupFallbackReason
         }
         metadata.endedAt = date
         if metadata.duration == nil, let startedAt = metadata.startedAt {
@@ -1732,6 +1810,10 @@ public final class DictationCoordinator {
         }
         activeTask?.cancel()
         activeTask = nil
+        if cancelAfterRawIfNeeded(reason: "application shutdown") {
+            diagnostics.record("coordinator shutdown")
+            return
+        }
         if activeCapture == nil,
            [.preparing, .recording, .finalizing, .cleaning, .inserting].contains(state) {
             _ = try? apply(.cancel)
@@ -1756,6 +1838,10 @@ public final class DictationCoordinator {
             ) {
                 await task.value
             }
+        }
+        if cancelAfterRawIfNeeded(reason: "application shutdown") {
+            diagnostics.record("coordinator shutdown")
+            return
         }
         if activeCapture == nil,
            [.preparing, .recording, .finalizing, .cleaning, .inserting].contains(state) {
@@ -1849,6 +1935,7 @@ public final class DictationCoordinator {
                 await task.value
             }
         }
+        _ = cancelAfterRawIfNeeded(reason: "application shutdown")
         diagnostics.record("coordinator shutdown")
     }
 }
