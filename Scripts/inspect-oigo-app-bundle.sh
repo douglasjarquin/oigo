@@ -145,71 +145,9 @@ fi
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 if membership_error="$(
-    /usr/bin/python3 - "$repo_root" "$repo_root/Oigo.xcodeproj/project.pbxproj" <<'PY'
-import json
-import os
-import subprocess
-import sys
-
-repo_root = sys.argv[1]
-pbxproj = sys.argv[2]
-converted = subprocess.check_output(
-    ["/usr/bin/plutil", "-convert", "json", "-o", "-", pbxproj]
-)
-project = json.loads(converted)
-objects = project.get("objects", {})
-compiled = set()
-for obj in objects.values():
-    if obj.get("isa") != "PBXSourcesBuildPhase":
-        continue
-    for build_file_id in obj.get("files", []):
-        build_file = objects.get(build_file_id, {})
-        file_ref = objects.get(build_file.get("fileRef"), {})
-        path = file_ref.get("path")
-        if not path or not path.endswith(".swift"):
-            sys.stdout.write("Xcode sources phase includes a non-Swift file: %s\n" % (path,))
-            sys.exit(1)
-        compiled.add(os.path.basename(path))
-
-production_roots = [
-    "Sources/Oigo",
-    "Sources/OigoCore",
-    "Sources/OigoCapture",
-    "Sources/OigoTranscription",
-    "Sources/OigoInsertion",
-    "Sources/OigoHotKey",
-]
-missing = []
-extra = set(compiled)
-for relative_root in production_roots:
-    directory = os.path.join(repo_root, relative_root)
-    found = False
-    for _, _, filenames in os.walk(directory):
-        for name in filenames:
-            if not name.endswith(".swift"):
-                continue
-            found = True
-            if name in compiled:
-                extra.discard(name)
-            else:
-                missing.append("%s/%s" % (relative_root, name))
-    if not found:
-        sys.stdout.write("%s has no Swift sources\n" % relative_root)
-        sys.exit(1)
-
-if missing or extra:
-    parts = []
-    if missing:
-        parts.append("missing from Xcode sources: " + ", ".join(sorted(missing)))
-    if extra:
-        parts.append(
-            "compiled Swift names not in production sources: " + ", ".join(sorted(extra))
-        )
-    sys.stdout.write("; ".join(parts) + "\n")
-    sys.exit(1)
-PY
+    /usr/bin/python3 "$repo_root/Scripts/check-xcode-source-membership.py" "$repo_root" 2>&1
 )"; then
-    pass "every production source is in an Xcode sources phase"
+    pass "every production source is compiled into the correct Xcode target"
 else
     fail "source membership drift: ${membership_error}"
 fi

@@ -4,7 +4,7 @@ This matrix hands the issue #82 global shortcut scenarios to issue #12's exact-r
 
 It is a handoff artifact, not a claim that issue #12 native acceptance is complete.
 
-The issue #12 operator must pin one reviewed source SHA and the exact Release `Oigo.app` produced by the `Xcode app bundle` GitHub Actions job for that SHA.
+The issue #12 operator must pin one reviewed source SHA and the exact Release `Oigo.app` from the `oigo-app-<checked-out-sha>` artifact uploaded by the `Xcode app bundle` job.
 
 If a Developer ID signed candidate is required, issue #14 must build it from that same Xcode contract rather than substituting a SwiftPM executable.
 

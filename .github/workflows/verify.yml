@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -34,12 +35,18 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref }}
       - name: Record SwiftPM host and toolchain
+        env:
+          DISPATCH_REF: ${{ github.event.inputs.ref }}
         run: |
           echo "event=${GITHUB_EVENT_NAME}"
           echo "ref=${GITHUB_REF}"
-          echo "sha=${GITHUB_SHA}"
-          echo "head_sha=${GITHUB_HEAD_REF:-}"
-          git rev-parse HEAD
+          echo "workflow_sha=${GITHUB_SHA}"
+          echo "head_ref=${GITHUB_HEAD_REF:-}"
+          checked_out_sha=$(git rev-parse HEAD)
+          echo "checked_out_sha=${checked_out_sha}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            printf 'dispatch_ref=%s\n' "$DISPATCH_REF"
+          fi
           sw_vers
           uname -m
           swift --version
@@ -95,11 +102,20 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref }}
       - name: Record Xcode host, toolchain, and SHA
+        id: identity
+        env:
+          DISPATCH_REF: ${{ github.event.inputs.ref }}
         run: |
           echo "event=${GITHUB_EVENT_NAME}"
           echo "ref=${GITHUB_REF}"
-          echo "sha=${GITHUB_SHA}"
-          git rev-parse HEAD
+          echo "workflow_sha=${GITHUB_SHA}"
+          echo "head_ref=${GITHUB_HEAD_REF:-}"
+          checked_out_sha=$(git rev-parse HEAD)
+          echo "checked_out_sha=${checked_out_sha}"
+          echo "checked_out_sha=${checked_out_sha}" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            printf 'dispatch_ref=%s\n' "$DISPATCH_REF"
+          fi
           sw_vers
           uname -m
           xcode-select -p
@@ -109,8 +125,12 @@ jobs:
           swift --version
           xcodebuild -project Oigo.xcodeproj -list
       - name: Show Oigo Release build settings
+        env:
+          DERIVED_DATA: ${{ runner.temp }}/oigo-derived-data
         run: |
           set -euo pipefail
+          mkdir -p "$DERIVED_DATA/ci-evidence"
+          SETTINGS="$DERIVED_DATA/ci-evidence/oigo-release-build-settings.txt"
           xcodebuild \
             -project Oigo.xcodeproj \
             -scheme Oigo \
@@ -125,7 +145,8 @@ jobs:
             | awk '
               /ARCHS |CONFIGURATION |MACOSX_DEPLOYMENT_TARGET |SDKROOT |PLATFORM_NAME |PRODUCT_BUNDLE_IDENTIFIER |PRODUCT_NAME |INFOPLIST_FILE |CODE_SIGNING_ALLOWED |CODE_SIGN_IDENTITY |CODE_SIGNING_REQUIRED |LSUIElement |NATIVE_ARCH /
               { print }
-            '
+            ' \
+            | tee "$SETTINGS"
       - name: Build unsigned Release Oigo.app
         env:
           DERIVED_DATA: ${{ runner.temp }}/oigo-derived-data
@@ -147,26 +168,16 @@ jobs:
         env:
           DERIVED_DATA: ${{ runner.temp }}/oigo-derived-data
         run: zsh ./Scripts/inspect-oigo-app-bundle.sh "$DERIVED_DATA/Build/Products/Release/Oigo.app"
+      - name: Upload inspected Oigo.app
+        uses: actions/upload-artifact@v4
+        with:
+          name: oigo-app-${{ steps.identity.outputs.checked_out_sha }}
+          path: |
+            ${{ runner.temp }}/oigo-derived-data/Build/Products/Release/Oigo.app
+            ${{ runner.temp }}/oigo-derived-data/ci-evidence/oigo-release-build-settings.txt
+          if-no-files-found: error
+          retention-days: 30
       - name: Bounded launch smoke test
         env:
           DERIVED_DATA: ${{ runner.temp }}/oigo-derived-data
-        run: |
-          APP="$DERIVED_DATA/Build/Products/Release/Oigo.app"
-          EXECUTABLE="$APP/Contents/MacOS/Oigo"
-          "$EXECUTABLE" &
-          PID=$!
-          sleep 3
-          if kill -0 "$PID" 2>/dev/null; then
-            echo "GREEN: bounded Oigo.app process stayed alive"
-            kill "$PID" 2>/dev/null || true
-            wait "$PID" 2>/dev/null || true
-          else
-            echo "INCONCLUSIVE: bounded launch did not keep a process alive on this hosted runner"
-          fi
-          echo "INCONCLUSIVE: microphone permission"
-          echo "INCONCLUSIVE: Speech recognition"
-          echo "INCONCLUSIVE: Accessibility"
-          echo "INCONCLUSIVE: hardware capture"
-          echo "INCONCLUSIVE: Developer ID signing and notarization"
-          echo "INCONCLUSIVE: clean-account dogfood"
-          echo "This job validates the Xcode Oigo.app bundle only. It is not the SwiftPM contract harness."
+        run: zsh ./Scripts/bounded-oigo-launch.sh "$DERIVED_DATA/Build/Products/Release/Oigo.app"

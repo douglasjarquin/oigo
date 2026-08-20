@@ -8,24 +8,25 @@ private struct ContractFailure: Error, CustomStringConvertible {
     }
 }
 
+private struct DumpPackage: Decodable {
+    struct Platform: Decodable {
+        let platformName: String
+        let version: String
+    }
+
+    let platforms: [Platform]
+}
+
 @main
 private struct OigoMacOSFloorCheck {
     static let requiredVersion = "26.0"
-    static let productionSourceRoots = [
-        "Sources/Oigo",
-        "Sources/OigoCore",
-        "Sources/OigoCapture",
-        "Sources/OigoTranscription",
-        "Sources/OigoInsertion",
-        "Sources/OigoHotKey"
-    ]
 
     static func main() {
         let cases: [(String, () throws -> Void)] = [
             ("SwiftPM platform is macOS 26.0", checkPackageManifest),
             ("Info.plist minimum system version is 26.0", checkInfoPlist),
             ("Xcode MACOSX_DEPLOYMENT_TARGET is 26.0", checkXcodeDeploymentTarget),
-            ("every production source is in an Xcode sources phase", checkSourceMembership)
+            ("every production source is compiled into the correct Xcode target", checkSourceMembership)
         ]
 
         var failures = 0
@@ -48,14 +49,32 @@ private struct OigoMacOSFloorCheck {
     }
 
     private static func checkPackageManifest() throws {
-        let text = try String(contentsOf: repositoryRoot().appendingPathComponent("Package.swift"), encoding: .utf8)
-        let versions = try macOSPlatforms(in: text)
-        guard versions == [requiredVersion] else {
+        let root = try repositoryRoot()
+        let stdout = try runCommand(
+            executable: "/usr/bin/env",
+            arguments: ["swift", "package", "dump-package"],
+            currentDirectory: root
+        )
+        let dump: DumpPackage
+        do {
+            dump = try JSONDecoder().decode(DumpPackage.self, from: Data(stdout.utf8))
+        } catch {
             throw ContractFailure(
-                message: "Package.swift platforms must be exactly macOS "
+                message: "swift package dump-package JSON could not be decoded: "
+                    + error.localizedDescription
+            )
+        }
+        let versions = dump.platforms.map { platform in
+            platform.platformName + " " + platform.version
+        }
+        guard dump.platforms.count == 1,
+              dump.platforms[0].platformName.lowercased() == "macos",
+              dump.platforms[0].version == requiredVersion else {
+            throw ContractFailure(
+                message: "swift package dump-package platforms must be exactly macos "
                     + requiredVersion
                     + ", found "
-                    + versions.joined(separator: ", ")
+                    + (versions.isEmpty ? "<none>" : versions.joined(separator: ", "))
             )
         }
     }
@@ -98,91 +117,12 @@ private struct OigoMacOSFloorCheck {
 
     private static func checkSourceMembership() throws {
         let root = try repositoryRoot()
-        let objects = try xcodeObjects()
-        let compiled = try compiledSwiftFileNames(in: objects)
-        var missing: [String] = []
-        var extra = compiled
-
-        for relativeRoot in productionSourceRoots {
-            let directory = root.appendingPathComponent(relativeRoot)
-            let files = try swiftFiles(in: directory)
-            guard !files.isEmpty else {
-                throw ContractFailure(message: relativeRoot + " has no Swift sources")
-            }
-            for file in files {
-                let name = file.lastPathComponent
-                if compiled.contains(name) {
-                    extra.remove(name)
-                } else {
-                    missing.append(relativeRoot + "/" + name)
-                }
-            }
-        }
-
-        if !missing.isEmpty || !extra.isEmpty {
-            var parts: [String] = []
-            if !missing.isEmpty {
-                parts.append("missing from Xcode sources: " + missing.sorted().joined(separator: ", "))
-            }
-            if !extra.isEmpty {
-                parts.append(
-                    "compiled Swift names not in production sources: "
-                        + extra.sorted().joined(separator: ", ")
-                )
-            }
-            throw ContractFailure(message: parts.joined(separator: "; "))
-        }
-    }
-
-    private static func macOSPlatforms(in manifest: String) throws -> [String] {
-        guard let platformsKeyword = manifest.range(of: "platforms:") else {
-            throw ContractFailure(message: "Package.swift has no platforms declaration")
-        }
-        let fromKeyword = manifest[platformsKeyword.upperBound...]
-        guard let arrayStart = fromKeyword.firstIndex(of: "[") else {
-            throw ContractFailure(message: "Package.swift platforms is not an array")
-        }
-        let afterStart = fromKeyword.index(after: arrayStart)
-        guard let arrayEnd = fromKeyword[afterStart...].firstIndex(of: "]") else {
-            throw ContractFailure(message: "Package.swift platforms array is unclosed")
-        }
-        let body = String(fromKeyword[afterStart..<arrayEnd])
-        if body.contains(".iOS") || body.contains(".tvOS") || body.contains(".watchOS") || body.contains(".visionOS") {
-            throw ContractFailure(message: "Package.swift platforms must declare only macOS")
-        }
-
-        var versions: [String] = []
-        let stringPattern = try NSRegularExpression(pattern: #"\.macOS\("([^"]+)"\)"#)
-        let stringMatches = stringPattern.matches(
-            in: body,
-            range: NSRange(body.startIndex..., in: body)
+        let script = root.appendingPathComponent("Scripts/check-xcode-source-membership.py")
+        _ = try runCommand(
+            executable: "/usr/bin/python3",
+            arguments: [script.path, root.path],
+            currentDirectory: root
         )
-        for match in stringMatches {
-            guard let range = Range(match.range(at: 1), in: body) else { continue }
-            versions.append(String(body[range]))
-        }
-
-        let enumPattern = try NSRegularExpression(pattern: #"\.macOS\(\.v(\d+)(?:_(\d+))?(?:_(\d+))?\)"#)
-        let enumMatches = enumPattern.matches(
-            in: body,
-            range: NSRange(body.startIndex..., in: body)
-        )
-        for match in enumMatches {
-            guard let majorRange = Range(match.range(at: 1), in: body) else { continue }
-            let major = String(body[majorRange])
-            let minor: String
-            if match.range(at: 2).location != NSNotFound, let minorRange = Range(match.range(at: 2), in: body) {
-                minor = String(body[minorRange])
-            } else {
-                minor = "0"
-            }
-            versions.append(major + "." + minor)
-        }
-
-        guard !versions.isEmpty else {
-            throw ContractFailure(message: "Package.swift platforms array contains no macOS entries")
-        }
-        return versions
     }
 
     private static func assertSupportedVersion(_ version: String, source: String) throws {
@@ -205,51 +145,6 @@ private struct OigoMacOSFloorCheck {
             return String(doubleValue)
         }
         throw ContractFailure(message: key + " is not a string or number")
-    }
-
-    private static func compiledSwiftFileNames(in objects: [String: Any]) throws -> Set<String> {
-        var names = Set<String>()
-        for (_, value) in objects {
-            guard let phase = value as? [String: Any],
-                  phase["isa"] as? String == "PBXSourcesBuildPhase",
-                  let files = phase["files"] as? [String] else {
-                continue
-            }
-            for buildFileID in files {
-                guard let buildFile = objects[buildFileID] as? [String: Any],
-                      let fileRefID = buildFile["fileRef"] as? String,
-                      let fileRef = objects[fileRefID] as? [String: Any],
-                      let path = fileRef["path"] as? String else {
-                    throw ContractFailure(
-                        message: "Xcode sources phase entry " + buildFileID + " is not a Swift file reference"
-                    )
-                }
-                guard path.hasSuffix(".swift") else {
-                    throw ContractFailure(message: "Xcode sources phase includes a non-Swift file: " + path)
-                }
-                names.insert(URL(fileURLWithPath: path).lastPathComponent)
-            }
-        }
-        guard !names.isEmpty else {
-            throw ContractFailure(message: "Oigo.xcodeproj has no Swift sources phases")
-        }
-        return names
-    }
-
-    private static func swiftFiles(in directory: URL) throws -> [URL] {
-        var files: [URL] = []
-        guard let enumerator = FileManager.default.enumerator(
-            at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            throw ContractFailure(message: "could not enumerate " + directory.path)
-        }
-        for case let file as URL in enumerator {
-            guard file.pathExtension == "swift" else { continue }
-            files.append(file)
-        }
-        return files
     }
 
     private static func xcodeObjects() throws -> [String: Any] {
@@ -275,6 +170,39 @@ private struct OigoMacOSFloorCheck {
             throw ContractFailure(message: url.lastPathComponent + " is not a dictionary plist")
         }
         return dictionary
+    }
+
+    private static func runCommand(
+        executable: String,
+        arguments: [String],
+        currentDirectory: URL
+    ) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.currentDirectoryURL = currentDirectory
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        do {
+            try process.run()
+        } catch {
+            throw ContractFailure(message: "could not start " + executable + ": " + error.localizedDescription)
+        }
+        process.waitUntilExit()
+        let output = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let errorOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard process.terminationStatus == 0 else {
+            let details = errorOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw ContractFailure(
+                message: arguments.joined(separator: " ")
+                    + " exited "
+                    + String(process.terminationStatus)
+                    + (details.isEmpty ? "" : ": " + details)
+            )
+        }
+        return output
     }
 
     private static func repositoryRoot() throws -> URL {

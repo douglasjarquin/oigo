@@ -12,7 +12,7 @@ swift build --product Oigo
 swift run oigo-macos-floor-check
 ```
 
-`oigo-macos-floor-check` reads `Package.swift`, `Oigo/Info.plist`, and `Oigo.xcodeproj/project.pbxproj` and fails if the floor drifts below macOS 26.0.
+`oigo-macos-floor-check` fails unless SwiftPM, Info.plist, and every Xcode configuration declare exactly `26.0`.
 
 `.github/workflows/verify.yml` runs on pull requests, every push to `main`, and `workflow_dispatch` of an exact git ref.
 

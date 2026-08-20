@@ -34,6 +34,6 @@ Prove the policy with:
 
 ## Downstream reuse
 
-Issue #12 must pin that `main` SHA and the Release `Oigo.app` produced by `Xcode app bundle` for that SHA.
+Issue #12 must pin that `main` SHA and the Release `Oigo.app` from the `oigo-app-<checked-out-sha>` artifact uploaded by `Xcode app bundle`.
 If a Developer ID signed candidate is required, issue #14 builds it from the same Xcode contract rather than substituting a SwiftPM executable.
 Hosted CI does not replace native TCC, Speech, Accessibility, hardware, or clean-account dogfood proof.
