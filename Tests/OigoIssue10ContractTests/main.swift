@@ -398,6 +398,7 @@ private struct OigoIssue10ContractTests {
             .afterMetadataCommit,
             .shortWrite,
             .duringTailRevision,
+            .beforeTailRevision,
             .duringFinalCheckpoint
         ]
         for fault in faults {
@@ -408,7 +409,7 @@ private struct OigoIssue10ContractTests {
             session = try store.appendRawText("canonical", for: session)
             store.armRawTextPersistenceFaultForTesting(fault)
             switch fault {
-            case .duringTailRevision:
+            case .duringTailRevision, .beforeTailRevision:
                 do {
                     _ = try store.replaceRawTextTail(
                         "canonical",

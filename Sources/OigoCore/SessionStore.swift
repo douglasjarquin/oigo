@@ -464,6 +464,7 @@ public enum RawTextPersistenceFault: String, Equatable, Sendable {
     case beforeMetadataCommit
     case afterMetadataCommit
     case duringTailRevision
+    case beforeTailRevision
     case duringFinalCheckpoint
     case shortWrite
 }
@@ -981,7 +982,8 @@ public final class SessionStore: @unchecked Sendable {
                     metadata.firstTranscriptLine = Self.firstTranscriptLine(from: rawText)
                 } else {
                     metadata.firstTranscriptLine = try readFirstTranscriptLine(
-                        from: rawFD,
+                        named: "raw.txt",
+                        in: directoryFD,
                         at: current.rawTextURL
                     )
                 }
@@ -1002,6 +1004,7 @@ public final class SessionStore: @unchecked Sendable {
                 persistenceMetrics.lastResultCode = "append-before-write"
                 throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
             }
+            var skipRollback = false
             do {
                 if previousRawTextByteCount > 0 {
                     try writeData(separator, to: rawFD, at: current.rawTextURL)
@@ -1016,10 +1019,12 @@ public final class SessionStore: @unchecked Sendable {
                 try writeData(rawData, to: rawFD, at: current.rawTextURL)
                 persistenceMetrics.transcriptBytesWritten += Int64(separator.count + rawData.count)
                 if consumeRawTextFault(.afterTextWrite) {
+                    skipRollback = true
                     persistenceMetrics.lastResultCode = "append-after-write"
                     throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
                 }
                 try fsyncTranscript(rawFD, at: current.rawTextURL)
+                skipRollback = true
                 if consumeRawTextFault(.afterFsync) {
                     persistenceMetrics.lastResultCode = "append-after-fsync"
                     throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
@@ -1029,12 +1034,11 @@ public final class SessionStore: @unchecked Sendable {
                     throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
                 }
                 guard Int64(after.st_size) == targetRawTextByteCount else {
+                    skipRollback = false
                     throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
                 }
             } catch {
-                let keepCommittedBytes = persistenceMetrics.lastResultCode == "append-after-write"
-                    || persistenceMetrics.lastResultCode == "append-after-fsync"
-                if !keepCommittedBytes {
+                if !skipRollback {
                     _ = Darwin.ftruncate(rawFD, off_t(previousRawTextByteCount))
                     _ = Darwin.fsync(rawFD)
                 }
@@ -1155,6 +1159,12 @@ public final class SessionStore: @unchecked Sendable {
             }
 
             let backupName = ".raw.txt." + UUID().uuidString + ".bak"
+            try writeSuffixBackup(
+                tail,
+                named: backupName,
+                in: directoryFD,
+                at: current.rawTextURL
+            )
             try writePendingPersistence(
                 PendingRawPersistence(
                     metadata: metadata,
@@ -1166,14 +1176,12 @@ public final class SessionStore: @unchecked Sendable {
                 in: directoryFD,
                 at: current.directoryURL.appendingPathComponent(Self.pendingRawPersistenceName)
             )
-            try writeSuffixBackup(
-                tail,
-                named: backupName,
-                in: directoryFD,
-                at: current.rawTextURL
-            )
             persistenceMetrics.revisionCount += 1
             persistenceMetrics.transcriptBytesWritten += Int64(separator.count + replacementData.count)
+            if consumeRawTextFault(.beforeTailRevision) {
+                persistenceMetrics.lastResultCode = "revise-before-truncate"
+                throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
+            }
 
             do {
                 guard Darwin.ftruncate(rawFD, off_t(prefixLength)) == 0 else {
@@ -1185,6 +1193,16 @@ public final class SessionStore: @unchecked Sendable {
                 }
                 if Darwin.lseek(rawFD, 0, SEEK_END) < 0 {
                     throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
+                }
+                if consumeRawTextFault(.shortWrite) {
+                    let landOnPrevious = Int(previousRawTextByteCount - prefixLength)
+                    try writeData(
+                        Data(replacementData.prefix(max(1, landOnPrevious))),
+                        to: rawFD,
+                        at: current.rawTextURL
+                    )
+                    persistenceMetrics.lastResultCode = "revise-short-write"
+                    throw storageFailure(for: ENOSPC)
                 }
                 if !separator.isEmpty {
                     try writeData(separator, to: rawFD, at: current.rawTextURL)
@@ -1250,15 +1268,6 @@ public final class SessionStore: @unchecked Sendable {
             if rawFD < 0 {
                 guard errno == ENOENT else {
                     throw SessionStoreError.invalidSessionDirectory(current.rawTextURL)
-                }
-                if consumeRawTextFault(.duringFinalCheckpoint) {
-                    persistenceMetrics.lastResultCode = "checkpoint-metadata-failure"
-                    return CanonicalRawTextCheckpoint(
-                        session: current,
-                        rawTextByteCount: current.metadata.rawTextByteCount ?? 0,
-                        contentUnchanged: true,
-                        metadataOutcome: .recoverableFailure
-                    )
                 }
                 let expected = current.metadata.rawTextByteCount ?? 0
                 guard expected == 0 else {
@@ -2198,6 +2207,25 @@ public final class SessionStore: @unchecked Sendable {
     }
 
     private func readFirstTranscriptLine(
+        named name: String,
+        in directoryFD: Int32,
+        at url: URL
+    ) throws -> String? {
+        let flags = O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+        let fileFD = name.withCString { entryName in
+            Darwin.openat(directoryFD, entryName, flags)
+        }
+        guard fileFD >= 0 else {
+            guard errno == ENOENT else {
+                throw SessionStoreError.invalidSessionDirectory(url)
+            }
+            return nil
+        }
+        defer { _ = Darwin.close(fileFD) }
+        return try readFirstTranscriptLine(from: fileFD, at: url)
+    }
+
+    private func readFirstTranscriptLine(
         from fileFD: Int32,
         at url: URL
     ) throws -> String? {
@@ -2506,7 +2534,39 @@ public final class SessionStore: @unchecked Sendable {
             in: directoryFD,
             at: rawTextURL
         )
+        guard entryExists(named: backupName, in: directoryFD) else {
+            guard currentByteCount == pending.previousRawTextByteCount else {
+                throw SessionStoreError.invalidMetadata(pendingURL)
+            }
+            return
+        }
+        let backup = try readData(
+            named: backupName,
+            in: directoryFD,
+            at: directoryURL.appendingPathComponent(backupName),
+            maxBytes: Self.maxTranscriptBytes
+        )
+        let prefixLength = pending.previousRawTextByteCount - Int64(backup.count)
+        guard prefixLength >= 0 else {
+            throw SessionStoreError.invalidMetadata(pendingURL)
+        }
+        let revisionCompleted: Bool
         if currentByteCount == pending.targetRawTextByteCount {
+            if pending.targetRawTextByteCount != pending.previousRawTextByteCount {
+                revisionCompleted = true
+            } else {
+                revisionCompleted = try readTranscriptSuffix(
+                    named: "raw.txt",
+                    prefixLength: prefixLength,
+                    count: backup.count,
+                    in: directoryFD,
+                    at: rawTextURL
+                ) != backup
+            }
+        } else {
+            revisionCompleted = false
+        }
+        if revisionCompleted {
             try invalidateCleanText(
                 for: DictationSession(metadata: pending.metadata, directoryURL: directoryURL),
                 in: directoryFD
@@ -2516,20 +2576,7 @@ public final class SessionStore: @unchecked Sendable {
                 at: directoryURL.appendingPathComponent("session.json"),
                 directoryFD: directoryFD
             )
-        } else if currentByteCount != pending.previousRawTextByteCount {
-            guard entryExists(named: backupName, in: directoryFD) else {
-                throw SessionStoreError.invalidMetadata(pendingURL)
-            }
-            let backup = try readData(
-                named: backupName,
-                in: directoryFD,
-                at: directoryURL.appendingPathComponent(backupName),
-                maxBytes: Self.maxTranscriptBytes
-            )
-            let prefixLength = pending.previousRawTextByteCount - Int64(backup.count)
-            guard prefixLength >= 0 else {
-                throw SessionStoreError.invalidMetadata(pendingURL)
-            }
+        } else {
             try restoreRawTextSuffix(
                 backup,
                 prefixLength: prefixLength,
@@ -3131,6 +3178,37 @@ public final class SessionStore: @unchecked Sendable {
         defer { _ = Darwin.close(backupFD) }
         try writeData(data, to: backupFD, at: url)
         try fsyncTranscript(backupFD, at: url)
+        guard Darwin.fsync(directoryFD) == 0 else {
+            throw SessionStoreError.invalidSessionDirectory(url)
+        }
+    }
+
+    private func readTranscriptSuffix(
+        named name: String,
+        prefixLength: Int64,
+        count: Int,
+        in directoryFD: Int32,
+        at url: URL
+    ) throws -> Data {
+        let flags = O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+        let fileFD = name.withCString { entryName in
+            Darwin.openat(directoryFD, entryName, flags)
+        }
+        guard fileFD >= 0 else {
+            throw SessionStoreError.invalidSessionDirectory(url)
+        }
+        defer { _ = Darwin.close(fileFD) }
+        var fileInfo = stat()
+        guard Darwin.fstat(fileFD, &fileInfo) == 0,
+              (fileInfo.st_mode & S_IFMT) == S_IFREG else {
+            throw SessionStoreError.invalidSessionDirectory(url)
+        }
+        return try readTranscriptBytes(
+            from: fileFD,
+            offset: prefixLength,
+            count: count,
+            at: url
+        )
     }
 
     private func truncateRawText(
