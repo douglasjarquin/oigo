@@ -27,6 +27,7 @@ private struct OigoIssue9ContractTests {
             ("lifecycle", testLifecycle),
             ("setup", testSetup),
             ("settings", testSettings),
+            ("locale", testLocaleSelection),
             ("hud", testHUD),
             ("history", testHistory)
         ]
@@ -184,6 +185,363 @@ private struct OigoIssue9ContractTests {
               !InsertionOutcome.failed.clipboardOutputAvailable else {
             throw ContractFailure(message: "clipboard output policy did not preserve copy-only outcomes")
         }
+    }
+
+    private static func testLocaleSelection() throws {
+        try testLocaleDisplayNames()
+        try testOnboardingSwitchDuringCheck()
+        try testOnboardingSwitchDuringInstall()
+        try testLateSuccessAndFailureCannotApply()
+        try testContinueRequiresMatchingReadyGeneration()
+        try testBackForwardRevalidate()
+        try testCloseReopenAndRerunPreserveCommittedLanguage()
+        try testOnboardingDoesNotPersistOnLoad()
+        try testUnsupportedStoredLocaleIsKeptAndShownUnavailable()
+        try testEmptySupportedListLeavesPreviousLocale()
+        try testSettingsUnrelatedSaveDoesNotChangeLanguage()
+        try testInstallFailureLeavesPreviousLocale()
+    }
+
+    private static func testLocaleDisplayNames() throws {
+        let displayLocale = Locale(identifier: "en_US")
+        let english = OigoLocalePresentation.displayName(for: "en-US", displayLocale: displayLocale)
+        let french = OigoLocalePresentation.displayName(for: "fr-FR", displayLocale: displayLocale)
+        guard english.contains("English"),
+              english.contains("United States"),
+              french.contains("French"),
+              french.contains("France"),
+              english != "en-US",
+              french != "fr-FR" else {
+            throw ContractFailure(message: "locale labels were not human-readable")
+        }
+
+        let items = OigoLocaleMenu.items(
+            supportedIdentifiers: ["fr-FR", "en-US"],
+            committedIdentifier: "en-US",
+            role: .onboarding,
+            displayLocale: displayLocale
+        )
+        guard items.map(\.identifier) == ["fr-FR", "en-US"],
+              items.allSatisfy({ !$0.title.contains("en-US") && !$0.title.contains("fr-FR") }),
+              items.allSatisfy({ !$0.isUnavailable }) else {
+            throw ContractFailure(message: "locale menu did not keep exact identifiers behind human-readable titles")
+        }
+    }
+
+    private static func testOnboardingSwitchDuringCheck() throws {
+        var state = onboardingState(committed: "en-US")
+        state.loadSupported(["en-US", "fr-FR"])
+        guard state.confirm() == nil else {
+            throw ContractFailure(message: "Continue was enabled before a matching ready result")
+        }
+        guard let request = state.beginAssetRequest(status: .checking) else {
+            throw ContractFailure(message: "checking the selected locale did not start")
+        }
+        state.select("fr-FR")
+        guard !state.canConfirm,
+              state.selectedIdentifier == "fr-FR",
+              state.committedIdentifier == "en-US",
+              state.readiness.status == .idle,
+              state.readiness.generation == state.generation else {
+            throw ContractFailure(message: "switching language during a check did not invalidate readiness")
+        }
+        let applied = state.applyAssetResult(
+            localeIdentifier: request.localeIdentifier,
+            generation: request.generation,
+            status: .ready
+        )
+        guard !applied,
+              !state.canConfirm,
+              state.confirm() == nil,
+              state.committedIdentifier == "en-US" else {
+            throw ContractFailure(message: "a late check result approved a different language")
+        }
+    }
+
+    private static func testOnboardingSwitchDuringInstall() throws {
+        var state = onboardingState(committed: "en-US")
+        state.loadSupported(["en-US", "fr-FR"])
+        state.select("fr-FR")
+        guard let request = state.beginAssetRequest(status: .installing) else {
+            throw ContractFailure(message: "installing the selected locale did not start")
+        }
+        guard state.readiness.status == .installing,
+              !state.canConfirm else {
+            throw ContractFailure(message: "Continue stayed enabled while assets were installing")
+        }
+        state.select("en-US")
+        let applied = state.applyAssetResult(
+            localeIdentifier: request.localeIdentifier,
+            generation: request.generation,
+            status: .ready
+        )
+        guard !applied,
+              !state.canConfirm,
+              state.selectedIdentifier == "en-US",
+              state.committedIdentifier == "en-US",
+              state.confirm() == nil else {
+            throw ContractFailure(message: "a late install result committed a language the user had left")
+        }
+    }
+
+    private static func testLateSuccessAndFailureCannotApply() throws {
+        var state = onboardingState(committed: "en-GB")
+        state.loadSupported(["en-GB", "de-DE", "fr-FR"])
+        let first = state.beginAssetRequest(status: .checking)
+        state.select("de-DE")
+        let second = state.beginAssetRequest(status: .installing)
+        guard let first, let second else {
+            throw ContractFailure(message: "locale asset requests were not fenced by generation")
+        }
+        guard first.generation != second.generation else {
+            throw ContractFailure(message: "a new locale request reused the previous generation")
+        }
+        guard !state.applyAssetResult(
+            localeIdentifier: first.localeIdentifier,
+            generation: first.generation,
+            status: .ready
+        ), !state.applyAssetResult(
+            localeIdentifier: first.localeIdentifier,
+            generation: first.generation,
+            status: .failed("download failed")
+        ), !state.canConfirm,
+              state.committedIdentifier == "en-GB" else {
+            throw ContractFailure(message: "late success or failure from an old locale updated current state")
+        }
+        guard state.applyAssetResult(
+            localeIdentifier: second.localeIdentifier,
+            generation: second.generation,
+            status: .ready
+        ), state.canConfirm,
+              state.confirm() == "de-DE",
+              state.committedIdentifier == "de-DE" else {
+            throw ContractFailure(message: "only the matching ready generation should commit")
+        }
+    }
+
+    private static func testContinueRequiresMatchingReadyGeneration() throws {
+        var state = onboardingState(committed: "en-US")
+        state.loadSupported(["en-US", "fr-FR"])
+        let stale = state.beginAssetRequest(status: .checking)
+        state.select("fr-FR")
+        let current = state.beginAssetRequest(status: .checking)
+        guard let stale, let current else {
+            throw ContractFailure(message: "asset generations were not issued")
+        }
+        guard !state.applyAssetResult(
+            localeIdentifier: "fr-FR",
+            generation: stale.generation,
+            status: .ready
+        ), !state.canConfirm else {
+            throw ContractFailure(message: "Continue accepted a ready result from the wrong generation")
+        }
+        guard state.applyAssetResult(
+            localeIdentifier: current.localeIdentifier,
+            generation: current.generation,
+            status: .ready
+        ), state.canConfirm,
+              state.confirm() == "fr-FR" else {
+            throw ContractFailure(message: "Continue was not enabled for the matching ready generation")
+        }
+    }
+
+    private static func testBackForwardRevalidate() throws {
+        var state = onboardingState(committed: "en-US")
+        state.loadSupported(["en-US", "fr-FR"])
+        state.select("fr-FR")
+        guard let request = state.beginAssetRequest(status: .installing) else {
+            throw ContractFailure(message: "language verification did not start")
+        }
+        _ = state.applyAssetResult(
+            localeIdentifier: request.localeIdentifier,
+            generation: request.generation,
+            status: .ready
+        )
+        guard state.canConfirm else {
+            throw ContractFailure(message: "verified locale could not continue")
+        }
+        state.revalidate()
+        guard !state.canConfirm,
+              state.confirm() == nil,
+              state.committedIdentifier == "en-US",
+              state.selectedIdentifier == "fr-FR",
+              state.readiness.status == .idle else {
+            throw ContractFailure(message: "returning to the language step kept a stale ready result")
+        }
+        guard let retry = state.beginAssetRequest(status: .installing),
+              state.applyAssetResult(
+                localeIdentifier: retry.localeIdentifier,
+                generation: retry.generation,
+                status: .ready
+              ),
+              state.confirm() == "fr-FR" else {
+            throw ContractFailure(message: "rechecking after back/forward did not require a new matching ready result")
+        }
+    }
+
+    private static func testCloseReopenAndRerunPreserveCommittedLanguage() throws {
+        var session = onboardingState(committed: "en-US")
+        session.loadSupported(["en-US", "fr-FR"])
+        session.select("fr-FR")
+        guard let request = session.beginAssetRequest(status: .installing) else {
+            throw ContractFailure(message: "language verification did not start")
+        }
+        _ = session.applyAssetResult(
+            localeIdentifier: request.localeIdentifier,
+            generation: request.generation,
+            status: .ready
+        )
+        session.abandonUncommitted()
+        guard session.committedIdentifier == "en-US",
+              session.selectedIdentifier == "en-US",
+              session.confirm() == nil else {
+            throw ContractFailure(message: "closing onboarding replaced the committed language")
+        }
+
+        var rerun = onboardingState(committed: "en-US")
+        rerun.loadSupported(["en-US", "fr-FR"])
+        rerun.select("fr-FR")
+        rerun.abandonUncommitted()
+        guard rerun.committedIdentifier == "en-US",
+              rerun.selectedIdentifier == "en-US" else {
+            throw ContractFailure(message: "rerunning onboarding replaced the committed language")
+        }
+    }
+
+    private static func testOnboardingDoesNotPersistOnLoad() throws {
+        var state = onboardingState(committed: "en-AU")
+        state.loadSupported(["fr-FR", "en-GB", "de-DE"])
+        guard state.committedIdentifier == "en-AU",
+              state.selectedIdentifier == "en-GB",
+              state.confirm() == nil else {
+            throw ContractFailure(message: "loading languages persisted or confirmed an unverified preselection")
+        }
+    }
+
+    private static func testUnsupportedStoredLocaleIsKeptAndShownUnavailable() throws {
+        var state = OigoLocaleSelectionState(
+            committedIdentifier: "zh-CN",
+            role: .settings,
+            displayLocale: Locale(identifier: "en_US")
+        )
+        state.loadSupported(["en-US", "fr-FR"])
+        guard state.committedIdentifier == "zh-CN",
+              state.selectedIdentifier == "zh-CN",
+              state.selectedItemIsUnavailable,
+              !state.requiresVerificationToCommit,
+              state.menuItems.contains(where: { $0.identifier == "zh-CN" && $0.isUnavailable }),
+              state.menuItems.contains(where: { $0.identifier == "en-US" && !$0.isUnavailable }),
+              !state.menuItems.contains(where: { $0.identifier == "zh-CN" && $0.title == "en-US" }) else {
+            throw ContractFailure(message: "an unavailable stored locale was replaced by the first supported locale")
+        }
+        guard state.beginAssetRequest(status: .installing) == nil,
+              state.confirm() == nil else {
+            throw ContractFailure(message: "an unavailable stored locale was treated as ready to commit")
+        }
+    }
+
+    private static func testEmptySupportedListLeavesPreviousLocale() throws {
+        var onboarding = onboardingState(committed: "en-US")
+        onboarding.loadSupported([])
+        guard onboarding.committedIdentifier == "en-US",
+              onboarding.selectedIdentifier == nil,
+              onboarding.menuItems.isEmpty,
+              !onboarding.canConfirm,
+              onboarding.statusMessage.contains("No supported speech locales") else {
+            throw ContractFailure(message: "an empty onboarding language list changed the committed locale")
+        }
+
+        var settings = OigoLocaleSelectionState(
+            committedIdentifier: "en-US",
+            role: .settings,
+            displayLocale: Locale(identifier: "en_US")
+        )
+        settings.loadSupported([])
+        guard settings.committedIdentifier == "en-US",
+              settings.selectedIdentifier == "en-US",
+              settings.selectedItemIsUnavailable,
+              !settings.requiresVerificationToCommit,
+              settings.confirm() == nil else {
+            throw ContractFailure(message: "an empty Settings language list dropped the saved locale")
+        }
+    }
+
+    private static func testSettingsUnrelatedSaveDoesNotChangeLanguage() throws {
+        var state = OigoLocaleSelectionState(
+            committedIdentifier: "zh-CN",
+            role: .settings,
+            displayLocale: Locale(identifier: "en_US")
+        )
+        state.loadSupported(["de-DE", "en-US", "fr-FR"])
+        let persisted = settingsPersistLocale(from: state)
+        guard persisted == "zh-CN",
+              state.committedIdentifier == "zh-CN" else {
+            throw ContractFailure(message: "saving unrelated settings changed the dictation language")
+        }
+
+        state.select("fr-FR")
+        let persistedAfterSelection = settingsPersistLocale(from: state)
+        guard persistedAfterSelection == "zh-CN",
+              state.committedIdentifier == "zh-CN",
+              state.requiresVerificationToCommit else {
+            throw ContractFailure(message: "selecting a language in Settings persisted it before verification")
+        }
+    }
+
+    private static func testInstallFailureLeavesPreviousLocale() throws {
+        var onboarding = onboardingState(committed: "en-US")
+        onboarding.loadSupported(["en-US", "fr-FR"])
+        onboarding.select("fr-FR")
+        guard let request = onboarding.beginAssetRequest(status: .installing) else {
+            throw ContractFailure(message: "install did not start")
+        }
+        guard onboarding.applyAssetResult(
+            localeIdentifier: request.localeIdentifier,
+            generation: request.generation,
+            status: .failed("download failed")
+        ), !onboarding.canConfirm,
+              onboarding.confirm() == nil,
+              onboarding.committedIdentifier == "en-US" else {
+            throw ContractFailure(message: "an onboarding install failure replaced the previous locale")
+        }
+
+        var settings = OigoLocaleSelectionState(
+            committedIdentifier: "en-US",
+            role: .settings,
+            displayLocale: Locale(identifier: "en_US")
+        )
+        settings.loadSupported(["en-US", "fr-FR"])
+        settings.select("fr-FR")
+        guard let settingsRequest = settings.beginAssetRequest(status: .installing) else {
+            throw ContractFailure(message: "Settings install did not start")
+        }
+        _ = settings.applyAssetResult(
+            localeIdentifier: settingsRequest.localeIdentifier,
+            generation: settingsRequest.generation,
+            status: .failed("download failed")
+        )
+        settings.abandonUncommitted()
+        guard settings.committedIdentifier == "en-US",
+              settings.selectedIdentifier == "en-US",
+              settingsPersistLocale(from: settings) == "en-US" else {
+            throw ContractFailure(message: "a Settings install failure replaced the previous locale")
+        }
+    }
+
+    private static func onboardingState(committed: String) -> OigoLocaleSelectionState {
+        OigoLocaleSelectionState(
+            committedIdentifier: committed,
+            role: .onboarding,
+            preferredIdentifier: committed,
+            displayLocale: Locale(identifier: "en_US")
+        )
+    }
+
+    private static func settingsPersistLocale(from state: OigoLocaleSelectionState) -> String {
+        if state.requiresVerificationToCommit {
+            return state.canConfirm ? (state.selectedIdentifier ?? state.committedIdentifier) : state.committedIdentifier
+        }
+        return state.committedIdentifier
     }
 
     private static func testSettings() throws {

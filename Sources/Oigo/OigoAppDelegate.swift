@@ -316,6 +316,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             save: { [weak self] settings in
                 self?.applySettings(settings) ?? "Oigo is no longer available."
             },
+            checkSpeechAssets: { [weak self] identifier in
+                await self?.inspectSpeechAssets(for: identifier) ?? .unavailable("Oigo is no longer available")
+            },
             refreshPermissions: { [weak self] in
                 guard let self else {
                     return (.unknown, .unknown)
@@ -359,6 +362,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             globalShortcut: settings.globalShortcut,
             inputDevices: currentInputDevices(),
             selectedInput: settings.selectedInput,
+            committedLocaleIdentifier: settings.localeIdentifier,
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
             storageHealth: displayedStorageHealth,
@@ -376,18 +380,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 return [closest] + identifiers.filter { $0 != closest }
             },
             checkSpeechAssets: { [weak self] identifier in
-                guard let self else {
-                    return .unavailable("Oigo is no longer available")
-                }
-                guard self.storageCapability.health.isReady else {
-                    return .unavailable("durable storage is unavailable")
-                }
-                let service = self.transcriptionService(for: identifier)
-                do {
-                    return try await service.installSpeechAssets()
-                } catch {
-                    return service.currentAssetState
-                }
+                await self?.inspectSpeechAssets(for: identifier) ?? .unavailable("Oigo is no longer available")
             },
             saveLanguage: { [weak self] identifier in
                 guard let self else { return }
@@ -1950,6 +1943,41 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
              .deletionConfirmationRequired:
             return nil
         }
+    }
+
+    private func inspectSpeechAssets(for identifier: String) async -> OigoLocaleAssetStatus {
+        guard storageCapability.health.isReady else {
+            return .unavailable("durable storage is unavailable")
+        }
+        let service = speechAssetService(for: identifier)
+        do {
+            return Self.localeAssetStatus(from: try await service.installSpeechAssets())
+        } catch {
+            return Self.localeAssetStatus(from: service.currentAssetState)
+        }
+    }
+
+    private static func localeAssetStatus(from state: SpeechAssetState) -> OigoLocaleAssetStatus {
+        switch state {
+        case .ready:
+            .ready
+        case .installing:
+            .installing
+        case .failed(let reason):
+            .failed(reason)
+        case .unavailable(let reason):
+            .unavailable(reason)
+        }
+    }
+
+    private func speechAssetService(for identifier: String) -> TranscriptionService {
+        if let transcription, transcription.configuredLocaleIdentifier == identifier {
+            return transcription
+        }
+        return TranscriptionService(
+            locale: Locale(identifier: identifier),
+            instrumentation: performanceInstrumentation
+        )
     }
 
     private func transcriptionService(for requestedIdentifier: String? = nil) -> TranscriptionService {

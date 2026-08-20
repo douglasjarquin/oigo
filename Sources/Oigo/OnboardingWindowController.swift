@@ -1,6 +1,5 @@
 import AppKit
 import OigoCore
-import OigoTranscription
 import OigoHotKey
 
 @available(macOS 26.0, *)
@@ -8,7 +7,7 @@ import OigoHotKey
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let support: OigoSystemSupportResult
     private let loadSupportedLanguages: () async -> [String]
-    private let checkSpeechAssets: (String) async -> SpeechAssetState
+    private let checkSpeechAssets: (String) async -> OigoLocaleAssetStatus
     private let saveLanguage: (String) -> Void
     private let saveStep: (OigoOnboardingStep) -> Void
     private let saveInputSelection: (OigoInputSelection) -> Void
@@ -30,7 +29,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let onClose: () -> Void
 
     private var currentStep: OigoOnboardingStep
-    private var languageReady = false
+    private var localeSelection: OigoLocaleSelectionState
+    private var localeMenuIdentifiers: [String] = []
+    private var isLoadingLanguages = false
     private var microphoneState: OigoPermissionState
     private var accessibilityState: OigoPermissionState
     private var accessibilityRequestAttempted = false
@@ -67,11 +68,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         globalShortcut: ToggleShortcut,
         inputDevices: [OigoInputDevice],
         selectedInput: OigoInputSelection,
+        committedLocaleIdentifier: String,
         microphoneState: OigoPermissionState,
         accessibilityState: OigoPermissionState,
         storageHealth: DurableSessionHealth,
         loadSupportedLanguages: @escaping () async -> [String],
-        checkSpeechAssets: @escaping (String) async -> SpeechAssetState,
+        checkSpeechAssets: @escaping (String) async -> OigoLocaleAssetStatus,
         saveLanguage: @escaping (String) -> Void,
         saveStep: @escaping (OigoOnboardingStep) -> Void,
         saveInputSelection: @escaping (OigoInputSelection) -> Void,
@@ -95,6 +97,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.support = support
         self.currentStep = initialStep
         self.selectedInput = selectedInput
+        localeSelection = OigoLocaleSelectionState(
+            committedIdentifier: committedLocaleIdentifier,
+            role: .onboarding,
+            preferredIdentifier: committedLocaleIdentifier
+        )
         self.loadSupportedLanguages = loadSupportedLanguages
         self.checkSpeechAssets = checkSpeechAssets
         self.saveLanguage = saveLanguage
@@ -210,6 +217,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         testField.isEditable = false
         testField.isSelectable = true
         shortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
+        languagePopup.target = self
+        languagePopup.action = #selector(languageSelectionChanged)
         historyButton.target = self
         historyButton.action = #selector(openHistoryAction)
         retryStorageButton.target = self
@@ -326,7 +335,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         nextButton.title = currentStep == .recovery ? "Finish setup" : "Continue"
         nextButton.isEnabled = currentStep != .microphone || microphoneState == .granted
         if currentStep == .language {
-            nextButton.isEnabled = languageReady
+            nextButton.isEnabled = localeSelection.canConfirm
         }
         if currentStep == .testDictation {
             nextButton.isEnabled = storageHealth.isReady && testOutcome.allowsContinue
@@ -378,6 +387,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             }
         case .testDictation where testOutcome == .passed:
             return "Test complete."
+        case .language:
+            return localeSelection.statusMessage
         case .testDictation where testOutcome == .skipped:
             return "Test skipped. You can run it later from Settings."
         default:
@@ -403,21 +414,48 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func loadLanguagesIfNeeded() {
-        guard languagePopup.numberOfItems == 0 else {
+        guard localeMenuIdentifiers.isEmpty, !isLoadingLanguages else {
             return
         }
+        isLoadingLanguages = true
         Task { @MainActor [weak self] in
             guard let self else { return }
             let languages = await loadSupportedLanguages()
-            languagePopup.removeAllItems()
-            languagePopup.addItems(withTitles: languages)
-            if languages.isEmpty {
-                statusLabel.stringValue = "No supported speech locales were found."
-                return
-            }
-            languagePopup.selectItem(at: 0)
-            saveLanguage(languagePopup.selectedItem?.title ?? languages[0])
+            isLoadingLanguages = false
+            localeSelection.loadSupported(languages)
+            syncLanguagePopup()
+            statusLabel.stringValue = localeSelection.statusMessage
+            renderButtons()
         }
+    }
+
+    private func syncLanguagePopup() {
+        let items = localeSelection.menuItems
+        localeMenuIdentifiers = items.map(\.identifier)
+        languagePopup.removeAllItems()
+        languagePopup.addItems(withTitles: items.map(\.title))
+        if let selected = localeSelection.selectedIdentifier,
+           let index = items.firstIndex(where: { $0.identifier == selected }) {
+            languagePopup.selectItem(at: index)
+        }
+    }
+
+    @objc private func languageSelectionChanged() {
+        guard currentStep == .language,
+              let identifier = selectedLocaleFromMenu() else {
+            return
+        }
+        localeSelection.select(identifier)
+        statusLabel.stringValue = localeSelection.statusMessage
+        renderButtons()
+    }
+
+    private func selectedLocaleFromMenu() -> String? {
+        let index = languagePopup.indexOfSelectedItem
+        guard localeMenuIdentifiers.indices.contains(index) else {
+            return nil
+        }
+        return localeMenuIdentifiers[index]
     }
 
     private func configureInputMenu(
@@ -444,18 +482,25 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     @objc private func performAction() {
         switch currentStep {
         case .language:
-            statusLabel.stringValue = "Speech assets: installing…"
+            guard let request = localeSelection.beginAssetRequest(status: .installing) else {
+                statusLabel.stringValue = localeSelection.statusMessage
+                renderButtons()
+                return
+            }
+            statusLabel.stringValue = localeSelection.statusMessage
             actionButton.isEnabled = false
+            renderButtons()
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                guard let selectedLanguage = languagePopup.selectedItem?.title else {
-                    statusLabel.stringValue = "Choose a supported speech language first."
-                    actionButton.isEnabled = true
-                    return
+                let status = await checkSpeechAssets(request.localeIdentifier)
+                let applied = localeSelection.applyAssetResult(
+                    localeIdentifier: request.localeIdentifier,
+                    generation: request.generation,
+                    status: status
+                )
+                if applied {
+                    statusLabel.stringValue = localeSelection.statusMessage
                 }
-                let state = await checkSpeechAssets(selectedLanguage)
-                statusLabel.stringValue = "Speech assets: " + state.description
-                languageReady = if case .ready = state { true } else { false }
                 actionButton.isEnabled = true
                 renderButtons()
             }
@@ -527,9 +572,13 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             }
             committedShortcut = candidate
         }
-        if currentStep == .language,
-           let selectedLanguage = languagePopup.selectedItem?.title {
-            saveLanguage(selectedLanguage)
+        if currentStep == .language {
+            guard let locale = localeSelection.confirm() else {
+                statusLabel.stringValue = localeSelection.statusMessage
+                renderButtons()
+                return
+            }
+            saveLanguage(locale)
         }
         if currentStep == .recovery, !storageHealth.isReady {
             statusLabel.stringValue = "Storage unavailable. Retry storage before finishing setup."
@@ -546,6 +595,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         currentStep = next
+        if currentStep == .language {
+            localeSelection.revalidate()
+        }
         saveStep(next)
         render()
     }
@@ -554,6 +606,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         discardShortcutCandidate()
         guard let previous = previousStep(before: currentStep) else { return }
         currentStep = previous
+        if currentStep == .language {
+            localeSelection.revalidate()
+        }
         saveStep(previous)
         render()
     }
