@@ -1,5 +1,6 @@
 #!/bin/zsh
 set -euo pipefail
+path=(/usr/bin /bin /usr/sbin /sbin $path)
 
 if [[ $# -ne 1 ]]; then
     print -u2 "usage: $0 <Oigo.app>"
@@ -143,7 +144,7 @@ if [[ -d "$app/Contents/PlugIns" ]]; then
     fail "bundle contains PlugIns, which ordinary Release CI must not ship"
 fi
 
-repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+repo_root="${0:A:h:h}"
 if membership_error="$(
     /usr/bin/python3 "$repo_root/Scripts/check-xcode-source-membership.py" "$repo_root" 2>&1
 )"; then
