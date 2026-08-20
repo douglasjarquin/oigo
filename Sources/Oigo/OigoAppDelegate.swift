@@ -120,6 +120,56 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var recordingStartedAt: Date?
     private var previewThrottle = OigoHUDPreviewThrottle()
     private let operationGate = AppOperationGate()
+    private var maintenanceHandle: AppOperationHandle?
+    nonisolated(unsafe) private var maintenanceStore: SessionStore?
+    nonisolated(unsafe) private var maintenancePolicy = SessionRetentionPolicy.default
+    private lazy var maintenanceCoordinator = SessionMaintenanceCoordinator(
+        canRun: { [weak self] in
+            guard let self else {
+                return false
+            }
+            return self.commandAvailability.canRunMaintenance
+                && !self.coordinator.hasActiveTranscription
+                && !self.playback.hasActivePlayback
+        },
+        beginRun: { [weak self] in
+            guard let self else {
+                return false
+            }
+            switch self.operationGate.begin(.maintenance) {
+            case .success(let handle):
+                self.maintenanceHandle = handle
+                return true
+            case .failure:
+                return false
+            }
+        },
+        endRun: { [weak self] in
+            guard let self, let handle = self.maintenanceHandle else {
+                return
+            }
+            self.operationGate.complete(handle)
+            self.maintenanceHandle = nil
+        },
+        perform: { [weak self] cursor in
+            guard let self, let store = self.maintenanceStore else {
+                return SessionMaintenanceResult()
+            }
+            return try store.performIdleMaintenance(
+                at: Date(),
+                policy: self.maintenancePolicy,
+                cursor: cursor,
+                shouldContinue: { !Task.isCancelled }
+            )
+        },
+        onComplete: { [weak self] summary in
+            self?.historyWindow?.showMessage(summary.sanitizedMessage)
+            if self?.historyWindow != nil {
+                self?.refreshHistory()
+            }
+            self?.updateSurface()
+        }
+    )
     private var finishRequestedAfterStart = false
     private var shortcutFeedbackDetail: String?
     private var workspaceObservers: [NSObjectProtocol] = []
@@ -735,6 +785,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startDictation(kind: AppOperationKind = .dictation) {
+        maintenanceCoordinator.preempt()
         guard storageCapability.health.isReady else {
             reportOnboardingTestFailure()
             updateSurface()
@@ -987,6 +1038,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             if historyWindow != nil {
                 refreshHistory()
             }
+            scheduleIdleMaintenance(.sessionTerminal)
             updateSurface()
         } catch is CancellationError {
             await coordinator.cancelActiveWork()
@@ -1108,6 +1160,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             if historyWindow != nil {
                 refreshHistory()
             }
+            scheduleIdleMaintenance(.sessionTerminal)
             updateSurface()
         } catch is CancellationError {
             await coordinator.cancelActiveWork()
@@ -1286,6 +1339,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             historyWindow?.showMessage(Self.friendlyError("Retry failed", error))
         }
         refreshHistory()
+        scheduleIdleMaintenance(.sessionTerminal)
         updateSurface()
     }
 
@@ -1688,6 +1742,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             historyWindow?.showMessage("Session deleted.")
             refreshHistory()
+            scheduleIdleMaintenance(.sessionTerminal)
         } catch {
             markStorageUnhealthyIfNeeded(error)
             historyWindow?.showMessage(Self.friendlyError("Delete failed", error))
@@ -1730,29 +1785,20 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             updateSurface()
             return
         }
-        guard storageCapability.health.isReady,
-              let store = sessionStore else {
+        scheduleIdleMaintenance(.explicit)
+        updateSurface()
+    }
+
+    private func scheduleIdleMaintenance(_ trigger: SessionMaintenanceTrigger) {
+        guard storageCapability.health.isReady, sessionStore != nil else {
             return
         }
-        do {
-            let lifetime = settings.keepSuccessfulAudioIndefinitely
-                ? Double.greatestFiniteMagnitude
-                : settings.audioRetention.duration
-            let policy = SessionRetentionPolicy(
-                successfulAudioLifetime: lifetime
-            )
-            let result = try store.performIdleMaintenance(policy: policy)
-            refreshHistory()
-            let removed = result.removedSessionIDs.count + result.removedAudioSessionIDs.count
-            historyWindow?.showMessage(
-                removed == 0
-                    ? "Idle maintenance found nothing to remove."
-                    : "Idle maintenance removed \(removed) expired artifact set\(removed == 1 ? "" : "s")."
-            )
-        } catch {
-            markStorageUnhealthyIfNeeded(error)
-            historyWindow?.showMessage(Self.friendlyError("Maintenance failed", error))
-        }
+        maintenanceStore = sessionStore
+        let lifetime = settings.keepSuccessfulAudioIndefinitely
+            ? Double.greatestFiniteMagnitude
+            : settings.audioRetention.duration
+        maintenancePolicy = SessionRetentionPolicy(successfulAudioLifetime: lifetime)
+        maintenanceCoordinator.request(trigger)
     }
 
     private func applyTranscriptionUpdate(_ update: TranscriptionUpdate) {
@@ -1993,6 +2039,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         settingsWindow?.setStorageHealth(displayedStorageHealth)
         onboardingWindow?.setStorageHealth(displayedStorageHealth)
+        if storageCapability.health.isReady {
+            scheduleIdleMaintenance(.startup)
+        }
         updateSurface()
     }
 
@@ -2186,6 +2235,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         if !shortcutRegistrar.status.isActive {
             registerShortcut()
+        }
+        if previousSettings.audioRetention != settings.audioRetention
+            || previousSettings.keepSuccessfulAudioIndefinitely != settings.keepSuccessfulAudioIndefinitely {
+            scheduleIdleMaintenance(.settingsChanged)
         }
         updateSurface()
         return nil

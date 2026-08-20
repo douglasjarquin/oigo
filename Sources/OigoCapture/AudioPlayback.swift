@@ -100,6 +100,12 @@ public final class AudioPlayback: @unchecked Sendable {
         return performer == nil ? nil : sessionID
     }
 
+    public var hasActivePlayback: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return performer != nil
+    }
+
     public func isPlaying(sessionID: UUID) -> Bool {
         lock.lock()
         defer { lock.unlock() }

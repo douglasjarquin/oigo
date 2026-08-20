@@ -172,19 +172,33 @@ public enum TranscriptInsertionSource: String, Codable, CaseIterable, Equatable,
 
 public struct SessionRetentionPolicy: Equatable, Sendable {
     public static let `default` = SessionRetentionPolicy()
+    public static let defaultMaxElapsedNanoseconds: UInt64 = 250_000_000
 
     public let maxTranscriptSessions: Int
     public let successfulAudioLifetime: TimeInterval
     public let maxDirectoriesToInspect: Int
+    public let maxElapsedNanoseconds: UInt64
 
     public init(
         maxTranscriptSessions: Int = 100,
         successfulAudioLifetime: TimeInterval = 24 * 60 * 60,
-        maxDirectoriesToInspect: Int = 4_096
+        maxDirectoriesToInspect: Int = 4_096,
+        maxElapsedNanoseconds: UInt64 = SessionRetentionPolicy.defaultMaxElapsedNanoseconds
     ) {
         self.maxTranscriptSessions = max(0, maxTranscriptSessions)
         self.successfulAudioLifetime = max(0, successfulAudioLifetime)
         self.maxDirectoriesToInspect = max(1, maxDirectoriesToInspect)
+        self.maxElapsedNanoseconds = max(1, maxElapsedNanoseconds)
+    }
+}
+
+public struct SessionMaintenanceCursor: Equatable, Sendable {
+    public let lastDirectoryName: String
+    public let retainedTranscriptCount: Int
+
+    public init(lastDirectoryName: String, retainedTranscriptCount: Int) {
+        self.lastDirectoryName = lastDirectoryName
+        self.retainedTranscriptCount = max(0, retainedTranscriptCount)
     }
 }
 
@@ -408,13 +422,25 @@ public struct SessionHistoryEnumeration: Equatable, Sendable {
 public struct SessionMaintenanceResult: Equatable, Sendable {
     public let removedSessionIDs: [UUID]
     public let removedAudioSessionIDs: [UUID]
+    public let inspectedDirectoryCount: Int
+    public let skippedDirectoryCount: Int
+    public let moreWorkRemains: Bool
+    public let cursor: SessionMaintenanceCursor?
 
     public init(
         removedSessionIDs: [UUID] = [],
-        removedAudioSessionIDs: [UUID] = []
+        removedAudioSessionIDs: [UUID] = [],
+        inspectedDirectoryCount: Int = 0,
+        skippedDirectoryCount: Int = 0,
+        moreWorkRemains: Bool = false,
+        cursor: SessionMaintenanceCursor? = nil
     ) {
         self.removedSessionIDs = removedSessionIDs
         self.removedAudioSessionIDs = removedAudioSessionIDs
+        self.inspectedDirectoryCount = max(0, inspectedDirectoryCount)
+        self.skippedDirectoryCount = max(0, skippedDirectoryCount)
+        self.moreWorkRemains = moreWorkRemains
+        self.cursor = cursor
     }
 }
 
@@ -1860,13 +1886,41 @@ public final class SessionStore: @unchecked Sendable {
 
     public func performIdleMaintenance(
         at date: Date = Date(),
-        policy: SessionRetentionPolicy = .default
+        policy: SessionRetentionPolicy = .default,
+        cursor: SessionMaintenanceCursor? = nil,
+        shouldContinue: @escaping () -> Bool = { true }
+    ) throws -> SessionMaintenanceResult {
+        try performIdleMaintenance(
+            at: date,
+            policy: policy,
+            cursor: cursor,
+            nowNanoseconds: { DispatchTime.now().uptimeNanoseconds },
+            shouldContinue: shouldContinue
+        )
+    }
+
+    @_spi(Testing)
+    public func performIdleMaintenance(
+        at date: Date,
+        policy: SessionRetentionPolicy,
+        cursor: SessionMaintenanceCursor?,
+        nowNanoseconds: @escaping () -> UInt64,
+        shouldContinue: @escaping () -> Bool
     ) throws -> SessionMaintenanceResult {
         lock.lock()
         defer { lock.unlock() }
 
+        let started = nowNanoseconds()
+        let batch = try collectMaintenanceBatch(policy: policy, cursor: cursor)
         var removedSessionIDs: [UUID] = []
         var removedAudioSessionIDs: [UUID] = []
+        var inspectedDirectoryCount = 0
+        var skippedDirectoryCount = 0
+        var retainedTranscriptCount = cursor?.retainedTranscriptCount ?? 0
+        var retainedIDs: Set<UUID> = []
+        var lastProcessedName: String?
+        var moreWorkRemains = batch.moreWorkRemains
+        var stoppedEarly = false
 
         func applyMaintenance(
             to session: DictationSession,
@@ -1911,26 +1965,65 @@ public final class SessionStore: @unchecked Sendable {
             removedAudioSessionIDs.append(session.id)
         }
 
-        var retainedTranscriptSessions: [DictationSession] = []
-        try forEachTolerantSession { session in
-            if try sessionHasTranscript(session) {
-                retainedTranscriptSessions.append(session)
-                retainedTranscriptSessions.sort { isNewer($0, than: $1) }
-                if retainedTranscriptSessions.count > policy.maxTranscriptSessions {
-                    let evicted = retainedTranscriptSessions.removeLast()
-                    try applyMaintenance(to: evicted, retainsTranscript: false)
-                    if evicted.id == session.id {
-                        return
-                    }
+        for item in batch.items {
+            if nowNanoseconds() &- started >= policy.maxElapsedNanoseconds || !shouldContinue() {
+                moreWorkRemains = true
+                stoppedEarly = true
+                break
+            }
+            inspectedDirectoryCount += 1
+            guard let session = item.session else {
+                skippedDirectoryCount += 1
+                lastProcessedName = item.name
+                continue
+            }
+            let hasTranscript = (try? sessionHasTranscript(session)) ?? false
+            let retainsTranscript: Bool
+            if hasTranscript, retainedTranscriptCount < policy.maxTranscriptSessions {
+                retainedTranscriptCount += 1
+                retainedIDs.insert(session.id)
+                retainsTranscript = true
+            } else {
+                retainsTranscript = retainedIDs.contains(session.id)
+            }
+            do {
+                try applyMaintenance(to: session, retainsTranscript: retainsTranscript)
+            } catch is CancellationError {
+                moreWorkRemains = true
+                stoppedEarly = true
+                break
+            } catch let error as SessionStoreError {
+                switch error {
+                case .missingSession, .invalidSessionDirectory:
+                    skippedDirectoryCount += 1
+                default:
+                    throw error
                 }
             }
-            let retainsTranscript = retainedTranscriptSessions.contains { $0.id == session.id }
-            try applyMaintenance(to: session, retainsTranscript: retainsTranscript)
+            lastProcessedName = item.name
+        }
+
+        if stoppedEarly, inspectedDirectoryCount < batch.items.count {
+            moreWorkRemains = true
+        }
+
+        let nextCursor: SessionMaintenanceCursor?
+        if let lastProcessedName {
+            nextCursor = SessionMaintenanceCursor(
+                lastDirectoryName: lastProcessedName,
+                retainedTranscriptCount: retainedTranscriptCount
+            )
+        } else {
+            nextCursor = cursor
         }
 
         return SessionMaintenanceResult(
             removedSessionIDs: removedSessionIDs,
-            removedAudioSessionIDs: removedAudioSessionIDs
+            removedAudioSessionIDs: removedAudioSessionIDs,
+            inspectedDirectoryCount: inspectedDirectoryCount,
+            skippedDirectoryCount: skippedDirectoryCount,
+            moreWorkRemains: moreWorkRemains,
+            cursor: moreWorkRemains ? nextCursor : nil
         )
     }
 
@@ -2183,6 +2276,84 @@ public final class SessionStore: @unchecked Sendable {
             return lhs.metadata.directoryName > rhs.metadata.directoryName
         }
         return lhs.metadata.createdAt > rhs.metadata.createdAt
+    }
+
+    private struct MaintenanceDirectory {
+        let name: String
+        let url: URL
+        let session: DictationSession?
+        let isSymbolicLink: Bool
+    }
+
+    private struct MaintenanceBatch {
+        let items: [MaintenanceDirectory]
+        let moreWorkRemains: Bool
+    }
+
+    private func collectMaintenanceBatch(
+        policy: SessionRetentionPolicy,
+        cursor: SessionMaintenanceCursor?
+    ) throws -> MaintenanceBatch {
+        try ensureRootPathIdentity()
+        guard let enumerator = fileManager.enumerator(
+            at: rootDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles],
+            errorHandler: { _, _ in true }
+        ) else {
+            return MaintenanceBatch(items: [], moreWorkRemains: false)
+        }
+
+        var selected: [MaintenanceDirectory] = []
+        var remainingCount = 0
+        while let value = enumerator.nextObject() {
+            guard let url = value as? URL else {
+                continue
+            }
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            if values?.isDirectory == true {
+                enumerator.skipDescendants()
+            }
+            guard values?.isDirectory == true else {
+                continue
+            }
+            let name = url.lastPathComponent
+            if let cursor, name >= cursor.lastDirectoryName {
+                continue
+            }
+            remainingCount += 1
+            selected.append(
+                MaintenanceDirectory(
+                    name: name,
+                    url: url,
+                    session: nil,
+                    isSymbolicLink: values?.isSymbolicLink == true
+                )
+            )
+            if selected.count > policy.maxDirectoriesToInspect {
+                if let oldestIndex = selected.indices.min(by: { selected[$0].name < selected[$1].name }) {
+                    selected.remove(at: oldestIndex)
+                }
+            }
+        }
+
+        selected.sort { lhs, rhs in
+            if lhs.name == rhs.name {
+                return lhs.url.path > rhs.url.path
+            }
+            return lhs.name > rhs.name
+        }
+        let decoded = selected.map { item in
+            let session = item.isSymbolicLink ? nil : (try? readSession(at: item.url))
+            return MaintenanceDirectory(
+                name: item.name,
+                url: item.url,
+                session: session,
+                isSymbolicLink: item.isSymbolicLink
+            )
+        }
+        let moreWorkRemains = remainingCount > decoded.count
+        return MaintenanceBatch(items: decoded, moreWorkRemains: moreWorkRemains)
     }
 
     private func forEachTolerantSession(
