@@ -18,6 +18,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private var entries: [SessionHistoryEntry] = []
     private var isReloading = false
     private var preservedSelectionID: UUID?
+    private var commandAvailability: AppCommandAvailability?
     private let tableView = NSTableView()
     private let detailTitle = NSTextField(labelWithString: "No session selected")
     private let detailStatus = NSTextField(labelWithString: "")
@@ -131,7 +132,14 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     func setCleanAgainEnabled(_ enabled: Bool) {
-        cleanAgainButton.isEnabled = enabled && selectedEntry != nil
+        cleanAgainButton.isEnabled = enabled
+            && selectedEntry != nil
+            && commandAvailability?.canCleanAgain ?? true
+    }
+
+    func setCommandAvailability(_ availability: AppCommandAvailability) {
+        commandAvailability = availability
+        setActionButtons(enabled: selectedEntry != nil, entry: selectedEntry)
     }
 
     func showCleanTranscript() {
@@ -185,6 +193,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             }
         case "status":
             text = Self.statusText(entry.session.metadata.state)
+                + " · "
+                + entry.session.metadata.configurationIdentity.historyLabel
         case "paste":
             text = Self.pasteText(entry.session.metadata.insertionOutcome)
         default:
@@ -351,7 +361,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         tableView.addTableColumn(column(identifier: "duration", title: "Duration", width: 55))
         tableView.addTableColumn(column(identifier: "transcript", title: "Transcript", width: 130))
         tableView.addTableColumn(column(identifier: "source", title: "Inserted", width: 100))
-        tableView.addTableColumn(column(identifier: "status", title: "Status", width: 90))
+        tableView.addTableColumn(column(identifier: "status", title: "Status", width: 170))
         tableView.addTableColumn(column(identifier: "paste", title: "Paste", width: 92))
         tableView.delegate = self
         tableView.dataSource = self
@@ -443,6 +453,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         transcriptVersionPopup.selectItem(at: selectedTranscriptSource == .processed ? 1 : 0)
         detailStatus.stringValue = Self.statusText(entry.session.metadata.state)
             + " · " + (selectedTranscriptSource == .processed ? "Clean transcript" : "Raw transcript")
+            + " · " + entry.session.metadata.configurationIdentity.historyLabel
         failureLabel.stringValue = [
             entry.session.metadata.failureReason,
             entry.session.metadata.insertionFailureReason,
@@ -469,17 +480,22 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             )
         }
         let canUseTranscript = enabled && capabilities?.copyAvailable == true
+        let sessionCommandsEnabled = commandAvailability?.canPasteAgain ?? true
         copyButton.isEnabled = canUseTranscript
-        pasteAgainButton.isEnabled = enabled && capabilities?.pasteAgainAvailable == true
+        pasteAgainButton.isEnabled = enabled
+            && capabilities?.pasteAgainAvailable == true
+            && sessionCommandsEnabled
         let canUseCleanTranscript = canUseTranscript && entry.map {
             FileManager.default.fileExists(atPath: $0.session.cleanTextURL.path)
         } == true
         transcriptVersionPopup.isEnabled = enabled && entry != nil
         copyCleanButton.isEnabled = canUseCleanTranscript
-        pasteCleanAgainButton.isEnabled = canUseCleanTranscript
-        cleanAgainButton.isEnabled = canUseTranscript
+        pasteCleanAgainButton.isEnabled = canUseCleanTranscript && sessionCommandsEnabled
+        cleanAgainButton.isEnabled = canUseTranscript && (commandAvailability?.canCleanAgain ?? true)
         playButton.isEnabled = enabled && entry.map { FileManager.default.fileExists(atPath: $0.session.audioURL.path) } == true
-        retryButton.isEnabled = enabled && capabilities?.savedAudioRetryAvailable == true
+        retryButton.isEnabled = enabled
+            && capabilities?.savedAudioRetryAvailable == true
+            && (commandAvailability?.canRetry ?? true)
         revealButton.isEnabled = enabled && entry != nil
         deleteButton.isEnabled = enabled && entry.map { !$0.session.metadata.state.isUnfinished } == true
     }

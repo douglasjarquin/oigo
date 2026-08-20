@@ -19,7 +19,10 @@ private struct OigoIssue3ContractTests {
             ("mouse menu toggle starts and stops", testMouseMenuToggle),
             ("one active task and quit cleanup", testTaskCleanup),
             ("quit cleanup from every state", testShutdownFromEveryState),
-            ("idle policy", testIdlePolicy)
+            ("idle policy", testIdlePolicy),
+            ("app operation gate exclusive occupancy", testAppOperationGateExclusiveOccupancy),
+            ("stale gate completion is ignored", testAppOperationGateIgnoresStaleCompletion),
+            ("onboarding stop does not require setup complete", testOnboardingStopDoesNotRequireSetupComplete)
         ]
 
         var failures = 0
@@ -164,6 +167,64 @@ private struct OigoIssue3ContractTests {
               IdlePolicy.maxIdlePhysicalFootprintBytes == 90 * 1024 * 1024,
               IdlePolicy.maxIdleCPUPercent == 0.5 else {
             fatalError("idle policy does not match issue #3 constraints")
+        }
+    }
+
+    @MainActor
+    private static func testAppOperationGateExclusiveOccupancy() throws {
+        let gate = AppOperationGate()
+        switch gate.begin(.retry) {
+        case .success:
+            break
+        case .failure(let reason):
+            throw ContractFailure(message: "retry did not occupy the gate: " + reason.userMessage)
+        }
+        switch gate.begin(.dictation) {
+        case .success:
+            throw ContractFailure(message: "dictation was accepted while retry owned the gate")
+        case .failure(.occupied(.retry)):
+            break
+        case .failure(let reason):
+            throw ContractFailure(message: "busy reason was not retry: " + reason.userMessage)
+        }
+        let availability = gate.availability(coordinatorState: .idle)
+        guard !availability.canStartDictation,
+              availability.busyReason != nil else {
+            throw ContractFailure(message: "Start Dictation remained advertised during retry")
+        }
+    }
+
+    @MainActor
+    private static func testAppOperationGateIgnoresStaleCompletion() throws {
+        let gate = AppOperationGate()
+        guard case .success(let first) = gate.begin(.pasteAgain) else {
+            throw ContractFailure(message: "paste again did not begin")
+        }
+        let second = gate.preempt(.retry)
+        gate.complete(first)
+        guard gate.isCurrent(second),
+              !gate.isCurrent(first) else {
+            throw ContractFailure(message: "stale paste-again completion cleared the retry slot")
+        }
+        gate.complete(second)
+        guard gate.isIdle else {
+            throw ContractFailure(message: "retry completion did not idle the gate")
+        }
+    }
+
+    @MainActor
+    private static func testOnboardingStopDoesNotRequireSetupComplete() throws {
+        let availability = AppCommandAvailability.evaluate(
+            coordinatorState: .recording,
+            occupiedKind: .onboardingTest,
+            acceptingCommands: true,
+            setupComplete: false,
+            storageReady: true
+        )
+        guard availability.canStopDictation,
+              availability.onboardingTestActionTitle == "Stop test dictation",
+              availability.canUseOnboardingTestAction else {
+            throw ContractFailure(message: "setup-incomplete onboarding Stop was not advertised")
         }
     }
 }

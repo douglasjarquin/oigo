@@ -286,6 +286,7 @@ public final class DictationCoordinator {
     public private(set) var lastFailureReason: String?
     public private(set) var lastFailureCode: DictationFailureCode?
     public private(set) var lastTerminalMetadataWriteFailed = false
+    public private(set) var activeConfiguration: DictationConfigurationSnapshot?
 
     public var state: DictationState {
         machine.state
@@ -304,6 +305,16 @@ public final class DictationCoordinator {
             sessionStore != nil,
             activeOperationID != nil
         ].filter { $0 }.count
+    }
+
+    @_spi(Testing)
+    public var activeTranscriptionObjectIdentifier: ObjectIdentifier? {
+        activeTranscription.map { ObjectIdentifier($0 as AnyObject) }
+    }
+
+    @_spi(Testing)
+    public var activeCaptureObjectIdentifier: ObjectIdentifier? {
+        activeCapture.map { ObjectIdentifier($0 as AnyObject) }
     }
 
     @_spi(Testing)
@@ -363,6 +374,7 @@ public final class DictationCoordinator {
         using capture: AudioCapturing,
         store: SessionStore,
         now: Date = Date(),
+        configuration: DictationConfigurationSnapshot? = nil,
         onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void = { _ in }
     ) throws -> DictationSession {
         reapReleasedTranscription()
@@ -377,12 +389,14 @@ public final class DictationCoordinator {
         diagnostics.mark(.sessionPersisted)
         var preparedSession = session
         let operationID = UUID()
+        activeConfiguration = configuration
         do {
             _ = try apply(.start)
             preparedSession = try store.update(
                 session,
                 state: .recording,
-                at: now
+                at: now,
+                configurationSnapshot: configuration
             )
             _ = try apply(.prepared)
             activeCapture = capture
@@ -452,6 +466,7 @@ public final class DictationCoordinator {
         transcription: TranscriptionController,
         format: AudioCaptureFormat,
         now: Date = Date(),
+        configuration: DictationConfigurationSnapshot? = nil,
         onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in }
     ) async throws -> DictationSession {
         try await startRecordingWithTranscriptionInternal(
@@ -461,6 +476,7 @@ public final class DictationCoordinator {
             format: format,
             session: nil,
             now: now,
+            configuration: configuration,
             onUpdate: onUpdate
         )
     }
@@ -472,6 +488,7 @@ public final class DictationCoordinator {
         transcription: TranscriptionController,
         format: AudioCaptureFormat,
         now: Date = Date(),
+        configuration: DictationConfigurationSnapshot? = nil,
         onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in }
     ) async throws -> DictationSession {
         try await startRecordingWithTranscriptionInternal(
@@ -481,6 +498,7 @@ public final class DictationCoordinator {
             format: format,
             session: session,
             now: now,
+            configuration: configuration,
             onUpdate: onUpdate
         )
     }
@@ -492,6 +510,7 @@ public final class DictationCoordinator {
         format: AudioCaptureFormat,
         session: DictationSession?,
         now: Date,
+        configuration: DictationConfigurationSnapshot?,
         onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
     ) async throws -> DictationSession {
         reapReleasedTranscription()
@@ -502,15 +521,23 @@ public final class DictationCoordinator {
             throw DictationTransitionError.illegal(from: state, event: .start)
         }
 
-        let persistedSession: DictationSession
+        var persistedSession: DictationSession
         if let session {
             persistedSession = session
         } else {
             persistedSession = try store.createSession(now: now)
         }
+        if let configuration {
+            persistedSession = try store.update(
+                persistedSession,
+                state: persistedSession.metadata.state,
+                configurationSnapshot: configuration
+            )
+        }
         diagnostics.mark(.sessionPersisted)
         var preparedSession = persistedSession
         let operationID = UUID()
+        activeConfiguration = configuration ?? persistedSession.metadata.configurationSnapshot
         do {
             pendingTranscriptionTerminalState = nil
             _ = try apply(.start)
@@ -520,6 +547,7 @@ public final class DictationCoordinator {
             acceptsCallbacks = true
             sessionStore = store
             currentSession = persistedSession
+            let startupSession = persistedSession
 
             try await withTaskCancellationHandler(operation: {
                 try await BoundedOperation.run(
@@ -529,7 +557,7 @@ public final class DictationCoordinator {
                     registry: operationRegistry
                 ) {
                     try await transcription.start(
-                        session: persistedSession,
+                        session: startupSession,
                         format: format,
                         store: store,
                         onUpdate: { [weak self] update in
@@ -646,7 +674,8 @@ public final class DictationCoordinator {
     public func retryRecordingWithTranscription(
         for savedSession: DictationSession? = nil,
         using transcription: TranscriptionController,
-        store: SessionStore
+        store: SessionStore,
+        configurationOverride: DictationConfigurationSnapshot? = nil
     ) async throws -> DictationSession {
         guard await waitForTerminalOperationIfNeeded(
             operationID: activeOperationID ?? UUID(),
@@ -666,7 +695,17 @@ public final class DictationCoordinator {
             throw DictationCoordinatorError.recordingNotActive
         }
 
-        let retryingSession = try store.beginTranscriptionRetry(for: session)
+        var retryingSession = try store.beginTranscriptionRetry(for: session)
+        if let configurationOverride {
+            retryingSession = try store.update(
+                retryingSession,
+                state: retryingSession.metadata.state,
+                retryOverrideSnapshot: configurationOverride
+            )
+            activeConfiguration = configurationOverride
+        } else {
+            activeConfiguration = retryingSession.metadata.configurationSnapshot
+        }
         currentSession = retryingSession
         let operationID = UUID()
         activeOperationID = operationID
@@ -680,13 +719,14 @@ public final class DictationCoordinator {
         }
 
         do {
+            let retrySession = retryingSession
             let result = try await BoundedOperation.run(
                 operationID: operationID,
                 stage: .retry,
                 timeout: timeoutPolicy.budget(for: .retry),
                 registry: operationRegistry
             ) {
-                try await transcription.retrySavedAudio(for: retryingSession, store: store)
+                try await transcription.retrySavedAudio(for: retrySession, store: store)
             }
             guard activeOperationID == operationID, acceptsCallbacks else {
                 throw DictationCoordinatorError.recordingNotActive
@@ -936,7 +976,7 @@ public final class DictationCoordinator {
     @discardableResult
     public func beginInsertion(
         using store: SessionStore,
-        requiresCleanup: Bool = false
+        requiresCleanup: Bool? = nil
     ) throws -> DictationSession {
         guard state == .complete,
               let session = currentSession,
@@ -944,9 +984,13 @@ public final class DictationCoordinator {
               session.metadata.rawTextByteCount != nil else {
             throw DictationCoordinatorError.rawTranscriptNotPersisted
         }
+        let needsCleanup = requiresCleanup
+            ?? activeConfiguration?.requiresCleanup
+            ?? session.metadata.configurationSnapshot?.requiresCleanup
+            ?? false
         sessionStore = store
         _ = try apply(.finalized)
-        if !requiresCleanup {
+        if !needsCleanup {
             _ = try apply(.cleaned)
         }
         return session
@@ -1074,7 +1118,16 @@ public final class DictationCoordinator {
             lastFailureCode = nil
         }
         diagnostics.record("transcript insertion finished as " + outcome.rawValue)
+        releaseInsertionResources()
         return persisted
+    }
+
+    private func releaseInsertionResources() {
+        sessionStore = nil
+        if activeCapture == nil, activeTranscription == nil {
+            activeOperationID = nil
+            acceptsCallbacks = false
+        }
     }
 
     @discardableResult

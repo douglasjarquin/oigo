@@ -37,6 +37,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var accessibilityRequestAttempted = false
     private var testOutcome: OigoOnboardingTestOutcome = .pending
     private var testRunning = false
+    private var commandAvailability: AppCommandAvailability?
     private var completed = false
     private var storageHealth: DurableSessionHealth
     private var committedShortcut: ToggleShortcut
@@ -152,7 +153,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         _ = notification
         discardShortcutCandidate()
-        if testRunning {
+        if onboardingTestAvailability.isOnboardingTestActive {
             testRunning = false
             cancelTest()
         }
@@ -323,7 +324,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
                 ? "Open Accessibility Settings"
                 : "Allow Accessibility (optional)"
         } else if currentStep == .testDictation {
-            actionButton.title = testRunning ? "Stop test dictation" : "Start test dictation"
+            actionButton.title = onboardingTestAvailability.onboardingTestActionTitle
         }
         renderButtons()
     }
@@ -338,7 +339,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             nextButton.isEnabled = localeSelection.canConfirm
         }
         if currentStep == .testDictation {
-            nextButton.isEnabled = storageHealth.isReady && testOutcome.allowsContinue
+            nextButton.isEnabled = storageHealth.isReady
+                && testOutcome.allowsContinue
+                && !onboardingTestAvailability.isOnboardingTestActive
+            actionButton.isEnabled = storageHealth.isReady
+                && onboardingTestAvailability.canUseOnboardingTestAction
+            skipButton.isEnabled = true
         }
         if currentStep == .recovery {
             nextButton.isEnabled = storageHealth.isReady && registrationStatus().isActive
@@ -348,6 +354,24 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     func setStorageHealth(_ health: DurableSessionHealth) {
         storageHealth = health
         render()
+    }
+
+    func setCommandAvailability(_ availability: AppCommandAvailability) {
+        commandAvailability = availability
+        testRunning = availability.isOnboardingTestActive
+        if currentStep == .testDictation {
+            render()
+        }
+    }
+
+    private var onboardingTestAvailability: AppCommandAvailability {
+        commandAvailability ?? AppCommandAvailability.evaluate(
+            coordinatorState: testRunning ? .recording : .idle,
+            occupiedKind: testRunning ? .onboardingTest : nil,
+            acceptingCommands: true,
+            setupComplete: false,
+            storageReady: storageHealth.isReady
+        )
     }
 
     private func body(for step: OigoOnboardingStep) -> String {
@@ -400,7 +424,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         guard currentStep == .testDictation else {
             return
         }
-        if testRunning {
+        if onboardingTestAvailability.isOnboardingTestActive {
             testRunning = false
             cancelTest()
         }
@@ -537,10 +561,24 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
                 statusLabel.stringValue = "Storage unavailable. Retry storage before starting a test dictation."
                 return
             }
-            testRunning.toggle()
-            if testRunning { startTest() } else { stopTest() }
-            actionButton.title = testRunning ? "Stop test dictation" : "Start test dictation"
-            renderButtons()
+            let availability = onboardingTestAvailability
+            if availability.isOnboardingTestActive {
+                guard availability.canStopDictation || availability.canCancelOnboardingTest else {
+                    statusLabel.stringValue = availability.busyReason?.userMessage
+                        ?? "Stop test dictation is unavailable."
+                    render()
+                    return
+                }
+                stopTest()
+            } else if availability.canRunOnboardingTest {
+                startTest()
+            } else {
+                statusLabel.stringValue = availability.busyReason?.userMessage
+                    ?? "Start test dictation is unavailable."
+                render()
+                return
+            }
+            render()
         default:
             break
         }

@@ -557,19 +557,27 @@ public final class DurableSessionCapability {
         onChange?()
     }
 
-    public func waitForCurrentAttempt() async {
+    public func waitForCurrentAttempt(timeout: Duration? = nil) async {
+        if Task.isCancelled {
+            return
+        }
         let task = currentAttempt
         let completion = currentAttemptCompletion
         let pendingCompletions = task == nil ? pendingShutdownCompletions : []
         if task == nil {
             pendingShutdownCompletions.removeAll(keepingCapacity: false)
         }
+        let waitNanoseconds = timeout.map(AppOperationTimeoutPolicy.nanoseconds(for:))
+            ?? Self.shutdownWaitNanoseconds
         let deadline = DispatchTime.now().uptimeNanoseconds
-            &+ Self.shutdownWaitNanoseconds
+            &+ waitNanoseconds
         if let completion {
             await waitForAttempt(completion, until: deadline)
         }
         for completion in pendingCompletions {
+            if Task.isCancelled {
+                return
+            }
             guard DispatchTime.now().uptimeNanoseconds < deadline else {
                 break
             }
@@ -581,6 +589,9 @@ public final class DurableSessionCapability {
         _ completion: DurableSessionAttemptCompletion,
         until deadline: UInt64
     ) async {
+        if Task.isCancelled {
+            return
+        }
         let now = DispatchTime.now().uptimeNanoseconds
         guard now < deadline else {
             return
