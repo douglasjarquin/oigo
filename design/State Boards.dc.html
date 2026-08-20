@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>html,body{margin:0}body{background:#111114}a{color:#0a84ff}a:hover{color:#3f9cff}</style>
+</helmet>
+<div style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;-webkit-font-smoothing:antialiased;padding:36px;display:flex;flex-direction:column;gap:32px;color:#e8e8ec;min-width:1280px">
+  <div style="font:12px 'SF Mono',ui-monospace,monospace;color:#8e8e93">OIGO STATE BOARDS — HUD progression · health notices · menu-bar icon states</div>
+
+  <div style="display:flex;flex-direction:column;gap:12px">
+    <div style="font-size:13px;font-weight:600;color:#c9c9ce">1 · Recording HUD — every state, light + dark</div>
+    <div style="display:flex;gap:24px;align-items:flex-start">
+      <sc-for list="{{ panels }}" as="panel" hint-placeholder-count="2">
+        <div style="color-scheme: {{ panel.scheme }};flex:1;border-radius:12px;padding:20px;background:light-dark(#d8d9de,#1f2024);display:flex;flex-direction:column;gap:14px">
+          <sc-for list="{{ hudStates }}" as="st" hint-placeholder-count="12">
+            <div style="display:flex;align-items:center;gap:16px">
+              <div style="min-width:224px;max-width:300px;padding:10px 14px;border-radius:12px;background:light-dark(rgba(248,248,250,.97),rgba(46,46,50,.97));box-shadow:0 6px 20px rgba(0,0,0,.25),0 0 0 1px light-dark(rgba(0,0,0,.1),rgba(255,255,255,.1))">
+                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:light-dark(#1d1d1f,#f0f0f2)">
+                  <sc-if value="{{ st.dot }}" hint-placeholder-val="{{ false }}"><span style="width:9px;height:9px;border-radius:5px;background:#ff3b30;flex:none"></span></sc-if>
+                  <sc-if value="{{ st.spinner }}" hint-placeholder-val="{{ false }}"><span style="width:11px;height:11px;flex:none;border-radius:6px;border:2px solid light-dark(rgba(0,0,0,.18),rgba(255,255,255,.22));border-top-color:light-dark(#666,#ddd)"></span></sc-if>
+                  <sc-if value="{{ st.check }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;flex:none">✓</span></sc-if>
+                  <sc-if value="{{ st.warn }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;flex:none;color:#ff9500">⚠</span></sc-if>
+                  <sc-if value="{{ st.timer }}" hint-placeholder-val="{{ false }}"><span style="font-family:'SF Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums">{{ st.timer }}</span></sc-if>
+                  <span>{{ st.main }}</span>
+                </div>
+                <sc-if value="{{ st.sub }}" hint-placeholder-val="{{ false }}"><div style="margin-top:4px;font-size:11px;color:light-dark(#6e6e73,#98989d)">{{ st.sub }}</div></sc-if>
+                <sc-if value="{{ st.preview }}" hint-placeholder-val="{{ false }}"><div style="margin-top:5px;font-size:12px;font-style:italic;color:light-dark(#48484d,#c0c0c6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:270px">&ldquo;{{ st.preview }}&rdquo;</div></sc-if>
+              </div>
+              <div style="flex:1;font:10.5px 'SF Mono',ui-monospace,monospace;line-height:1.5;color:light-dark(#5c5c61,#8e8e93)">{{ st.note }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:12px">
+    <div style="font-size:13px;font-weight:600;color:#c9c9ce">2 · Popover inline health notices (MacUIInlineNotice)</div>
+    <div style="display:flex;gap:24px;align-items:flex-start">
+      <sc-for list="{{ panels }}" as="panel" hint-placeholder-count="2">
+        <div style="color-scheme: {{ panel.scheme }};flex:1;border-radius:12px;padding:20px;background:light-dark(#d8d9de,#1f2024);display:flex;flex-direction:column;gap:10px">
+          <sc-for list="{{ notices }}" as="n" hint-placeholder-count="6">
+            <div style="width:340px;padding:10px 12px;border-radius:8px;background:light-dark(rgba(255,255,255,.75),rgba(255,255,255,.06));box-shadow:0 0 0 1px light-dark(rgba(0,0,0,.08),rgba(255,255,255,.08));display:flex;gap:10px;align-items:flex-start">
+              <span style="font-size:13px;line-height:1.35;flex:none;color: {{ n.color }}">{{ n.icon }}</span>
+              <span style="flex:1;display:flex;flex-direction:column;gap:2px">
+                <span style="font-size:12.5px;font-weight:600;color:light-dark(#1d1d1f,#f5f5f7)">{{ n.title }}</span>
+                <span style="font-size:11.5px;line-height:1.4;color:light-dark(#515156,#aeaeb2)">{{ n.body }}</span>
+              </span>
+              <span style="flex:none;font-size:11.5px;font-weight:500;padding:3px 10px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#ffffff,#48484c);color:light-dark(#1d1d1f,#f5f5f7)">{{ n.btn }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:12px">
+    <div style="font-size:13px;font-weight:600;color:#c9c9ce">3 · Menu-bar status item states</div>
+    <div style="display:flex;gap:24px;align-items:flex-start">
+      <sc-for list="{{ panels }}" as="panel" hint-placeholder-count="2">
+        <div style="color-scheme: {{ panel.scheme }};flex:1;border-radius:12px;padding:20px;background:light-dark(#d8d9de,#1f2024);display:flex;flex-direction:column;gap:8px">
+          <sc-for list="{{ iconStates }}" as="ic" hint-placeholder-count="4">
+            <div style="display:flex;align-items:center;gap:14px;height:28px;padding:0 12px;border-radius:6px;background:light-dark(rgba(246,246,248,.92),rgba(34,34,38,.92))">
+              <span style="position:relative;display:flex;align-items:center;justify-content:center;width:30px;height:22px;border-radius:4px;color:light-dark(#1d1d1f,#f5f5f7)">
+                <svg width="13" height="17" viewBox="0 0 24 32">
+                  <path d="M9.4 5.2 C10.2 3.7 11 2.8 12.4 2.8 C17.8 2.8 20.2 8.3 20.2 16 C20.2 23.7 17.6 29.2 12 29.2 C7 29.2 4 25.2 3.8 19.4 C3.7 13.6 5.6 9.6 8.8 8.4 C11.2 7.5 13.1 8.8 12.9 10.9 C12.7 12.9 10.6 13.4 10 15.1 C9.4 16.8 10.6 18.2 12.3 18.1" fill="none" stroke-width="2.6" stroke-linecap="round" style="stroke: {{ ic.stroke }}"></path>
+                </svg>
+                <sc-if value="{{ ic.badge }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;top:0;right:0;width:6px;height:6px;border-radius:3px;background: {{ ic.badge }}"></span></sc-if>
+              </span>
+              <span style="font:11px 'SF Mono',ui-monospace,monospace;color:light-dark(#5c5c61,#98989d)">{{ ic.note }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      panels: [{ scheme: 'light' }, { scheme: 'dark' }],
+      hudStates: [
+        { spinner: true, main: 'Preparing…', note: 'shown until durable session + writer + input path are ready · persists while active' },
+        { dot: true, timer: '00:12', main: 'Recording · Notes', sub: 'Release ⌥Space to finish', note: 'timer 1 Hz, monospaced · release hint uses the configured shortcut' },
+        { dot: true, timer: '00:12', main: 'Recording · Notes', preview: '…send the agenda to the platform team', note: 'volatile preview: one line, opt-in, ≤5 updates/s, never announced repeatedly' },
+        { spinner: true, main: 'Finalizing…', note: 'persists while active' },
+        { spinner: true, main: 'Cleaning…', note: 'Clean mode only · persists while active' },
+        { spinner: true, main: 'Pasting…', note: 'persists while active' },
+        { check: true, main: 'Paste attempted', note: 'terminal · dismisses ~1.8 s · never claimed as verified in third-party fields' },
+        { check: true, main: 'Copied to Clipboard', note: 'terminal · secure/changed-target fallback · calm, not an error · ~1.8 s' },
+        { warn: true, main: 'Recording Saved — Retry Needed', note: 'terminal · ~3 s · persistent recovery lives in popover + History' },
+        { warn: true, main: 'Failed — Recording Preserved', note: 'terminal · ~3 s · durable audio kept, not a lost dictation' },
+        { main: 'Cancelled', note: 'terminal · ~1.5 s' },
+        { warn: true, main: 'Interrupted', note: 'terminal · ~3 s · e.g. device loss, sleep · audio preserved if durable' }
+      ],
+      notices: [
+        { icon: '⛔', color: '#ff3b30', title: 'Storage unavailable', body: 'Oigo cannot create durable recordings right now.', btn: 'Retry' },
+        { icon: '⚠', color: '#ff9500', title: 'Shortcut inactive', body: '⌥Space failed to register with the system.', btn: 'Open Settings' },
+        { icon: '⚠', color: '#ff9500', title: 'Microphone unavailable', body: 'MacBook Pro Microphone is disconnected.', btn: 'Choose Input' },
+        { icon: '⚠', color: '#ff9500', title: 'Speech assets required', body: 'English (US) needs on-device speech assets.', btn: 'Install' },
+        { icon: 'ℹ', color: '#0a84ff', title: 'Accessibility unavailable', body: 'Oigo will copy results instead of pasting automatically.', btn: 'Open System Settings' },
+        { icon: '⚠', color: '#ff9500', title: 'Recording preserved', body: 'Live transcription degraded. Your audio was saved.', btn: 'Retry Transcription' }
+      ],
+      iconStates: [
+        { stroke: 'currentColor', badge: null, note: 'idle — template outline' },
+        { stroke: 'currentColor', badge: null, note: 'preparing / processing — outline + system activity treatment' },
+        { stroke: '#ff453a', badge: '#ff453a', note: 'recording — red stroke + red dot badge' },
+        { stroke: 'currentColor', badge: '#ff9500', note: 'needs attention — orange badge' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
