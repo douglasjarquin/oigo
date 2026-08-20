@@ -34,7 +34,8 @@ private struct OigoIssue78ContractTests {
             ("interruption ignores untyped timeout prose", testInterruptionIgnoresUntypedTimeoutProse),
             ("interruption ignores caller timeout prose", testInterruptionIgnoresCallerTimeoutProse),
             ("one hundred lifecycle cycles release resources", testOneHundredLifecycleCyclesReleaseResources),
-            ("one hundred adversarial lifecycle cycles release resources", testOneHundredAdversarialLifecycleCyclesReleaseResources)
+            ("one hundred adversarial lifecycle cycles release resources", testOneHundredAdversarialLifecycleCyclesReleaseResources),
+            ("stale generation cannot persist after live degradation", testStaleGenerationCannotPersistAfterLiveDegradation)
         ]
 
         var failures = 0
@@ -788,6 +789,35 @@ private struct OigoIssue78ContractTests {
                 throw ContractFailure(message: "adversarial lifecycle cycle left resources active at index " + String(cycle))
             }
         }
+    }
+
+    @MainActor
+    private static func testStaleGenerationCannotPersistAfterLiveDegradation() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue78-stale-live-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let firstSession = try store.createSession()
+        _ = try store.persistRawText("", for: firstSession)
+        let service = TranscriptionService()
+        let firstID = try service.startLiveIntakeFixture(session: firstSession, store: store)
+        service.injectAnalyzerFailureForTesting()
+        service.consumeFinalForTesting(operationID: firstID, text: "late degraded text")
+        guard try store.readRawText(for: firstSession).isEmpty,
+              service.liveDegradationForTesting == .analyzerFailed else {
+            throw ContractFailure(message: "degraded generation published a late final as success")
+        }
+        await service.stopLiveIntakeFixture()
+
+        let secondSession = try store.createSession()
+        _ = try store.persistRawText("", for: secondSession)
+        _ = try service.startLiveIntakeFixture(session: secondSession, store: store)
+        service.consumeFinalForTesting(operationID: firstID, text: "stale generation")
+        guard try store.readRawText(for: secondSession).isEmpty else {
+            throw ContractFailure(message: "stale generation persisted raw text into a later session")
+        }
+        await service.stopLiveIntakeFixture()
     }
 
     @MainActor

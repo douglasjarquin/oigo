@@ -33,6 +33,9 @@ public enum TranscriptionError: Error, Equatable, Sendable, CustomStringConverti
     case cancelled
     case timedOut(TranscriptionStage)
     case analysisFailed(String)
+    case liveQueueSaturated
+    case liveContinuationTerminated
+    case liveConversionFailed
     case persistenceFailed(String)
     case notRunning
     case alreadyRunning
@@ -66,6 +69,12 @@ public enum TranscriptionError: Error, Equatable, Sendable, CustomStringConverti
             return "speech transcription timed out during " + stage.rawValue
         case .analysisFailed(let reason):
             return "speech analysis failed: " + reason
+        case .liveQueueSaturated:
+            return "speech analysis queue saturated"
+        case .liveContinuationTerminated:
+            return "speech analysis continuation terminated"
+        case .liveConversionFailed:
+            return "speech analysis conversion failed"
         case .persistenceFailed(let reason):
             return "canonical raw transcript could not be persisted: " + reason
         case .notRunning:

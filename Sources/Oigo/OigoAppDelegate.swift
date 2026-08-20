@@ -1733,6 +1733,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyTranscriptionUpdate(_ update: TranscriptionUpdate) {
+        if update.liveDegradation != nil {
+            livePreview = ""
+            updateSurface()
+            return
+        }
         guard previewThrottle.shouldPublish(at: Date().timeIntervalSinceReferenceDate) else {
             return
         }
@@ -1791,9 +1796,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         if isRecording {
             let previewEnabled = coordinator.activeConfiguration?.previewEnabled
                 ?? settings.showVolatilePreview
+            let degradedDetail = coordinator.liveRecordingHUDDetail
             statusSurface.showRecording(
                 startedAt: recordingStartedAt ?? Date(),
-                preview: previewEnabled ? livePreview : "",
+                preview: previewEnabled && degradedDetail == nil ? livePreview : "",
+                detail: degradedDetail,
                 anchoredTo: statusItem?.button
             )
         } else if let insertionDisplayStatus {

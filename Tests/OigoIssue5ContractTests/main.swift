@@ -1,7 +1,10 @@
+import AVFAudio
 import Darwin
 import Foundation
 @_spi(Testing) import OigoCore
+import OigoCapture
 @_spi(Testing) import OigoTranscription
+import Speech
 
 private struct ContractFailure: Error, CustomStringConvertible {
     let message: String
@@ -41,7 +44,18 @@ private struct OigoIssue5ContractTests {
             ("same-length tail revision interrupted before truncate", testSameLengthTailRevisionInterruptedBeforeTruncate),
             ("longer rewrite short-write restores previous suffix", testLongerRewriteShortWriteRestoresPreviousSuffix),
             ("newline-prefixed first segment then second append", testNewlinePrefixedFirstSegmentThenSecondAppend),
-            ("missing raw.txt with stale byte count does not checkpoint empty", testMissingRawTextWithStaleByteCountDoesNotCheckpointEmpty)
+            ("missing raw.txt with stale byte count does not checkpoint empty", testMissingRawTextWithStaleByteCountDoesNotCheckpointEmpty),
+            ("bounded analyzer-input policy", testBoundedAnalyzerInputPolicy),
+            ("never-read consumer saturates with typed degradation", testNeverReadConsumerSaturates),
+            ("slow consumer saturates with typed degradation", testSlowConsumerSaturates),
+            ("terminated continuation is visible", testTerminatedContinuationIsVisible),
+            ("conversion analyzer and result failures reach coordinator", testConversionAnalyzerAndResultFailuresReachCoordinator),
+            ("stale generation cannot persist raw text or HUD success", testStaleGenerationCannotPersist),
+            ("live speech degradation preserves CAF and saved-audio retry", testLiveSpeechDegradationPreservesCAFAndRetry),
+            ("writer failure stays distinct from speech degradation", testWriterFailureDistinctFromSpeechDegradation),
+            ("stalled retry consumer saturates with typed degradation", testRetryFeedSaturatesOnStalledConsumer),
+            ("retry waits for a draining consumer past the live bound", testRetryFeedWaitsForDrainingConsumer),
+            ("preparing live degradation persists into recording metadata", testPreparingDegradationPersistsIntoRecording)
         ]
 
         var failures = 0
@@ -1267,6 +1281,479 @@ private struct OigoIssue5ContractTests {
         }
     }
 
+    @MainActor
+    private static func testBoundedAnalyzerInputPolicy() throws {
+        guard AnalyzerInputLimits.capacity == 32,
+              AnalyzerInputLimits.maxRetainedBytes
+                == AnalyzerInputLimits.capacity * AnalyzerInputLimits.maxBytesPerInput,
+              AnalyzerInputLimits.maxRetainedBytes == 1_048_576 else {
+            throw ContractFailure(message: "analyzer-input capacity is no longer a documented 32-slot / 1 MiB bound")
+        }
+        let generation = UUID()
+        let intake = AnalyzerInputBackpressure(
+            generation: generation,
+            capacity: AnalyzerInputLimits.capacity
+        )
+        let (input, byteCount) = try makeAnalyzerInput()
+        for _ in 0..<AnalyzerInputLimits.capacity {
+            let outcome = intake.enqueue(input, generation: generation, byteCount: byteCount)
+            guard outcome == .enqueued else {
+                throw ContractFailure(message: "documented capacity rejected input before filling")
+            }
+        }
+        let overflow = intake.enqueue(input, generation: generation, byteCount: byteCount)
+        let metrics = intake.metrics
+        guard overflow == .saturated,
+              metrics.degradation == .queueSaturated,
+              metrics.highWaterDepth == AnalyzerInputLimits.capacity,
+              metrics.highWaterBytes <= AnalyzerInputLimits.maxRetainedBytes,
+              metrics.lastYieldOutcome == .saturated else {
+            throw ContractFailure(message: "bounded analyzer-input policy did not saturate at the documented cap")
+        }
+        for _ in 0..<10_000 {
+            let outcome = intake.enqueue(input, generation: generation, byteCount: byteCount)
+            guard outcome == .rejected else {
+                throw ContractFailure(message: "stalled consumer kept growing after saturation")
+            }
+        }
+        let bounded = intake.metrics
+        guard bounded.highWaterDepth == AnalyzerInputLimits.capacity,
+              bounded.enqueueAccepted == AnalyzerInputLimits.capacity,
+              bounded.highWaterBytes <= AnalyzerInputLimits.maxRetainedBytes else {
+            throw ContractFailure(message: "never-read consumer exceeded the analyzer-input memory bound")
+        }
+    }
+
+    @MainActor
+    private static func testNeverReadConsumerSaturates() async throws {
+        let service = TranscriptionService()
+        let updates = UpdateCollector()
+        _ = try service.startLiveIntakeFixture(
+            consumer: .neverRead,
+            onUpdate: { update in updates.append(update) }
+        )
+        let buffer = makeCaptureBuffer()
+        for _ in 0..<(AnalyzerInputLimits.capacity + 8) {
+            service.append(buffer)
+        }
+        let metrics = service.analyzerInputMetricsForTesting
+        guard service.liveDegradationForTesting == .queueSaturated,
+              service.lastTranscriptionError == .liveQueueSaturated,
+              updates.values.contains(where: {
+                  $0.liveDegradation == .queueSaturated
+                      && $0.volatilePreview.isEmpty
+                      && $0.finalizedSegment == nil
+              }),
+              metrics.highWaterDepth <= AnalyzerInputLimits.capacity,
+              metrics.highWaterBytes <= AnalyzerInputLimits.maxRetainedBytes,
+              metrics.enqueueAccepted <= AnalyzerInputLimits.capacity else {
+            throw ContractFailure(message: "never-read consumer did not emit typed saturation")
+        }
+        service.append(buffer)
+        guard service.analyzerInputMetricsForTesting.enqueueAccepted == metrics.enqueueAccepted else {
+            throw ContractFailure(message: "conversion continued after live degradation")
+        }
+        await service.stopLiveIntakeFixture()
+    }
+
+    @MainActor
+    private static func testSlowConsumerSaturates() async throws {
+        let service = TranscriptionService()
+        let updates = UpdateCollector()
+        _ = try service.startLiveIntakeFixture(
+            consumer: .slow(nanoseconds: 50_000_000),
+            onUpdate: { update in updates.append(update) }
+        )
+        let buffer = makeCaptureBuffer()
+        for _ in 0..<(AnalyzerInputLimits.capacity * 2) {
+            service.append(buffer)
+        }
+        guard service.liveDegradationForTesting == .queueSaturated,
+              updates.values.contains(where: { $0.liveDegradation == .queueSaturated }),
+              service.analyzerInputMetricsForTesting.highWaterDepth <= AnalyzerInputLimits.capacity else {
+            throw ContractFailure(message: "slow consumer did not saturate with a typed degradation")
+        }
+        await service.stopLiveIntakeFixture()
+    }
+
+    @MainActor
+    private static func testTerminatedContinuationIsVisible() throws {
+        let generation = UUID()
+        let intake = AnalyzerInputBackpressure(generation: generation, capacity: 4)
+        let (input, byteCount) = try makeAnalyzerInput()
+        intake.finish()
+        let outcome = intake.enqueue(input, generation: generation, byteCount: byteCount)
+        guard outcome == .terminated,
+              intake.metrics.degradation == .continuationTerminated,
+              intake.metrics.lastYieldOutcome == .terminated else {
+            throw ContractFailure(message: "terminated continuation was not a typed live-speech outcome")
+        }
+    }
+
+    @MainActor
+    private static func testConversionAnalyzerAndResultFailuresReachCoordinator() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-live-failures-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(rootDirectory: root)
+        let capture = FakeAudioCapture()
+        let conversion = TranscriptionService()
+        let conversionUpdates = UpdateCollector()
+        _ = try conversion.startLiveIntakeFixture(
+            onUpdate: { update in conversionUpdates.append(update) }
+        )
+        conversion.append(
+            AudioCaptureBuffer(
+                frameCount: 4,
+                sampleRate: 16_000,
+                channelCount: 2,
+                pcmData: Data(count: 32)
+            )
+        )
+        guard conversion.liveDegradationForTesting == .conversionFailed,
+              conversion.lastTranscriptionError == .liveConversionFailed,
+              conversionUpdates.values.contains(where: { $0.liveDegradation == .conversionFailed }) else {
+            throw ContractFailure(message: "conversion failure stayed internal")
+        }
+        await conversion.stopLiveIntakeFixture()
+
+        let analyzerService = TranscriptionService()
+        let analyzerUpdates = UpdateCollector()
+        _ = try analyzerService.startLiveIntakeFixture(
+            onUpdate: { update in analyzerUpdates.append(update) }
+        )
+        analyzerService.injectAnalyzerFailureForTesting()
+        guard analyzerService.liveDegradationForTesting == .analyzerFailed,
+              analyzerUpdates.values.contains(where: { $0.liveDegradation == .analyzerFailed }) else {
+            throw ContractFailure(message: "analyzer failure stayed internal")
+        }
+        await analyzerService.stopLiveIntakeFixture()
+
+        let resultService = TranscriptionService()
+        let resultUpdates = UpdateCollector()
+        _ = try resultService.startLiveIntakeFixture(
+            onUpdate: { update in resultUpdates.append(update) }
+        )
+        resultService.injectResultSequenceFailureForTesting()
+        guard resultService.liveDegradationForTesting == .resultSequenceFailed,
+              resultUpdates.values.contains(where: { $0.liveDegradation == .resultSequenceFailed }) else {
+            throw ContractFailure(message: "result-sequence failure stayed internal")
+        }
+        await resultService.stopLiveIntakeFixture()
+
+        let transcription = FakeTranscriptionController()
+        let coordinator = DictationCoordinator()
+        let updates = UpdateCollector()
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1),
+            onUpdate: { update in updates.append(update) }
+        )
+        transcription.emitDegradation(.analyzerFailed)
+        for _ in 0..<200 where coordinator.liveTranscriptionDegradation == nil {
+            await Task.yield()
+        }
+        guard coordinator.state == .recording,
+              coordinator.liveTranscriptionDegradation == .analyzerFailed,
+              coordinator.lastFailureCode == .transcriptionFailed,
+              coordinator.liveRecordingHUDDetail
+                == LiveTranscriptionHUDCopy.recordingPreservedRetryRequired,
+              capture.isActive else {
+            throw ContractFailure(message: "live analyzer failure did not reach the coordinator during capture")
+        }
+        do {
+            _ = try await coordinator.stopRecordingWithTranscription()
+            throw ContractFailure(message: "degraded live analysis completed as success")
+        } catch let error as TranscriptionError {
+            guard error == .analysisFailed("speech analyzer failed") else {
+                throw ContractFailure(message: "degraded finish changed category: " + error.description)
+            }
+        }
+    }
+
+    @MainActor
+    private static func testStaleGenerationCannotPersist() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-stale-generation-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(rootDirectory: root)
+        let firstSession = try store.createSession()
+        _ = try store.persistRawText("", for: firstSession)
+        let service = TranscriptionService()
+        let firstID = try service.startLiveIntakeFixture(session: firstSession, store: store)
+        service.injectAnalyzerFailureForTesting()
+        service.consumeFinalForTesting(operationID: firstID, text: "degraded generation")
+        guard try store.readRawText(for: firstSession).isEmpty else {
+            throw ContractFailure(message: "degraded generation persisted canonical raw text")
+        }
+        await service.stopLiveIntakeFixture()
+
+        let secondSession = try store.createSession()
+        _ = try store.persistRawText("", for: secondSession)
+        let secondID = try service.startLiveIntakeFixture(session: secondSession, store: store)
+        service.consumeFinalForTesting(operationID: firstID, text: "stale generation")
+        guard try store.readRawText(for: secondSession).isEmpty,
+              secondID != firstID,
+              service.liveDegradationForTesting == nil else {
+            throw ContractFailure(message: "stale generation mutated a later session")
+        }
+        await service.stopLiveIntakeFixture()
+    }
+
+    @MainActor
+    private static func testLiveSpeechDegradationPreservesCAFAndRetry() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-live-retry-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(rootDirectory: root)
+        let capture = FakeAudioCapture()
+        let transcription = FakeTranscriptionController()
+        transcription.finalizedText = "saved audio retry transcript"
+        let coordinator = DictationCoordinator()
+        capture.writesCanonicalCAF = true
+        let session: DictationSession
+        do {
+            session = try await coordinator.startRecordingWithTranscription(
+                using: capture,
+                store: store,
+                transcription: transcription,
+                format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+            )
+            try capture.writeCanonicalFrames()
+        } catch {
+            print("INCONCLUSIVE: native CAF writer unavailable: " + String(describing: error))
+            _ = try? await coordinator.cancelRecordingWithTranscription()
+            return
+        }
+        transcription.emitDegradation(.queueSaturated)
+        for _ in 0..<200 where coordinator.liveTranscriptionDegradation == nil {
+            await Task.yield()
+        }
+        guard coordinator.state == .recording,
+              coordinator.liveTranscriptionDegraded,
+              coordinator.currentSession?.metadata.failureCode == .transcriptionFailed,
+              coordinator.currentSession?.metadata.failureReason == LiveTranscriptionDegradation.queueSaturated.rawValue,
+              FileManager.default.fileExists(atPath: session.audioURL.path) else {
+            throw ContractFailure(message: "live saturation did not persist a content-free retry-required code")
+        }
+        do {
+            _ = try await coordinator.stopRecordingWithTranscription()
+            throw ContractFailure(message: "saturated live analysis completed as success")
+        } catch let error as TranscriptionError {
+            guard error == .liveQueueSaturated else {
+                throw ContractFailure(message: "saturation finish changed category: " + error.description)
+            }
+        }
+        let failed = try store.load(id: session.id)
+        let history = DictationHistoryActions.capabilities(
+            sessionState: failed.metadata.state,
+            hasValidRaw: false,
+            hasAudio: FileManager.default.fileExists(atPath: failed.audioURL.path)
+        )
+        let frames: AVAudioFramePosition
+        do {
+            frames = try AudioPlayback.playableFrameLength(at: failed.audioURL)
+        } catch {
+            throw ContractFailure(
+                message: "durable capture frames were not playable after live speech degradation: "
+                    + String(describing: error)
+            )
+        }
+        guard failed.metadata.state == .failed,
+              failed.metadata.failureCode == .transcriptionFailed,
+              history.savedAudioRetryAvailable,
+              frames > 0 else {
+            throw ContractFailure(message: "live speech degradation lost the playable CAF or saved-audio retry")
+        }
+        let retried = try await coordinator.retryRecordingWithTranscription(
+            for: failed,
+            using: transcription,
+            store: store
+        )
+        guard retried.metadata.state == .completed,
+              try store.readRawText(for: retried) == "saved audio retry transcript" else {
+            throw ContractFailure(message: "saved-audio retry was not available after live speech degradation")
+        }
+    }
+
+    @MainActor
+    private static func testWriterFailureDistinctFromSpeechDegradation() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-writer-vs-speech-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(rootDirectory: root)
+        let speechCapture = FakeAudioCapture()
+        let speechTranscription = FakeTranscriptionController()
+        let speechCoordinator = DictationCoordinator()
+        _ = try await speechCoordinator.startRecordingWithTranscription(
+            using: speechCapture,
+            store: store,
+            transcription: speechTranscription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        speechTranscription.emitDegradation(.conversionFailed)
+        for _ in 0..<200 where speechCoordinator.liveTranscriptionDegradation == nil {
+            await Task.yield()
+        }
+        guard speechCoordinator.state == .recording,
+              speechCoordinator.lastFailureCode == .transcriptionFailed,
+              speechCapture.isActive else {
+            throw ContractFailure(message: "live speech degradation terminalized durable capture")
+        }
+        _ = try? await speechCoordinator.stopRecordingWithTranscription()
+
+        let writerStore = try SessionStore(
+            rootDirectory: root.appendingPathComponent("writer", isDirectory: true)
+        )
+        let writerCapture = FakeAudioCapture()
+        let writerCoordinator = DictationCoordinator()
+        let writerSession = try writerCoordinator.startRecording(using: writerCapture, store: writerStore)
+        writerCapture.sendBuffer()
+        writerCapture.emitFailure("audio file write failed: disk full")
+        for _ in 0..<200 where writerCoordinator.state == .recording {
+            await Task.yield()
+        }
+        let writerFailed = try writerStore.load(id: writerSession.id)
+        guard writerCoordinator.state == .failed,
+              writerFailed.metadata.failureCode == .audioWriteFailed,
+              writerFailed.metadata.failureCode != speechCoordinator.lastFailureCode
+                || speechCoordinator.lastFailureCode == .transcriptionFailed else {
+            throw ContractFailure(message: "durable-writer failure was not distinct from live-speech degradation")
+        }
+    }
+
+    private static func makeAnalyzerPCMBuffer(frames: Int = 256) throws -> AVAudioPCMBuffer {
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 16_000,
+            channels: 1,
+            interleaved: true
+        ), let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(frames)
+        ) else {
+            throw ContractFailure(message: "could not allocate analyzer fixture buffer")
+        }
+        buffer.frameLength = AVAudioFrameCount(frames)
+        return buffer
+    }
+
+    private static func makeAnalyzerInput(frames: Int = 256) throws -> (AnalyzerInput, Int) {
+        let buffer = try makeAnalyzerPCMBuffer(frames: frames)
+        return (AnalyzerInput(buffer: buffer), frames * MemoryLayout<Int16>.size)
+    }
+
+    private static func makeCaptureBuffer(frames: Int = 256) -> AudioCaptureBuffer {
+        let samples = [Float](repeating: 0.05, count: frames)
+        let data = samples.withUnsafeBytes { Data($0) }
+        return AudioCaptureBuffer(
+            frameCount: frames,
+            sampleRate: 16_000,
+            channelCount: 1,
+            pcmData: data
+        )
+    }
+
+    private static func testRetryFeedSaturatesOnStalledConsumer() async throws {
+        let generation = UUID()
+        let intake = AnalyzerInputBackpressure(generation: generation)
+        let service = TranscriptionService()
+        let feed = Task {
+            let pcmBuffer = try makeAnalyzerPCMBuffer()
+            for _ in 0..<(AnalyzerInputLimits.capacity + 8) {
+                try await service.enqueueRetryInputForTesting(
+                    pcmBuffer,
+                    intake: intake,
+                    operationID: generation
+                )
+            }
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        feed.cancel()
+        do {
+            try await feed.value
+            throw ContractFailure(message: "stalled retry feed completed without saturating")
+        } catch let error as TranscriptionError {
+            guard error == .liveQueueSaturated else {
+                throw ContractFailure(message: "stalled retry feed changed category: " + error.description)
+            }
+        } catch is CancellationError {
+            throw ContractFailure(message: "stalled retry feed cancelled without a typed saturation")
+        }
+        let metrics = intake.metrics
+        guard metrics.degradation == .queueSaturated,
+              metrics.highWaterDepth <= AnalyzerInputLimits.capacity,
+              metrics.highWaterBytes <= AnalyzerInputLimits.maxRetainedBytes,
+              metrics.enqueueAccepted <= AnalyzerInputLimits.capacity else {
+            throw ContractFailure(message: "stalled retry consumer grew past the analyzer-input bound")
+        }
+    }
+
+    private static func testRetryFeedWaitsForDrainingConsumer() async throws {
+        let generation = UUID()
+        let intake = AnalyzerInputBackpressure(generation: generation)
+        let service = TranscriptionService()
+        let pcmBuffer = try makeAnalyzerPCMBuffer()
+        let total = AnalyzerInputLimits.capacity + 16
+        let consumer = Task {
+            var count = 0
+            for await _ in intake.stream {
+                count += 1
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+            return count
+        }
+        for _ in 0..<total {
+            try await service.enqueueRetryInputForTesting(
+                pcmBuffer,
+                intake: intake,
+                operationID: generation
+            )
+        }
+        intake.finish()
+        let consumed = await consumer.value
+        let metrics = intake.metrics
+        guard consumed == total,
+              metrics.degradation == nil,
+              metrics.enqueueAccepted == total,
+              metrics.highWaterDepth <= AnalyzerInputLimits.capacity,
+              metrics.highWaterBytes <= AnalyzerInputLimits.maxRetainedBytes else {
+            throw ContractFailure(message: "retry of a CAF longer than the live bound failed while Speech was draining")
+        }
+    }
+
+    @MainActor
+    private static func testPreparingDegradationPersistsIntoRecording() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-preparing-degrade-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(rootDirectory: root)
+        let capture = FakeAudioCapture()
+        let transcription = FakeTranscriptionController()
+        transcription.emitDegradationOnStart = .analyzerFailed
+        let coordinator = DictationCoordinator()
+        let session = try await coordinator.startRecordingWithTranscription(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        for _ in 0..<200 where coordinator.liveTranscriptionDegradation == nil {
+            await Task.yield()
+        }
+        let loaded = try store.load(id: session.id)
+        guard coordinator.state == .recording,
+              coordinator.liveTranscriptionDegradation == .analyzerFailed,
+              session.metadata.failureCode == .transcriptionFailed
+                || loaded.metadata.failureCode == .transcriptionFailed,
+              loaded.metadata.failureReason == LiveTranscriptionDegradation.analyzerFailed.rawValue,
+              capture.isActive else {
+            throw ContractFailure(message: "preparing live degradation did not persist into recording metadata")
+        }
+    }
+
 }
 
 private final class UpdateCollector: @unchecked Sendable {
@@ -1286,6 +1773,7 @@ private final class FakeTranscriptionController: TranscriptionController, @unche
     private(set) var appendedBufferCount = 0
     var finalizedText = ""
     var finishError: Error?
+    var emitDegradationOnStart: LiveTranscriptionDegradation?
 
     func start(
         session: DictationSession,
@@ -1301,6 +1789,12 @@ private final class FakeTranscriptionController: TranscriptionController, @unche
         self.onUpdate = onUpdate
         isRunning = true
         appendedBufferCount = 0
+        if let emitDegradationOnStart {
+            emitDegradation(emitDegradationOnStart)
+            for _ in 0..<20 {
+                await Task.yield()
+            }
+        }
     }
 
     func append(_ buffer: AudioCaptureBuffer) {
@@ -1352,6 +1846,22 @@ private final class FakeTranscriptionController: TranscriptionController, @unche
 
     func emit(_ update: TranscriptionUpdate) {
         onUpdate?(update)
+    }
+
+    func emitDegradation(_ degradation: LiveTranscriptionDegradation) {
+        switch degradation {
+        case .queueSaturated:
+            finishError = TranscriptionError.liveQueueSaturated
+        case .continuationTerminated:
+            finishError = TranscriptionError.liveContinuationTerminated
+        case .conversionFailed:
+            finishError = TranscriptionError.liveConversionFailed
+        case .analyzerFailed:
+            finishError = TranscriptionError.analysisFailed("speech analyzer failed")
+        case .resultSequenceFailed:
+            finishError = TranscriptionError.analysisFailed("speech result sequence failed")
+        }
+        onUpdate?(TranscriptionUpdate.liveHealth(degradation))
     }
 
     private func persist() throws -> TranscriptionResult {
@@ -1672,8 +2182,11 @@ private final class BlockingRetryTranscriptionController: TranscriptionControlle
 private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
     private var onBuffer: (@Sendable (AudioCaptureBuffer) -> Void)?
     private var onFinish: (@Sendable () -> Void)?
+    private var onFailure: (@Sendable (String) -> Void)?
     private var outputDescriptor: AudioFileDescriptor?
+    private var writer: CAFWriter?
     private(set) var isActive = false
+    var writesCanonicalCAF = false
 
     func start(
         to descriptor: AudioFileDescriptor,
@@ -1683,16 +2196,21 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
         onFailure: @escaping @Sendable (String) -> Void
     ) throws {
         _ = onInterruption
-        _ = onFailure
         outputDescriptor = descriptor
         self.onBuffer = onBuffer
         self.onFinish = onFinish
+        self.onFailure = onFailure
         isActive = true
+        if writesCanonicalCAF,
+           let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) {
+            writer = try CAFWriter(descriptor: descriptor, format: format)
+        }
     }
 
     func stop() throws {
         isActive = false
-        outputDescriptor?.close()
+        writer?.close()
+        writer = nil
         outputDescriptor = nil
         onFinish?()
         onBuffer = nil
@@ -1701,10 +2219,24 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
 
     func cancel() {
         isActive = false
-        outputDescriptor?.close()
+        writer?.close()
+        writer = nil
         outputDescriptor = nil
         onBuffer = nil
         onFinish = nil
+    }
+
+    func writeCanonicalFrames(frameCount: Int = 1_600) throws {
+        guard let writer else {
+            throw ContractFailure(message: "canonical CAF writer was not attached to capture")
+        }
+        let samples: [Float] = (0..<frameCount).map { sin(Float($0) / 32.0) * 0.25 }
+        try samples.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else {
+                throw ContractFailure(message: "synthetic PCM pointer was missing")
+            }
+            try writer.writeCanonicalMono(samples: baseAddress, frameCount: samples.count)
+        }
     }
 
     func sendBuffer() {
@@ -1723,5 +2255,10 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
                 pcmData: Data([0, 0])
             )
         )
+    }
+
+    func emitFailure(_ reason: String) {
+        isActive = false
+        onFailure?(reason)
     }
 }

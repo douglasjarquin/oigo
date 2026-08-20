@@ -32,7 +32,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private struct Resources {
         let operationID: UUID
         let analyzer: SpeechAnalyzer
-        let inputContinuation: AsyncStream<AnalyzerInput>.Continuation
+        let intake: AnalyzerInputBackpressure
         let analysisTask: Task<Void, Never>
         let resultTask: Task<Void, Never>
     }
@@ -50,7 +50,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private var resolvedLocaleIdentifier: String?
     private var transcriber: DictationTranscriber?
     private var analyzer: SpeechAnalyzer?
-    private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
+    private var intake: AnalyzerInputBackpressure?
     private var analysisTask: Task<Void, Never>?
     private var resultTask: Task<Void, Never>?
     private var previewTask: Task<Void, Never>?
@@ -65,6 +65,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private var updateHandler: (@Sendable (TranscriptionUpdate) -> Void)?
     private var analysisError: TranscriptionError?
     private var lastError: TranscriptionError?
+    private var liveDegradation: LiveTranscriptionDegradation?
     private var operationID: UUID?
     private var acceptsResults = false
 
@@ -165,7 +166,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         let published = publishStartingState(
             module: nil,
             analyzer: nil,
-            inputContinuation: nil,
+            intake: nil,
             audioFormat: nil,
             session: nil,
             store: nil,
@@ -189,6 +190,137 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         instrumentation.mark(.transcriptionFinalized)
         await releaseResources()
         return snapshot
+    }
+
+    @_spi(Testing)
+    @discardableResult
+    public func startLiveIntakeFixture(
+        session: DictationSession? = nil,
+        store: SessionStore? = nil,
+        consumer: LiveIntakeFixtureConsumer = .neverRead,
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in }
+    ) throws -> UUID {
+        guard let operationID = beginStarting() else {
+            throw remember(.alreadyRunning)
+        }
+        guard let captureFormat = AVAudioFormat(
+            standardFormatWithSampleRate: 16_000,
+            channels: 1
+        ), let analyzerFormat = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 16_000,
+            channels: 1,
+            interleaved: true
+        ), let converter = AVAudioConverter(
+            from: captureFormat,
+            to: analyzerFormat
+        ) else {
+            finishStarting()
+            throw remember(.invalidCaptureFormat)
+        }
+        converter.primeMethod = .none
+        let intake = AnalyzerInputBackpressure(generation: operationID)
+        let analysisTask: Task<Void, Never>
+        switch consumer {
+        case .neverRead:
+            analysisTask = Task {}
+        case .slow(let nanoseconds):
+            analysisTask = Task { [stream = intake.stream] in
+                for await _ in stream {
+                    try? await Task.sleep(nanoseconds: nanoseconds)
+                }
+            }
+        case .terminateAfter(let count):
+            analysisTask = Task { [stream = intake.stream] in
+                var seen = 0
+                for await _ in stream {
+                    seen += 1
+                    if seen >= count {
+                        intake.finish()
+                        break
+                    }
+                }
+            }
+        }
+        let resultTask = Task {}
+        let transcriptStore = TranscriptStore()
+        let published = publishStartingState(
+            module: nil,
+            analyzer: nil,
+            intake: intake,
+            audioFormat: analyzerFormat,
+            session: session,
+            store: store,
+            updateHandler: onUpdate,
+            resultTask: resultTask,
+            analysisTask: analysisTask,
+            transcriptStore: transcriptStore,
+            audioConverter: converter
+        )
+        guard published else {
+            intake.finish()
+            analysisTask.cancel()
+            finishStarting()
+            throw remember(.cancelled)
+        }
+        resumeStartWaiters()
+        return operationID
+    }
+
+    @_spi(Testing)
+    public func stopLiveIntakeFixture() async {
+        let snapshot: (UUID?, Task<Void, Never>?, Task<Void, Never>?) = withLock {
+            (operationID, analysisTask, resultTask)
+        }
+        invalidateOperation()
+        intake?.finish()
+        _ = await snapshot.1?.value
+        _ = await snapshot.2?.value
+        await releaseResources(expectedOperationID: snapshot.0)
+    }
+
+    @_spi(Testing)
+    public func injectAnalyzerFailureForTesting() {
+        guard let operationID = withLock({ self.operationID }) else {
+            return
+        }
+        degrade(
+            .analyzerFailed,
+            error: .analysisFailed("speech analyzer failed"),
+            operationID: operationID
+        )
+    }
+
+    @_spi(Testing)
+    public func injectResultSequenceFailureForTesting() {
+        guard let operationID = withLock({ self.operationID }) else {
+            return
+        }
+        degrade(
+            .resultSequenceFailed,
+            error: .analysisFailed("speech result sequence failed"),
+            operationID: operationID
+        )
+    }
+
+    @_spi(Testing)
+    public func consumeFinalForTesting(
+        operationID: UUID,
+        text: String
+    ) {
+        let storePair: (TranscriptStore, DictationSession?, SessionStore?) = withLock {
+            (transcriptStore, session, sessionStore)
+        }
+        consume(
+            range: TranscriptionRange(startMilliseconds: 0, endMilliseconds: 100),
+            text: text,
+            isFinal: true,
+            persistCanonical: storePair.1 != nil && storePair.2 != nil,
+            operationID: operationID,
+            transcriptStore: storePair.0,
+            session: storePair.1,
+            store: storePair.2
+        )
     }
 
     public var configuredLocaleIdentifier: String {
@@ -215,6 +347,26 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         lock.lock()
         defer { lock.unlock() }
         return lastError
+    }
+
+    @_spi(Testing)
+    public var liveDegradationForTesting: LiveTranscriptionDegradation? {
+        withLock { liveDegradation }
+    }
+
+    @_spi(Testing)
+    public var analyzerInputMetricsForTesting: AnalyzerInputMetrics {
+        withLock { intake?.metrics ?? AnalyzerInputMetrics() }
+    }
+
+    @_spi(Testing)
+    public var analyzerInputCapacityForTesting: Int {
+        AnalyzerInputLimits.capacity
+    }
+
+    @_spi(Testing)
+    public var analyzerInputMaxRetainedBytesForTesting: Int {
+        AnalyzerInputLimits.maxRetainedBytes
     }
 
     @_spi(Testing)
@@ -294,7 +446,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         }
 
         var preparedAnalyzer: SpeechAnalyzer?
-        var preparedInputContinuation: AsyncStream<AnalyzerInput>.Continuation?
+        var preparedIntake: AnalyzerInputBackpressure?
         var startupGate: TranscriptionStartupGate?
         var startupResultTask: Task<Void, Never>?
         var startupAnalysisTask: Task<Void, Never>?
@@ -327,8 +479,8 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             }
             audioConverter.primeMethod = .none
 
-            let streamPair = AsyncStream<AnalyzerInput>.makeStream()
-            preparedInputContinuation = streamPair.continuation
+            let intake = AnalyzerInputBackpressure(generation: operationID)
+            preparedIntake = intake
             let analyzer = SpeechAnalyzer(
                 modules: [module],
                 options: SpeechAnalyzer.Options(
@@ -372,10 +524,14 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                     }
                 } catch is CancellationError {
                 } catch {
-                    self?.record(error: Self.map(error))
+                    self?.degrade(
+                        .resultSequenceFailed,
+                        error: Self.map(error),
+                        operationID: operationID
+                    )
                 }
             }
-            let analysisTask = Task { [weak self, analyzer, stream = streamPair.stream, startupStream = gate.analysisStream] in
+            let analysisTask = Task { [weak self, analyzer, stream = intake.stream, startupStream = gate.analysisStream] in
                 for await _ in startupStream {
                     break
                 }
@@ -383,7 +539,11 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                     try await analyzer.start(inputSequence: stream)
                 } catch is CancellationError {
                 } catch {
-                    self?.record(error: Self.map(error))
+                    self?.degrade(
+                        .analyzerFailed,
+                        error: Self.map(error),
+                        operationID: operationID
+                    )
                 }
             }
             startupResultTask = resultTask
@@ -392,7 +552,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             let published = publishStartingState(
                 module: module,
                 analyzer: analyzer,
-                inputContinuation: streamPair.continuation,
+                intake: intake,
                 audioFormat: audioFormat,
                 session: session,
                 store: store,
@@ -427,7 +587,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                     stage: .cancellation
                 )
             }
-            preparedInputContinuation?.finish()
+            preparedIntake?.finish()
             if let preparedAnalyzer {
                 _ = await cancelAnalyzer(
                     preparedAnalyzer,
@@ -436,21 +596,28 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 )
             }
             finishStarting()
-            await releaseResources()
+            await releaseResources(expectedOperationID: operationID)
             throw remember(Self.map(error))
         }
     }
 
     public func append(_ buffer: AudioCaptureBuffer) {
-        lock.lock()
-        guard lifecycle == .running,
-              let audioFormat,
-              let audioConverter,
-              let inputContinuation else {
-            lock.unlock()
+        let started = DispatchTime.now().uptimeNanoseconds
+        let context: (AVAudioFormat, AVAudioConverter, AnalyzerInputBackpressure, UUID)? = withLock {
+            guard lifecycle == .running,
+                  liveDegradation == nil,
+                  acceptsResults,
+                  let audioFormat,
+                  let audioConverter,
+                  let intake,
+                  let operationID else {
+                return nil
+            }
+            return (audioFormat, audioConverter, intake, operationID)
+        }
+        guard let (audioFormat, audioConverter, intake, operationID) = context else {
             return
         }
-        lock.unlock()
 
         do {
             let pcmBuffer = try makePCMBuffer(
@@ -458,10 +625,35 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 format: audioFormat,
                 converter: audioConverter
             )
-            inputContinuation.yield(AnalyzerInput(buffer: pcmBuffer))
+            intake.recordConversionLatency(DispatchTime.now().uptimeNanoseconds &- started)
+            let byteCount = Int(pcmBuffer.frameLength)
+                * Int(pcmBuffer.format.streamDescription.pointee.mBytesPerFrame)
+            switch intake.enqueue(
+                AnalyzerInput(buffer: pcmBuffer),
+                generation: operationID,
+                byteCount: byteCount
+            ) {
+            case .enqueued, .rejected:
+                break
+            case .saturated:
+                degrade(
+                    .queueSaturated,
+                    error: .liveQueueSaturated,
+                    operationID: operationID
+                )
+            case .terminated:
+                degrade(
+                    .continuationTerminated,
+                    error: .liveContinuationTerminated,
+                    operationID: operationID
+                )
+            }
         } catch {
-            record(error: Self.map(error))
-            inputContinuation.finish()
+            degrade(
+                .conversionFailed,
+                error: .liveConversionFailed,
+                operationID: operationID
+            )
         }
     }
 
@@ -470,7 +662,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             throw remember(.notRunning)
         }
 
-        resources.inputContinuation.finish()
+        resources.intake.finish()
         var finalError: TranscriptionError?
         do {
             try await BoundedOperation.run(
@@ -483,7 +675,10 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             }
         } catch {
             finalError = Self.map(error)
-            record(error: finalError ?? .analysisFailed(String(describing: error)))
+            record(
+                error: finalError ?? .analysisFailed(String(describing: error)),
+                operationID: resources.operationID
+            )
             invalidateOperation()
             _ = await cancelAnalyzer(
                 resources.analyzer,
@@ -497,7 +692,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             stage: .finalization
         )) {
             finalError = finalError ?? .timedOut(.finalization)
-            record(error: finalError ?? .timedOut(.finalization))
+            record(error: finalError ?? .timedOut(.finalization), operationID: resources.operationID)
             invalidateOperation()
         }
         if !(await boundedAwait(
@@ -506,7 +701,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             stage: .finalization
         )) {
             finalError = finalError ?? .timedOut(.finalization)
-            record(error: finalError ?? .timedOut(.finalization))
+            record(error: finalError ?? .timedOut(.finalization), operationID: resources.operationID)
             invalidateOperation()
         }
         if !(await finishPreviewTask(
@@ -514,7 +709,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             stage: .finalization
         )) {
             finalError = finalError ?? .timedOut(.finalization)
-            record(error: finalError ?? .timedOut(.finalization))
+            record(error: finalError ?? .timedOut(.finalization), operationID: resources.operationID)
             invalidateOperation()
         }
 
@@ -525,13 +720,15 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         let snapshot = transcriptStore.snapshot
         var finalizedText = snapshot.finalizedText
         var rawTextByteCount = Int64(Data(snapshot.finalizedText.utf8).count)
-        do {
-            let persisted = try persistCanonicalRawText()
-            finalizedText = persisted.text
-            rawTextByteCount = persisted.rawTextByteCount
-        } catch {
-            finalError = Self.map(error)
-            record(error: finalError ?? .persistenceFailed(String(describing: error)))
+        if finalError == nil {
+            do {
+                let persisted = try persistCanonicalRawText()
+                finalizedText = persisted.text
+                rawTextByteCount = persisted.rawTextByteCount
+            } catch {
+                finalError = Self.map(error)
+                record(error: finalError ?? .persistenceFailed(String(describing: error)), operationID: resources.operationID)
+            }
         }
         let result = TranscriptionResult(
             finalizedText: finalizedText,
@@ -540,7 +737,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         if finalError == nil {
             instrumentation.mark(.transcriptionFinalized)
         }
-        await releaseResources()
+        await releaseResources(expectedOperationID: resources.operationID)
         if let finalError {
             throw finalError
         }
@@ -577,7 +774,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             return nil
         }
 
-        resources.inputContinuation.finish()
+        resources.intake.finish()
         resources.analysisTask.cancel()
         resources.resultTask.cancel()
         invalidateOperation()
@@ -614,14 +811,14 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         do {
             persisted = try persistCanonicalRawText()
         } catch {
-            await releaseResources()
+            await releaseResources(expectedOperationID: resources.operationID)
             throw Self.map(error)
         }
         let result = TranscriptionResult(
             finalizedText: persisted.text,
             rawTextByteCount: persisted.rawTextByteCount
         )
-        await releaseResources()
+        await releaseResources(expectedOperationID: resources.operationID)
         if let cancellationError {
             throw cancellationError
         }
@@ -769,7 +966,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 }
             } catch is CancellationError {
             } catch {
-                self?.record(error: Self.map(error))
+                self?.record(error: Self.map(error), operationID: operationID)
             }
         }
 
@@ -805,20 +1002,29 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
 
         do {
             try Task.checkCancellation()
-            let streamPair = AsyncStream<AnalyzerInput>.makeStream()
-            try feedRetryStream(
-                reader: reader,
-                converter: audioConverter,
-                analyzerFormat: audioFormat,
-                continuation: streamPair.continuation
-            )
+            let intake = AnalyzerInputBackpressure(generation: operationID)
+            withLock { self.intake = intake }
             try await BoundedOperation.run(
                 operationID: operationID,
                 stage: .retry,
                 timeout: timeoutPolicy.budget(for: .retry),
                 registry: operationRegistry
             ) {
-                try await analyzer.start(inputSequence: streamPair.stream)
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        try await analyzer.start(inputSequence: intake.stream)
+                    }
+                    await Task.yield()
+                    try await self.feedRetryStream(
+                        reader: reader,
+                        converter: audioConverter,
+                        analyzerFormat: audioFormat,
+                        intake: intake,
+                        operationID: operationID
+                    )
+                    _ = try await group.next()
+                    group.cancelAll()
+                }
             }
             try checkCancellationRequested()
             try await BoundedOperation.run(
@@ -966,6 +1172,8 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             firstVolatileResultReported = false
             self.operationID = operationID
             acceptsResults = false
+            liveDegradation = nil
+            analysisError = nil
             return operationID
         }
     }
@@ -1020,30 +1228,33 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         guard lifecycle == .running,
               let operationID,
               let analyzer,
-              let inputContinuation,
+              let intake,
               let analysisTask,
               let resultTask else {
             return nil
         }
         lifecycle = .finishing
         self.analyzer = nil
-        self.inputContinuation = nil
+        self.intake = nil
         self.analysisTask = nil
         self.resultTask = nil
         return Resources(
             operationID: operationID,
             analyzer: analyzer,
-            inputContinuation: inputContinuation,
+            intake: intake,
             analysisTask: analysisTask,
             resultTask: resultTask
         )
     }
 
-    private func releaseResources() async {
-        withLock {
+    private func releaseResources(expectedOperationID: UUID? = nil) async {
+        let shouldRelease = withLock { () -> Bool in
+            if let expectedOperationID, let current = operationID, current != expectedOperationID {
+                return false
+            }
             transcriber = nil
             analyzer = nil
-            inputContinuation = nil
+            intake = nil
             analysisTask = nil
             resultTask = nil
             previewTask = nil
@@ -1054,10 +1265,15 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             audioConverter = nil
             updateHandler = nil
             analysisError = nil
+            liveDegradation = nil
             acceptsResults = false
             operationID = nil
             cancellationRequested = false
             lifecycle = .idle
+            return true
+        }
+        guard shouldRelease else {
+            return
         }
         resumeStartWaiters()
         await SpeechModels.endRetention()
@@ -1065,16 +1281,21 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     }
 
     private func clearRetryResources() {
-        withLock {
+        let intakeToFinish: AnalyzerInputBackpressure? = withLock {
+            let intakeToFinish = intake
             transcriber = nil
             analyzer = nil
+            intake = nil
             resultTask = nil
             session = nil
             sessionStore = nil
             analysisError = nil
+            liveDegradation = nil
             acceptsResults = false
             operationID = nil
+            return intakeToFinish
         }
+        intakeToFinish?.finish()
     }
 
     private func finishPreviewTask(
@@ -1220,7 +1441,11 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                         return
                     }
                 } catch {
-                    record(error: Self.map(error))
+                    degrade(
+                        .resultSequenceFailed,
+                        error: Self.map(error),
+                        operationID: operationID
+                    )
                 }
             }
             guard isCurrentOperation(operationID) else {
@@ -1252,7 +1477,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
     private func publishStartingState(
         module: DictationTranscriber?,
         analyzer: SpeechAnalyzer?,
-        inputContinuation: AsyncStream<AnalyzerInput>.Continuation?,
+        intake: AnalyzerInputBackpressure?,
         audioFormat: AVAudioFormat?,
         session: DictationSession?,
         store: SessionStore?,
@@ -1269,7 +1494,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             lifecycle = .running
             transcriber = module
             self.analyzer = analyzer
-            self.inputContinuation = inputContinuation
+            self.intake = intake
             self.audioFormat = audioFormat
             self.audioConverter = audioConverter
             self.session = session
@@ -1278,6 +1503,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             self.transcriptStore = transcriptStore
             analysisError = nil
             lastError = nil
+            liveDegradation = nil
             acceptsResults = true
             self.resultTask = resultTask
             self.analysisTask = analysisTask
@@ -1449,8 +1675,43 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         }
     }
 
-    private func record(error: TranscriptionError) {
+    private func degrade(
+        _ degradation: LiveTranscriptionDegradation,
+        error: TranscriptionError,
+        operationID: UUID
+    ) {
+        let notification: (
+            handler: (@Sendable (TranscriptionUpdate) -> Void)?,
+            intake: AnalyzerInputBackpressure?
+        )? = withLock {
+            guard self.operationID == operationID else {
+                return nil
+            }
+            if analysisError == nil {
+                analysisError = error
+            }
+            lastError = error
+            guard liveDegradation == nil else {
+                return nil
+            }
+            liveDegradation = degradation
+            acceptsResults = false
+            pendingPreview = nil
+            return (updateHandler, intake)
+        }
+        guard let notification else {
+            return
+        }
+        _ = notification.intake?.markDegraded(degradation)
+        notification.handler?(TranscriptionUpdate.liveHealth(degradation))
+    }
+
+    private func record(error: TranscriptionError, operationID: UUID? = nil) {
         lock.lock()
+        if let operationID, self.operationID != operationID {
+            lock.unlock()
+            return
+        }
         if analysisError == nil {
             analysisError = error
         }
@@ -1478,14 +1739,33 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
         return .analysisFailed(String(describing: error))
     }
 
+    @_spi(Testing)
+    public func feedRetryStreamForTesting(
+        reader: CAFReader,
+        converter: AVAudioConverter,
+        analyzerFormat: AVAudioFormat,
+        intake: AnalyzerInputBackpressure,
+        operationID: UUID
+    ) async throws {
+        try await feedRetryStream(
+            reader: reader,
+            converter: converter,
+            analyzerFormat: analyzerFormat,
+            intake: intake,
+            operationID: operationID
+        )
+    }
+
     private func feedRetryStream(
         reader: CAFReader,
         converter: AVAudioConverter,
         analyzerFormat: AVAudioFormat,
-        continuation: AsyncStream<AnalyzerInput>.Continuation
-    ) throws {
-        defer { continuation.finish() }
+        intake: AnalyzerInputBackpressure,
+        operationID: UUID
+    ) async throws {
+        defer { intake.finish() }
         while let source = try reader.read(frameCount: 1_024) {
+            try Task.checkCancellation()
             guard let samples = source.floatChannelData?.pointee else {
                 throw TranscriptionError.malformedAudio(
                     URL(fileURLWithPath: "<retry-caf>"),
@@ -1498,12 +1778,66 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 channelCount: 1,
                 pcmData: Data(bytes: samples, count: Int(source.frameLength) * MemoryLayout<Float>.size)
             )
-            let pcmBuffer = try makePCMBuffer(
-                captureBuffer,
-                format: analyzerFormat,
-                converter: converter
+            let pcmBuffer: AVAudioPCMBuffer
+            do {
+                pcmBuffer = try makePCMBuffer(
+                    captureBuffer,
+                    format: analyzerFormat,
+                    converter: converter
+                )
+            } catch {
+                throw TranscriptionError.liveConversionFailed
+            }
+            try await enqueueRetryInput(
+                pcmBuffer,
+                intake: intake,
+                operationID: operationID
             )
-            continuation.yield(AnalyzerInput(buffer: pcmBuffer))
+        }
+    }
+
+    @_spi(Testing)
+    public func enqueueRetryInputForTesting(
+        _ pcmBuffer: AVAudioPCMBuffer,
+        intake: AnalyzerInputBackpressure,
+        operationID: UUID
+    ) async throws {
+        try await enqueueRetryInput(
+            pcmBuffer,
+            intake: intake,
+            operationID: operationID
+        )
+    }
+
+    private func enqueueRetryInput(
+        _ pcmBuffer: AVAudioPCMBuffer,
+        intake: AnalyzerInputBackpressure,
+        operationID: UUID
+    ) async throws {
+        let byteCount = Int(pcmBuffer.frameLength)
+            * Int(pcmBuffer.format.streamDescription.pointee.mBytesPerFrame)
+        while true {
+            switch intake.enqueue(
+                AnalyzerInput(buffer: pcmBuffer),
+                generation: operationID,
+                byteCount: byteCount,
+                waitForCapacity: true
+            ) {
+            case .enqueued:
+                return
+            case .saturated:
+                do {
+                    try Task.checkCancellation()
+                    try await Task.sleep(for: .milliseconds(2))
+                } catch {
+                    _ = intake.markDegraded(.queueSaturated)
+                    throw TranscriptionError.liveQueueSaturated
+                }
+            case .terminated:
+                throw TranscriptionError.liveContinuationTerminated
+            case .rejected:
+                throw TranscriptionError.cancelled
+            }
         }
     }
 

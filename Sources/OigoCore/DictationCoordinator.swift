@@ -287,6 +287,17 @@ public final class DictationCoordinator {
     public private(set) var lastFailureCode: DictationFailureCode?
     public private(set) var lastTerminalMetadataWriteFailed = false
     public private(set) var activeConfiguration: DictationConfigurationSnapshot?
+    public private(set) var liveTranscriptionDegradation: LiveTranscriptionDegradation?
+
+    public var liveTranscriptionDegraded: Bool {
+        liveTranscriptionDegradation != nil
+    }
+
+    public var liveRecordingHUDDetail: String? {
+        liveTranscriptionDegraded
+            ? LiveTranscriptionHUDCopy.recordingPreservedRetryRequired
+            : nil
+    }
 
     public var state: DictationState {
         machine.state
@@ -436,6 +447,7 @@ public final class DictationCoordinator {
             lastFailureReason = nil
             lastFailureCode = nil
             lastTerminalMetadataWriteFailed = false
+            liveTranscriptionDegradation = nil
             diagnostics.record("audio capture started")
             return preparedSession
         } catch {
@@ -540,6 +552,7 @@ public final class DictationCoordinator {
         activeConfiguration = configuration ?? persistedSession.metadata.configurationSnapshot
         do {
             pendingTranscriptionTerminalState = nil
+            liveTranscriptionDegradation = nil
             _ = try apply(.start)
             activeCapture = capture
             activeTranscription = transcription
@@ -566,6 +579,12 @@ public final class DictationCoordinator {
                                       self?.acceptsCallbacks == true else {
                                     return
                                 }
+                                if let degradation = update.liveDegradation {
+                                    self?.noteLiveTranscriptionDegradation(
+                                        degradation,
+                                        operationID: operationID
+                                    )
+                                }
                                 onUpdate(update)
                             }
                         }
@@ -582,9 +601,11 @@ public final class DictationCoordinator {
             })
             try Task.checkCancellation()
             preparedSession = try store.update(
-                persistedSession,
+                currentSession ?? persistedSession,
                 state: .recording,
-                at: now
+                at: now,
+                failureReason: liveTranscriptionDegradation?.rawValue,
+                failureCode: liveTranscriptionDegradation != nil ? .transcriptionFailed : nil
             )
             _ = try apply(.prepared)
             currentSession = preparedSession
@@ -616,8 +637,10 @@ public final class DictationCoordinator {
                     }
                 }
             )
-            lastFailureReason = nil
-            lastFailureCode = nil
+            if liveTranscriptionDegradation == nil {
+                lastFailureReason = nil
+                lastFailureCode = nil
+            }
             lastTerminalMetadataWriteFailed = false
             diagnostics.record("audio capture and transcription started")
             return preparedSession
@@ -956,9 +979,11 @@ public final class DictationCoordinator {
                 releaseCapture()
                 throw error
             }
-            let reason = Self.failureReason(for: error)
+            let reason = liveTranscriptionDegradation?.rawValue ?? Self.failureReason(for: error)
             lastFailureReason = reason
-            lastFailureCode = DictationFailureCode.infer(from: reason)
+            lastFailureCode = liveTranscriptionDegradation != nil
+                ? .transcriptionFailed
+                : DictationFailureCode.infer(from: reason)
             capture.cancel()
             currentSession = persistTerminalState(
                 stoppingSession,
@@ -1393,6 +1418,35 @@ public final class DictationCoordinator {
             _ = try? apply(.fail)
             releaseCapture()
             throw error
+        }
+    }
+
+    private func noteLiveTranscriptionDegradation(
+        _ degradation: LiveTranscriptionDegradation,
+        operationID: UUID
+    ) {
+        guard activeOperationID == operationID, acceptsCallbacks else {
+            return
+        }
+        guard liveTranscriptionDegradation == nil else {
+            return
+        }
+        liveTranscriptionDegradation = degradation
+        lastFailureReason = degradation.rawValue
+        lastFailureCode = .transcriptionFailed
+        diagnostics.record("live transcription degraded: " + degradation.rawValue)
+        guard let session = currentSession,
+              let store = sessionStore,
+              [.preparing, .recording].contains(session.metadata.state) else {
+            return
+        }
+        if let updated = try? store.update(
+            session,
+            state: session.metadata.state,
+            failureReason: degradation.rawValue,
+            failureCode: .transcriptionFailed
+        ) {
+            currentSession = updated
         }
     }
 

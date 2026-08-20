@@ -74,6 +74,7 @@ final class StatusSurfaceController {
     func showRecording(
         startedAt: Date,
         preview: String,
+        detail: String? = nil,
         anchoredTo button: NSStatusBarButton?
     ) {
         displayGeneration &+= 1
@@ -92,7 +93,7 @@ final class StatusSurfaceController {
                 RunLoop.main.add(recordingTimer, forMode: .common)
             }
         }
-        recordingPreview = preview
+        recordingPreview = detail ?? preview
         refreshRecordingLabel()
         position(anchoredTo: button)
         panel.orderFront(nil)
