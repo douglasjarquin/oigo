@@ -21,7 +21,8 @@ private struct OigoIssue3ContractTests {
             ("quit cleanup from every state", testShutdownFromEveryState),
             ("idle policy", testIdlePolicy),
             ("app operation gate exclusive occupancy", testAppOperationGateExclusiveOccupancy),
-            ("stale gate completion is ignored", testAppOperationGateIgnoresStaleCompletion)
+            ("stale gate completion is ignored", testAppOperationGateIgnoresStaleCompletion),
+            ("onboarding stop does not require setup complete", testOnboardingStopDoesNotRequireSetupComplete)
         ]
 
         var failures = 0
@@ -208,6 +209,22 @@ private struct OigoIssue3ContractTests {
         gate.complete(second)
         guard gate.isIdle else {
             throw ContractFailure(message: "retry completion did not idle the gate")
+        }
+    }
+
+    @MainActor
+    private static func testOnboardingStopDoesNotRequireSetupComplete() throws {
+        let availability = AppCommandAvailability.evaluate(
+            coordinatorState: .recording,
+            occupiedKind: .onboardingTest,
+            acceptingCommands: true,
+            setupComplete: false,
+            storageReady: true
+        )
+        guard availability.canStopDictation,
+              availability.onboardingTestActionTitle == "Stop test dictation",
+              availability.canUseOnboardingTestAction else {
+            throw ContractFailure(message: "setup-incomplete onboarding Stop was not advertised")
         }
     }
 }

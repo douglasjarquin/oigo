@@ -23,8 +23,10 @@ private struct OigoIssue102ContractTests {
             ("retry override is explicit and recorded", testRetryOverrideIsRecorded),
             ("snapshot persists before first buffer", testSnapshotPersistsBeforeFirstBuffer),
             ("hotkey during retry is busy", testHotkeyDuringRetryIsBusy),
+            ("onboarding stop succeeds before setup completes", testOnboardingStopSucceedsBeforeSetupComplete),
             ("stale task completion is ignored", testStaleTaskCompletionIsIgnored),
             ("quit deadline returns without waiting forever", testQuitDeadlineReturns),
+            ("quit budget includes nested storage wait", testQuitBudgetIncludesNestedStorageWait),
             ("late child cannot mutate after quit fence", testLateChildCannotMutateAfterQuitFence),
             ("insertion success releases store references", testInsertionSuccessReleasesStore),
             ("insertion failure releases store references", testInsertionFailureReleasesStore),
@@ -301,6 +303,61 @@ private struct OigoIssue102ContractTests {
         }
     }
 
+    private static func testOnboardingStopSucceedsBeforeSetupComplete() async throws {
+        let startAvailability = AppCommandAvailability.evaluate(
+            coordinatorState: .idle,
+            occupiedKind: nil,
+            acceptingCommands: true,
+            setupComplete: false,
+            storageReady: true
+        )
+        guard startAvailability.canRunOnboardingTest,
+              startAvailability.canUseOnboardingTestAction,
+              startAvailability.onboardingTestActionTitle == "Start test dictation",
+              !startAvailability.canStartDictation,
+              !startAvailability.canStopDictation else {
+            throw ContractFailure(message: "onboarding test could not start before setup completed")
+        }
+
+        let coordinator = DictationCoordinator()
+        try coordinator.toggle()
+        guard coordinator.state == .recording else {
+            throw ContractFailure(message: "onboarding test did not enter recording")
+        }
+
+        let gate = AppOperationGate()
+        let handle = try succeed(gate.begin(.onboardingTest))
+        let running = gate.availability(
+            coordinatorState: coordinator.state,
+            setupComplete: false,
+            storageReady: true
+        )
+        guard running.canStopDictation,
+              running.canCancelOnboardingTest,
+              running.canUseOnboardingTestAction,
+              running.onboardingTestActionTitle == "Stop test dictation",
+              !running.canRunOnboardingTest,
+              !running.canStartDictation else {
+            throw ContractFailure(message: "onboarding Stop was not available while setup was incomplete")
+        }
+
+        var stopSucceeded = false
+        gate.run(handle, completes: true) {
+            try? coordinator.toggle()
+            stopSucceeded = coordinator.state == .finalizing
+        }
+        for _ in 0..<100 where gate.isCurrent(handle) {
+            await Task.yield()
+        }
+        guard stopSucceeded,
+              coordinator.state == .finalizing,
+              !gate.isCurrent(handle) else {
+            throw ContractFailure(
+                message: "onboarding Stop did not continue the current handle while setup was incomplete"
+            )
+        }
+    }
+
     private static func testStaleTaskCompletionIsIgnored() async throws {
         let gate = AppOperationGate()
         var staleMutated = false
@@ -339,11 +396,28 @@ private struct OigoIssue102ContractTests {
         }
         let elapsed = DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds
         guard outcome.repliedWithinBudget,
+              outcome.elapsedNanoseconds <= elapsed,
+              outcome.budgetNanoseconds == AppOperationTimeoutPolicy.testing.nanoseconds,
               elapsed < 1_000_000_000,
               outcome.fencedLoserCount >= 1,
               !gate.isAcceptingCommands,
               gate.begin(.dictation).isShutdownFailure else {
             throw ContractFailure(message: "quit waited for a noncooperative child or kept accepting commands")
+        }
+    }
+
+    private static func testQuitBudgetIncludesNestedStorageWait() async throws {
+        let gate = AppOperationGate()
+        let started = DispatchTime.now()
+        let outcome = await gate.finishShutdown(timeout: AppOperationTimeoutPolicy.testing.quit) {
+            try? await Task.sleep(for: .seconds(2))
+        }
+        let elapsed = DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds
+        guard outcome.repliedWithinBudget,
+              outcome.elapsedNanoseconds <= outcome.budgetNanoseconds
+                || outcome.elapsedNanoseconds < 1_000_000_000,
+              elapsed < 1_000_000_000 else {
+            throw ContractFailure(message: "nested storage wait extended quit past the monotonic budget")
         }
     }
 

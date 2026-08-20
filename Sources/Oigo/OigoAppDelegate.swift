@@ -177,8 +177,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     timeout: AppOperationTimeoutPolicy.production.quit
                 ) {
                     await self.finishApplicationTermination()
+                    await self.storageCapability.waitForCurrentAttempt()
                 }
-                await self.storageCapability.waitForCurrentAttempt()
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
             return .terminateLater
@@ -738,15 +738,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             shortcutBridge.reset()
             showBusy(reason)
         case .success:
-            break
+            updateSurface()
         }
     }
 
     private func finishDictation() {
         let availability = commandAvailability
-        guard availability.canStopDictation,
-              let handle = operationGate.currentHandle,
-              handle.kind.isDictationLifecycle else {
+        guard availability.canStopDictation else {
             if coordinator.state != .recording,
                operationGate.currentKind?.isDictationLifecycle == true {
                 finishRequestedAfterStart = true
@@ -760,9 +758,27 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             shortcutBridge.reset()
             return
         }
+        continueDictationStop()
+    }
+
+    private func continueDictationStop() {
+        if coordinator.state != .recording,
+           operationGate.currentKind?.isDictationLifecycle == true {
+            finishRequestedAfterStart = true
+            updateSurface()
+            return
+        }
+        guard coordinator.state == .recording,
+              let handle = operationGate.currentHandle,
+              handle.kind.isDictationLifecycle else {
+            shortcutBridge.reset()
+            updateSurface()
+            return
+        }
         operationGate.run(handle, completes: true) { @MainActor [weak self] in
             await self?.performFinishDictation()
         }
+        updateSurface()
     }
 
     private func cancelTestDictation() {
@@ -794,16 +810,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishTestDictation() {
         Task { @MainActor [weak self] in
-            guard let self else { return }
-            if self.coordinator.state != .recording,
-               self.operationGate.currentKind?.isDictationLifecycle == true {
-                self.finishRequestedAfterStart = true
-                return
-            }
-            guard self.coordinator.state == .recording else {
-                return
-            }
-            self.finishDictation()
+            self?.continueDictationStop()
         }
     }
 
@@ -1748,6 +1755,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             : nil
         settingsWindow?.setAppliesToNextDictation(availability.settingsApplyToNextDictation)
         historyWindow?.setCommandAvailability(availability)
+        onboardingWindow?.setCommandAvailability(availability)
         storageStatusItem?.title = displayedStorageHealth.statusMessage
         retryStorageItem?.isEnabled = !storageReady && storageCapability.health != .checking
         launchAtLoginItem?.state = launchAtLoginController.isEnabled ? .on : .off

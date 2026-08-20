@@ -91,6 +91,17 @@ public struct AppOperationTimeoutPolicy: Equatable, Sendable {
 
     @_spi(Testing)
     public static let testing = Self(quit: .milliseconds(50))
+
+    public var nanoseconds: UInt64 {
+        Self.nanoseconds(for: quit)
+    }
+
+    static func nanoseconds(for duration: Duration) -> UInt64 {
+        let components = duration.components
+        let seconds = UInt64(max(0, components.seconds))
+        let attoseconds = UInt64(max(0, components.attoseconds))
+        return seconds &* 1_000_000_000 &+ attoseconds / 1_000_000_000
+    }
 }
 
 public struct AppCommandAvailability: Equatable, Sendable {
@@ -100,9 +111,34 @@ public struct AppCommandAvailability: Equatable, Sendable {
     public let canCleanAgain: Bool
     public let canPasteAgain: Bool
     public let canRunOnboardingTest: Bool
+    public let canCancelOnboardingTest: Bool
     public let canRunMaintenance: Bool
     public let settingsApplyToNextDictation: Bool
     public let busyReason: AppOperationBusyReason?
+
+    public var isOnboardingTestActive: Bool {
+        canStopDictation
+            || canCancelOnboardingTest
+            || occupiedDictationLifecycle
+    }
+
+    public var onboardingTestActionTitle: String {
+        isOnboardingTestActive ? "Stop test dictation" : "Start test dictation"
+    }
+
+    public var canUseOnboardingTestAction: Bool {
+        if isOnboardingTestActive {
+            return canStopDictation || canCancelOnboardingTest
+        }
+        return canRunOnboardingTest
+    }
+
+    private var occupiedDictationLifecycle: Bool {
+        if case .occupied(let kind) = busyReason {
+            return kind.isDictationLifecycle
+        }
+        return false
+    }
 
     public static func evaluate(
         coordinatorState: DictationState,
@@ -127,14 +163,15 @@ public struct AppCommandAvailability: Equatable, Sendable {
             .cancelled,
             .interrupted
         ].contains(coordinatorState)
+        let dictationOccupied = occupiedKind?.isDictationLifecycle == true
         let canStart = setupComplete
             && idleForSessionWork
             && terminalCoordinator
+        // A live dictation-lifecycle handle is stoppable even before setup completes.
         let canStop = acceptingCommands
-            && setupComplete
             && storageReady
-            && coordinatorState == .recording
-            && (occupiedKind?.isDictationLifecycle ?? false)
+            && dictationOccupied
+            && (coordinatorState == .recording || coordinatorState == .preparing)
         let canHistoryAction = idleForSessionWork && terminalCoordinator
         return AppCommandAvailability(
             canStartDictation: canStart,
@@ -143,6 +180,7 @@ public struct AppCommandAvailability: Equatable, Sendable {
             canCleanAgain: canHistoryAction,
             canPasteAgain: canHistoryAction,
             canRunOnboardingTest: idleForSessionWork && terminalCoordinator,
+            canCancelOnboardingTest: acceptingCommands && occupiedKind == .onboardingTest,
             canRunMaintenance: canHistoryAction,
             settingsApplyToNextDictation: occupiedKind != nil,
             busyReason: busyReason
@@ -153,10 +191,19 @@ public struct AppCommandAvailability: Equatable, Sendable {
 public struct AppShutdownOutcome: Equatable, Sendable {
     public let repliedWithinBudget: Bool
     public let fencedLoserCount: Int
+    public let elapsedNanoseconds: UInt64
+    public let budgetNanoseconds: UInt64
 
-    public init(repliedWithinBudget: Bool, fencedLoserCount: Int) {
+    public init(
+        repliedWithinBudget: Bool,
+        fencedLoserCount: Int,
+        elapsedNanoseconds: UInt64 = 0,
+        budgetNanoseconds: UInt64 = 0
+    ) {
         self.repliedWithinBudget = repliedWithinBudget
         self.fencedLoserCount = fencedLoserCount
+        self.elapsedNanoseconds = elapsedNanoseconds
+        self.budgetNanoseconds = budgetNanoseconds
     }
 }
 
@@ -344,6 +391,8 @@ public final class AppOperationGate {
         timeout: Duration,
         work: @escaping @MainActor () async -> Void
     ) async -> AppShutdownOutcome {
+        let started = DispatchTime.now()
+        let budgetNanoseconds = AppOperationTimeoutPolicy.nanoseconds(for: timeout)
         let handle = enterShutdown()
         cancelCurrent()
         fencedLosers.values.forEach { $0.task.cancel() }
@@ -363,9 +412,12 @@ public final class AppOperationGate {
         } else {
             complete(handle)
         }
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds &- started.uptimeNanoseconds
         return AppShutdownOutcome(
-            repliedWithinBudget: true,
-            fencedLoserCount: fencedLosers.count
+            repliedWithinBudget: timedOut || elapsedNanoseconds <= budgetNanoseconds,
+            fencedLoserCount: fencedLosers.count,
+            elapsedNanoseconds: elapsedNanoseconds,
+            budgetNanoseconds: budgetNanoseconds
         )
     }
 
