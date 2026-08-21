@@ -13,7 +13,7 @@ enum OigoStatusSurfaceCommand {
 }
 
 @MainActor
-final class StatusSurfaceController: NSObject {
+final class StatusSurfaceController: NSObject, NSMenuDelegate {
     private let panel: OigoHUDPanel
     private let label: NSTextField
     private let detailLabel: NSTextField
@@ -93,6 +93,7 @@ final class StatusSurfaceController: NSObject {
         popover.animates = false
 
         utilityMenu.autoenablesItems = false
+        utilityMenu.delegate = self
         utilityMenu.addItem(commandItem(title: "History", action: #selector(openHistory)))
         utilityMenu.addItem(commandItem(title: "Settings", action: #selector(openSettings)))
         utilityMenu.addItem(.separator())
@@ -127,6 +128,11 @@ final class StatusSurfaceController: NSObject {
         }
         teardownStatusItemHandler()
         hide()
+        utilityMenu.delegate = nil
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        _ = menu
     }
 
     @objc private func handleStatusItemEvent() {

@@ -162,6 +162,7 @@ final class PopoverRoutingScenario: NativeUIContractScenario {
         }
     }
 
+
     private static func containsPrivateContent(_ object: Any) -> Bool {
         if let dictionary = object as? [String: Any] {
             let forbidden = Set([
