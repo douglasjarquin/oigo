@@ -23,6 +23,10 @@ final class AuditCompletenessScenario: NativeUIContractScenario {
             "AUDIT_SHA=a3c96c4f3d775ca9cd16ac55d5f68370fa24ab4d",
             "UNRELATED_WORKFLOW_RENAME=#140 ci: drop \"master\" from project workflow"
         ]
+        let requiredOwnerMarkers = [
+            "OnboardingWindowController.startTest", "lines 719-742", "OigoAppDelegate",
+            "beginOnboardingProductionTest(generation:)", "applyTestCompletion(generation:sessionID:report:)"
+        ]
         let requiredRows = [
             "status-idle", "status-activity", "status-recording", "status-attention",
             "menu-start-stop", "menu-settings-history-quit", "popover-ready", "popover-recording",
@@ -38,7 +42,9 @@ final class AuditCompletenessScenario: NativeUIContractScenario {
             "shutdown", "stale-generation"
         ]
         guard requiredMetadata.allSatisfy(audit.contains),
-              requiredRows.allSatisfy({ audit.contains("| " + $0 + " |") }) else {
+              requiredRows.allSatisfy({ audit.contains("| " + $0 + " |") }),
+              requiredOwnerMarkers.allSatisfy(audit.contains),
+              !audit.contains("startOnboardingTest") else {
             throw ContractInputError(category: "audit-missing-required-contract")
         }
         guard !audit.contains("NATIVE PASS") else {
