@@ -131,17 +131,6 @@ final class PopoverRoutingScenario: NativeUIContractScenario {
         }
     }
 
-    private static func appearsInOrder(_ needles: [String], in source: String) -> Bool {
-        var remainder = source[source.startIndex...]
-        for needle in needles {
-            guard let range = remainder.range(of: needle) else {
-                return false
-            }
-            remainder = remainder[range.upperBound...]
-        }
-        return true
-    }
-
     private static func validateGalleryRouteEvidenceSource() throws {
         let repository = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         let galleryURL = repository.appendingPathComponent(
@@ -156,12 +145,23 @@ final class PopoverRoutingScenario: NativeUIContractScenario {
               !gallery.contains("window.orderFront(nil)"),
               !gallery.contains("window.orderOut(nil)"),
               gallery.contains("recordHostObservation()"),
+              !gallery.contains("assertion="),
               gallery.contains("entries=History,Settings,separator,Quit"),
               gallery.contains("activation-policy=") else {
             throw ContractInputError(category: "invalid-gallery-activation-evidence")
         }
     }
 
+    private static func appearsInOrder(_ needles: [String], in source: String) -> Bool {
+        var remainder = source[source.startIndex...]
+        for needle in needles {
+            guard let range = remainder.range(of: needle) else {
+                return false
+            }
+            remainder = remainder[range.upperBound...]
+        }
+        return true
+    }
 
     private static func containsPrivateContent(_ object: Any) -> Bool {
         if let dictionary = object as? [String: Any] {
