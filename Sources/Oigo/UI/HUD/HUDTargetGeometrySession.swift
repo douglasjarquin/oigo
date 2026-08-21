@@ -13,6 +13,15 @@ public final class HUDTargetGeometrySession {
 
     @discardableResult
     public func beginDictation(generation: UInt64) -> HUDTargetGeometrySnapshot? {
+        beginCapture(generation: generation)
+    }
+
+    @discardableResult
+    public func beginPasteAgain(generation: UInt64) -> HUDTargetGeometrySnapshot? {
+        beginCapture(generation: generation)
+    }
+
+    private func beginCapture(generation: UInt64) -> HUDTargetGeometrySnapshot? {
         guard generation > 0 else { return nil }
         if currentSnapshot?.generation == generation {
             return currentSnapshot

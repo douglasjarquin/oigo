@@ -299,6 +299,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "OigoNativeUIContractTests",
+            dependencies: ["OigoCore", "OigoInsertion"],
             path: "Tests/OigoNativeUIContractTests"
         ),
         .executableTarget(
