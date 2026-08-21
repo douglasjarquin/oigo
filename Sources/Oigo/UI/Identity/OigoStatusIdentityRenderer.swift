@@ -2,13 +2,22 @@ import AppKit
 
 @MainActor
 public final class OigoStatusIdentityRenderer {
+    public typealias SourceImageProvider = @MainActor () -> NSImage?
+
     private weak var button: NSButton?
     private var artwork: OigoStatusIdentityArtwork?
     private var animationTimer: Timer?
     private var progressPhase: CGFloat = 0
     private var isShutDown = false
+    private let sourceImageProvider: SourceImageProvider
 
-    public init() {}
+    public init(
+        sourceImageProvider: @escaping SourceImageProvider = {
+            NSImage(named: NSImage.Name("OigoMenuBar"))
+        }
+    ) {
+        self.sourceImageProvider = sourceImageProvider
+    }
 
     public var activeAnimationCount: Int {
         animationTimer?.isValid == true ? 1 : 0
@@ -63,10 +72,13 @@ public final class OigoStatusIdentityRenderer {
         button.title = ""
         button.imagePosition = .imageOnly
         button.imageScaling = .scaleProportionallyDown
-        button.image = artwork.image(
-            environment: environment(for: button),
-            progressPhase: progressPhase
-        )
+        button.image = sourceImageProvider().map {
+            artwork.image(
+                environment: environment(for: button),
+                sourceImage: $0,
+                progressPhase: progressPhase
+            )
+        }
         button.setAccessibilityElement(true)
         button.setAccessibilityRole(.button)
         button.setAccessibilityLabel(artwork.accessibilityLabel)

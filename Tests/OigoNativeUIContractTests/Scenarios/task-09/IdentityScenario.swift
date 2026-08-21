@@ -22,11 +22,6 @@ final class IdentityScenario: NativeUIContractScenario {
         let status: String
         let terminal: Bool
         let visible: Bool
-        let variant: String
-        let shape: String
-        let color: String
-        let template: Bool
-        let animated: Bool
         let value: String
         let help: String
     }
@@ -61,6 +56,14 @@ final class IdentityScenario: NativeUIContractScenario {
         try validateSourceBoundary([descriptorSource, rendererSource])
 
         let presentationRoot = sourceRoot.appendingPathComponent("UI/Presentation", isDirectory: true)
+        let assetRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("Oigo/Assets.xcassets/OigoMenuBar.imageset", isDirectory: true)
+        let asset1x = assetRoot.appendingPathComponent("oigo-menubar.png")
+        let asset2x = assetRoot.appendingPathComponent("oigo-menubar@2x.png")
+        guard FileManager.default.fileExists(atPath: asset1x.path),
+              FileManager.default.fileExists(atPath: asset2x.path) else {
+            throw ContractInputError(category: "missing-authoritative-identity-asset")
+        }
         let output = try runCompiledContract(
             sources: [
                 presentationRoot.appendingPathComponent("OigoPresentationInputs.swift"),
@@ -68,7 +71,9 @@ final class IdentityScenario: NativeUIContractScenario {
                 descriptorSource,
                 rendererSource
             ],
-            fixtureURL: fixtureURL
+            fixtureURL: fixtureURL,
+            asset1x: asset1x,
+            asset2x: asset2x
         )
         guard output.contains("IDENTITY states=\(fixture.states.count)"),
               output.contains("animation-count=0"),
@@ -121,8 +126,8 @@ final class IdentityScenario: NativeUIContractScenario {
             print("PASS decoy-only")
             throw ContractInputError(category: "misleading-success-output")
         }
-        guard Set(fixture.states.map(\.variant)).isSuperset(of: [
-            "idle", "processing", "recording", "attention"
+        guard Set(fixture.states.map(\.mark)) == Set([
+            "outline", "activity", "recording", "attention"
         ]), fixture.transitions.map(\.event) == [
             "replacement", "terminalization", "item-removal", "shutdown",
             "interruption", "interruption"
@@ -162,7 +167,12 @@ final class IdentityScenario: NativeUIContractScenario {
         }
     }
 
-    private static func runCompiledContract(sources: [URL], fixtureURL: URL) throws -> String {
+    private static func runCompiledContract(
+        sources: [URL],
+        fixtureURL: URL,
+        asset1x: URL,
+        asset2x: URL
+    ) throws -> String {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("oigo-native-ui-redesign.task09." + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -175,7 +185,10 @@ final class IdentityScenario: NativeUIContractScenario {
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
             arguments: ["swiftc"] + sources.map(\.path) + [driver.path, "-o", executable.path]
         )
-        let data = try runProcess(executable: executable, arguments: [fixtureURL.path])
+        let data = try runProcess(
+            executable: executable,
+            arguments: [fixtureURL.path, asset1x.path, asset2x.path]
+        )
         guard let output = String(data: data, encoding: .utf8) else {
             throw ContractInputError(category: "unexpected-contract-output")
         }
@@ -223,11 +236,6 @@ final class IdentityScenario: NativeUIContractScenario {
         let status: String
         let terminal: Bool
         let visible: Bool
-        let variant: String
-        let shape: String
-        let color: String
-        let template: Bool
-        let animated: Bool
         let value: String
         let help: String
     }
@@ -262,28 +270,196 @@ final class IdentityScenario: NativeUIContractScenario {
         )
     }
 
+    func failSemantic(_ message: String) -> Never {
+        FileHandle.standardError.write(Data(("SEMANTIC_FAIL " + message + "\n").utf8))
+        exit(20)
+    }
+
+    func requireSemantic(_ condition: @autoclosure () -> Bool, _ message: String) {
+        if !condition() { failSemantic(message) }
+    }
+
+    @MainActor
+    func authoritativeAsset(oneX: URL, twoX: URL) throws -> NSImage {
+        let image = NSImage(size: NSSize(width: 16, height: 22))
+        for url in [oneX, twoX] {
+            guard let representation = NSBitmapImageRep(data: try Data(contentsOf: url)) else {
+                failSemantic("authoritative-asset-unreadable")
+            }
+            representation.size = NSSize(width: 16, height: 22)
+            image.addRepresentation(representation)
+        }
+        return image
+    }
+
+    @MainActor
+    func rasterize(_ image: NSImage, pixels: Int = 18) -> NSBitmapImageRep {
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixels,
+            pixelsHigh: pixels,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { failSemantic("bitmap-allocation") }
+        bitmap.size = NSSize(width: 18, height: 18)
+        guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            failSemantic("bitmap-context")
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        NSColor.clear.setFill()
+        NSRect(x: 0, y: 0, width: 18, height: 18).fill()
+        image.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18))
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+        return bitmap
+    }
+
+    @MainActor
+    func expectedEarMask(_ asset: NSImage) -> NSBitmapImageRep {
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 18,
+            pixelsHigh: 18,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ), let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            failSemantic("expected-mask-allocation")
+        }
+        bitmap.size = NSSize(width: 18, height: 18)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        NSColor.clear.setFill()
+        NSRect(x: 0, y: 0, width: 18, height: 18).fill()
+        asset.draw(in: NSRect(x: 1.5, y: 0.5, width: 13, height: 17))
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+        return bitmap
+    }
+
+    func isOpaque(_ color: NSColor?) -> Bool {
+        (color?.alphaComponent ?? 0) > 0.2
+    }
+
+    func isRed(_ color: NSColor?) -> Bool {
+        guard let color = color?.usingColorSpace(.deviceRGB) else { return false }
+        return color.redComponent > 0.65
+            && color.redComponent > color.greenComponent * 1.45
+            && color.blueComponent < 0.45
+            && color.alphaComponent > 0.2
+    }
+
+    func isOrange(_ color: NSColor?) -> Bool {
+        guard let color = color?.usingColorSpace(.deviceRGB) else { return false }
+        return color.redComponent > 0.7
+            && color.greenComponent > 0.25
+            && color.greenComponent < 0.8
+            && color.blueComponent < 0.3
+            && color.alphaComponent > 0.2
+    }
+
+    @MainActor
+    func validateApprovedPixels(
+        asset: NSImage,
+        idle: NSImage,
+        recording: NSImage,
+        attention: NSImage,
+        retina: NSImage
+    ) {
+        let expected = expectedEarMask(asset)
+        let idleBitmap = rasterize(idle)
+        let recordingBitmap = rasterize(recording)
+        let attentionBitmap = rasterize(attention)
+        var expectedCount = 0
+        var maskDifference = 0
+        var redEarCount = 0
+        var recordingBadgeCount = 0
+        var attentionBadgeCount = 0
+        var attentionLowerOrangeCount = 0
+        for y in 0..<18 {
+            for x in 0..<18 {
+                let expectedOpaque = isOpaque(expected.colorAt(x: x, y: y))
+                let idleOpaque = isOpaque(idleBitmap.colorAt(x: x, y: y))
+                if expectedOpaque { expectedCount += 1 }
+                if expectedOpaque != idleOpaque { maskDifference += 1 }
+                if expectedOpaque, x < 12, isRed(recordingBitmap.colorAt(x: x, y: y)) {
+                    redEarCount += 1
+                }
+                if x >= 12, y >= 11, isRed(recordingBitmap.colorAt(x: x, y: y)) {
+                    recordingBadgeCount += 1
+                }
+                if x >= 12, y <= 6, isOrange(attentionBitmap.colorAt(x: x, y: y)) {
+                    attentionBadgeCount += 1
+                }
+                if x >= 9, y >= 9, isOrange(attentionBitmap.colorAt(x: x, y: y)) {
+                    attentionLowerOrangeCount += 1
+                }
+            }
+        }
+        requireSemantic(expectedCount > 35, "authoritative-mask-empty")
+        requireSemantic(maskDifference <= 14, "ear-o-mask-diverged")
+        requireSemantic(redEarCount * 4 >= expectedCount * 3, "recording-ear-not-red")
+        requireSemantic(recordingBadgeCount >= 5, "recording-bottom-dot-missing")
+        requireSemantic(attentionBadgeCount >= 5, "attention-top-dot-missing")
+        requireSemantic(attentionLowerOrangeCount <= 2, "attention-substitute-shape-present")
+        guard let retinaBitmap = retina.representations
+                .compactMap({ $0 as? NSBitmapImageRep })
+                .first(where: { $0.pixelsWide == 36 && $0.pixelsHigh == 36 }) else {
+            failSemantic("retina-not-36x36")
+        }
+        var retinaOpaqueCount = 0
+        for y in 0..<36 {
+            for x in 0..<36 where isOpaque(retinaBitmap.colorAt(x: x, y: y)) {
+                retinaOpaqueCount += 1
+            }
+        }
+        requireSemantic(
+            retinaOpaqueCount * 2 >= expectedCount * 5,
+            "retina-content-not-2x-\(retinaOpaqueCount)-of-\(expectedCount * 4)"
+        )
+    }
+
     @MainActor
     func runContract() throws {
         let fixtureURL = URL(fileURLWithPath: CommandLine.arguments[1])
+        let asset = try authoritativeAsset(
+            oneX: URL(fileURLWithPath: CommandLine.arguments[2]),
+            twoX: URL(fileURLWithPath: CommandLine.arguments[3])
+        )
         let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: fixtureURL))
         let button = NSButton(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
-        let renderer = OigoStatusIdentityRenderer()
+        let renderer = OigoStatusIdentityRenderer(sourceImageProvider: { asset })
         var typedStates: [String: OigoPresentationState] = [:]
 
     for expected in fixture.states {
         guard let state = presentationState(expected) else { exit(2) }
-        typedStates[expected.variant] = state
         let artwork = OigoStatusIdentityArtwork(state: state)
-        guard artwork.variant.rawValue == expected.variant,
-              artwork.shapeRole.rawValue == expected.shape,
-              artwork.colorRole.rawValue == expected.color,
-              artwork.isTemplate == expected.template,
-              artwork.animatesWhenVisible == expected.animated,
+        let expectedVariant: String = switch expected.mark {
+        case "activity": "processing"
+        case "recording": "recording"
+        case "attention": "attention"
+        default: "idle"
+        }
+        typedStates[expectedVariant] = state
+        guard artwork.variant.rawValue == expectedVariant,
+              artwork.isTemplate == (expectedVariant == "idle"),
+              artwork.animatesWhenVisible == (expectedVariant == "processing" && !expected.terminal),
               artwork.accessibilityLabel == "Oigo",
               artwork.accessibilityValue == expected.value,
               artwork.accessibilityHelp == expected.help else { exit(3) }
         renderer.render(state, on: button, isVisible: expected.visible)
-        guard renderer.activeAnimationCount == (expected.animated && expected.visible ? 1 : 0),
+        guard renderer.activeAnimationCount
+                == (artwork.animatesWhenVisible && expected.visible ? 1 : 0),
               button.accessibilityLabel() == "Oigo",
               button.accessibilityValue() as? String == expected.value,
               button.accessibilityHelp() == expected.help,
@@ -348,9 +524,44 @@ final class IdentityScenario: NativeUIContractScenario {
     }
 
     for environment in OigoStatusIdentityEnvironment.contractAppearances {
-        guard OigoStatusIdentityArtwork(state: idle).image(environment: environment).size
+        guard OigoStatusIdentityArtwork(state: idle).image(
+            environment: environment,
+            sourceImage: asset
+        ).size
                 == NSSize(width: 18, height: 18) else { exit(14) }
     }
+    let semanticEnvironment = OigoStatusIdentityEnvironment(
+        appearanceName: .aqua,
+        increasedContrast: false,
+        active: true,
+        scaleFactor: 1
+    )
+    let retinaEnvironment = OigoStatusIdentityEnvironment(
+        appearanceName: .darkAqua,
+        increasedContrast: true,
+        active: true,
+        scaleFactor: 2
+    )
+    guard let attention = typedStates["attention"] else { exit(21) }
+    validateApprovedPixels(
+        asset: asset,
+        idle: OigoStatusIdentityArtwork(state: idle).image(
+            environment: semanticEnvironment,
+            sourceImage: asset
+        ),
+        recording: OigoStatusIdentityArtwork(state: recording).image(
+            environment: semanticEnvironment,
+            sourceImage: asset
+        ),
+        attention: OigoStatusIdentityArtwork(state: attention).image(
+            environment: semanticEnvironment,
+            sourceImage: asset
+        ),
+        retina: OigoStatusIdentityArtwork(state: idle).image(
+            environment: retinaEnvironment,
+            sourceImage: asset
+        )
+    )
     if fixture.captureArtwork == true {
         let captureRoot = fixtureURL.deletingLastPathComponent()
             .appendingPathComponent("captures", isDirectory: true)
@@ -360,16 +571,26 @@ final class IdentityScenario: NativeUIContractScenario {
             let artwork = OigoStatusIdentityArtwork(state: state)
             for (appearanceIndex, environment) in
                 OigoStatusIdentityEnvironment.contractAppearances.enumerated() {
-                let phases: [CGFloat] = expected.variant == "processing" ? [0, 0.125, 0.25] : [0]
+                let variant = artwork.variant.rawValue
+                let phases: [CGFloat] = variant == "processing" ? [0, 0.125, 0.25] : [0]
                 for (phaseIndex, phase) in phases.enumerated() {
-                    let image = artwork.image(environment: environment, progressPhase: phase)
-                    guard let tiff = image.tiffRepresentation,
-                          let bitmap = NSBitmapImageRep(data: tiff),
+                    let image = artwork.image(
+                        environment: environment,
+                        sourceImage: asset,
+                        progressPhase: phase
+                    )
+                    let expectedPixels = Int((18 * environment.scaleFactor).rounded())
+                    guard let bitmap = image.representations
+                            .compactMap({ $0 as? NSBitmapImageRep })
+                            .first(where: {
+                                $0.pixelsWide == expectedPixels && $0.pixelsHigh == expectedPixels
+                            }),
                           let png = bitmap.representation(using: .png, properties: [:]) else {
                         exit(19)
                     }
-                    let name = expected.variant + "-appearance-\(appearanceIndex)"
-                        + "-phase-\(phaseIndex).png"
+                    let scale = environment.scaleFactor == 2 ? "2x" : "1x"
+                    let name = variant + "-appearance-\(appearanceIndex)-scale-\(scale)"
+                        + "-\(expectedPixels)x\(expectedPixels)-phase-\(phaseIndex).png"
                     try png.write(to: captureRoot.appendingPathComponent(name), options: .atomic)
                 }
             }
