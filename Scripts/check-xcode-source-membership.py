@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-"""Fail unless each production Swift file is compiled into the matching Xcode target."""
-
 import json
 import os
 import subprocess
@@ -18,9 +16,15 @@ REQUIRED_PRODUCTION_ROOTS = {
 OPTIONAL_DECLARED_ROOTS = {
     "Sources/MacUtilityUI": "MacUtilityUI",
     "Sources/OigoUIGallery": "OigoUIGallery",
+    "Tests/OigoNativeUIContractTests": "OigoNativeUIContractTests",
 }
 
 DECLARED_ROOTS = REQUIRED_PRODUCTION_ROOTS | OPTIONAL_DECLARED_ROOTS
+
+EXPECTED_RESOURCES = {
+    "Oigo": {"Oigo/Assets.xcassets"},
+    "OigoUIGallery": set(),
+}
 
 
 def load_objects(pbxproj):
@@ -134,6 +138,31 @@ def compiled_paths_by_target(objects, repo_root):
     return compiled
 
 
+def resource_paths_by_target(objects):
+    parents = group_parents(objects)
+    cache = {}
+    resources = {}
+    for obj in objects.values():
+        if obj.get("isa") != "PBXNativeTarget":
+            continue
+        target_name = obj.get("name")
+        for phase_id in obj.get("buildPhases", []):
+            phase = objects.get(phase_id, {})
+            if phase.get("isa") != "PBXResourcesBuildPhase":
+                continue
+            resources.setdefault(target_name, set())
+            for build_file_id in phase.get("files", []):
+                build_file = objects.get(build_file_id, {})
+                file_ref_id = build_file.get("fileRef")
+                path = file_repo_path(objects, file_ref_id, parents, cache)
+                if not path:
+                    raise SystemExit(
+                        "Xcode target %s has an unresolved resource" % target_name
+                    )
+                resources[target_name].add(path)
+    return resources
+
+
 def disk_paths_by_target(repo_root):
     expected = {}
     for relative_root, target in DECLARED_ROOTS.items():
@@ -164,6 +193,7 @@ def main():
     pbxproj = os.path.join(repo_root, "Oigo.xcodeproj/project.pbxproj")
     objects = load_objects(pbxproj)
     compiled = compiled_paths_by_target(objects, repo_root)
+    resources = resource_paths_by_target(objects)
     expected = disk_paths_by_target(repo_root)
     problems = []
     for target in sorted(set(compiled) | set(expected)):
@@ -186,9 +216,22 @@ def main():
                 "%s compiles paths not in its production root: %s"
                 % (target, ", ".join(extra))
             )
+    for target, want in EXPECTED_RESOURCES.items():
+        have = resources.get(target, set())
+        missing = sorted(want - have)
+        extra = sorted(have - want)
+        if missing:
+            problems.append(
+                "%s missing Xcode resources: %s" % (target, ", ".join(missing))
+            )
+        if extra:
+            problems.append(
+                "%s contains undeclared Xcode resources: %s"
+                % (target, ", ".join(extra))
+            )
     if problems:
         raise SystemExit("; ".join(problems))
-    print("GREEN: every production source is compiled into the correct Xcode target")
+    print("GREEN: declared sources and production resources match Xcode targets")
 
 
 if __name__ == "__main__":
