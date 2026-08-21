@@ -1,0 +1,22 @@
+{
+  "scenario": "hud-baseline",
+  "fixture": "legacy-status-surface",
+  "processingStates": [
+    "Finalizing",
+    "Cleaning",
+    "Pasting",
+    "Paste attempted",
+    "Pasted",
+    "Copied",
+    "Dictation completed; paste failed",
+    "Failed"
+  ],
+  "recordingTimerInterval": 0.2,
+  "ordinaryDismissalSeconds": 1.8,
+  "panelCanBecomeKey": false,
+  "panelCanBecomeMain": false,
+  "previewMaxUpdatesPerSecond": 5,
+  "dirty": false,
+  "reportedSuccess": true,
+  "processExitStatus": 0
+}
