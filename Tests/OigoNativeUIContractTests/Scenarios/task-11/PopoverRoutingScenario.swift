@@ -34,6 +34,7 @@ final class PopoverRoutingScenario: NativeUIContractScenario {
         let fixture = try loadFixture(arguments.fixtureRoot.appendingPathComponent("fixture.json"))
         try validate(fixture)
         try validateProductSource()
+        try validateGalleryRouteEvidenceSource()
         print(
             "PASS popover-routing fixture=" + fixture.name
                 + " routes=3 menu=history,settings,separator,quit surfaces=exclusive"
@@ -124,6 +125,27 @@ final class PopoverRoutingScenario: NativeUIContractScenario {
               delegate.contains("statusSurface.teardown()"),
               !delegate.contains("item.menu = menu") else {
             throw ContractInputError(category: "delegate-routing-seam-missing")
+        }
+    }
+
+    private static func validateGalleryRouteEvidenceSource() throws {
+        let repository = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let galleryURL = repository.appendingPathComponent(
+            "Sources/OigoUIGallery/Scenarios/task-11/PopoverRoutingGalleryScenario.swift"
+        )
+        guard let gallery = try? String(contentsOf: galleryURL, encoding: .utf8) else {
+            throw ContractInputError(category: "unreadable-gallery-routing-source")
+        }
+        guard gallery.contains("NSApp.setActivationPolicy(.accessory)"),
+              !gallery.contains("NSApp.setActivationPolicy(.regular)"),
+              !gallery.contains("NSApp.activate(ignoringOtherApps: true)"),
+              !gallery.contains("window.orderFront(nil)"),
+              !gallery.contains("window.orderOut(nil)"),
+              gallery.contains("recordHostObservation()"),
+              !gallery.contains("assertion="),
+              gallery.contains("entries=History,Settings,separator,Quit"),
+              gallery.contains("activation-policy=") else {
+            throw ContractInputError(category: "invalid-gallery-activation-evidence")
         }
     }
 

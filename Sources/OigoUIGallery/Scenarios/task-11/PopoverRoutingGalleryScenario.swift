@@ -12,7 +12,6 @@ final class PopoverRoutingGalleryScenario: GalleryScenario {
         let window = PopoverRoutingHostWindow(surface: surface)
         surface.install()
         DispatchQueue.main.async {
-            window.orderOut(nil)
             NSApp.setActivationPolicy(.accessory)
             NSApp.deactivate()
             surface.probeInactivePrimaryRoute()
@@ -20,10 +19,7 @@ final class PopoverRoutingGalleryScenario: GalleryScenario {
                 surface.activateForegroundSentinel { sentinelActivated in
                     DispatchQueue.main.async {
                         surface.recordDismissedActivation(sentinelActivated: sentinelActivated)
-                        NSApp.setActivationPolicy(.regular)
-                        window.orderFront(nil)
-                        NSApp.activate(ignoringOtherApps: true)
-                        surface.recordHostProbeActivation()
+                        surface.recordHostObservation()
                     }
                 }
             }
@@ -255,17 +251,15 @@ private final class SyntheticStatusSurface: NSObject {
 
     func recordDismissedActivation(sentinelActivated: Bool) {
         routeGeneration &+= 1
-        let passed = sentinelActivated && NSApp.activationPolicy() == .accessory && !NSApp.isActive
         record(
-            "route=primary-dismissed generation=\(routeGeneration) popover=closed menu=closed assertion="
-                + (passed ? "pass " : "fail ")
-                + "sentinel-activated=" + (sentinelActivated ? "true " : "false ")
+            "route=primary-dismissed generation=\(routeGeneration) popover=closed menu=closed sentinel-activated="
+                + (sentinelActivated ? "true " : "false ")
                 + activationReceipt()
         )
     }
 
-    func recordHostProbeActivation() {
-        record("host-probe " + activationReceipt())
+    func recordHostObservation() {
+        record("host-observation " + activationReceipt())
     }
 
     @objc func probePrimaryClick(_ sender: NSButton) {
@@ -297,7 +291,11 @@ private final class SyntheticStatusSurface: NSObject {
             return
         }
         routeGeneration &+= 1
-        record("route=\(route) generation=\(routeGeneration) popover=closed menu=open " + activationReceipt())
+        record(
+            "route=\(route) generation=\(routeGeneration) popover=closed menu=open "
+                + "entries=History,Settings,separator,Quit "
+                + activationReceipt()
+        )
         menu.popUp(
             positioning: nil,
             at: NSPoint(x: anchor.bounds.minX, y: anchor.bounds.minY - 4),
