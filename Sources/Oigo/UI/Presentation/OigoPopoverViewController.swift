@@ -3,12 +3,19 @@ import MacUtilityUI
 
 @MainActor
 public final class OigoPopoverViewController: NSViewController {
-    private let actionHandler: (OigoPresentationAction) -> Void
+    private let commandHandler: (OigoPopoverCommand) -> Void
     private let contentStack = NSStackView()
     private var buttonActions: [ObjectIdentifier: OigoPresentationAction] = [:]
+    private var inputSelections: [ObjectIdentifier: OigoPopoverInputOption] = [:]
+    private var focusableControls: [NSControl] = []
+    private var focusTask: Task<Void, Never>?
+    private var generation: UInt64 = 0
+    private var lastPresentation: OigoPopoverPresentation?
+    private var lastInputOptions: [OigoPopoverInputOption] = []
+    private var controlFailure: String?
 
-    public init(actionHandler: @escaping (OigoPresentationAction) -> Void) {
-        self.actionHandler = actionHandler
+    public init(commandHandler: @escaping (OigoPopoverCommand) -> Void) {
+        self.commandHandler = commandHandler
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -35,26 +42,39 @@ public final class OigoPopoverViewController: NSViewController {
         view = root
     }
 
-    public func render(_ presentation: OigoPopoverPresentation) {
+    public func render(
+        _ presentation: OigoPopoverPresentation,
+        generation: UInt64,
+        inputOptions: [OigoPopoverInputOption]
+    ) {
         loadViewIfNeeded()
+        self.generation = generation
+        lastPresentation = presentation
+        lastInputOptions = inputOptions
         contentStack.arrangedSubviews.forEach {
             contentStack.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
         buttonActions.removeAll(keepingCapacity: true)
+        inputSelections.removeAll(keepingCapacity: true)
+        focusableControls.removeAll(keepingCapacity: true)
 
         addHeader(presentation)
         addPrimaryAction(presentation.primaryAction)
         addShortcut(presentation.shortcut)
         addDivider()
         addMode(presentation.mode)
-        addMicrophone(presentation.microphone)
+        addMicrophone(presentation.microphone, inputOptions: inputOptions)
+        if let controlFailure {
+            addControlFailure(controlFailure)
+        }
         if let notice = presentation.notice {
             addNotice(notice)
         }
         addDivider()
         addLatest(presentation.latest)
         addFooter()
+        configureKeyLoop()
 
         view.layoutSubtreeIfNeeded()
         preferredContentSize = NSSize(width: 340, height: ceil(contentStack.fittingSize.height))
@@ -85,6 +105,7 @@ public final class OigoPopoverViewController: NSViewController {
         if let action = action.action {
             buttonActions[ObjectIdentifier(button)] = action
         }
+        focusableControls.append(button)
         button.toolTip = action.disabledReason
         button.setAccessibilityIdentifier("popover-primary-action")
         button.widthAnchor.constraint(equalToConstant: 308).isActive = true
@@ -114,6 +135,7 @@ public final class OigoPopoverViewController: NSViewController {
         control.selectedSegment = mode.selected == .instant ? 0 : 1
         control.isEnabled = mode.isEnabled
         control.setAccessibilityIdentifier("popover-mode")
+        focusableControls.append(control)
         contentStack.addArrangedSubview(horizontalRow([label, flexibleSpace(), control]))
         if mode.appliesToNextDictation {
             let note = NSTextField(labelWithString: "Applies to the next dictation")
@@ -125,25 +147,35 @@ public final class OigoPopoverViewController: NSViewController {
         }
     }
 
-    private func addMicrophone(_ microphone: OigoPopoverMicrophonePresentation) {
+    private func addMicrophone(
+        _ microphone: OigoPopoverMicrophonePresentation,
+        inputOptions: [OigoPopoverInputOption]
+    ) {
         let label = NSTextField(labelWithString: "Microphone")
         let value = NSButton(
             title: microphone.label + "  ›",
             target: self,
-            action: #selector(performAction(_:))
+            action: #selector(showInputMenu(_:))
         )
         value.isBordered = false
         value.alignment = .right
         value.contentTintColor = microphone.tone == .critical || microphone.tone == .warning
             ? .systemOrange : .secondaryLabelColor
-        value.isEnabled = microphone.isEnabled && microphone.action != nil
+        value.isEnabled = microphone.isEnabled && !inputOptions.isEmpty
         value.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        if let action = microphone.action {
-            buttonActions[ObjectIdentifier(value)] = action
-        }
+        focusableControls.append(value)
         let row = horizontalRow([label, flexibleSpace(), value])
         row.setAccessibilityIdentifier("popover-microphone")
         contentStack.addArrangedSubview(row)
+    }
+
+    private func addControlFailure(_ message: String) {
+        let label = NSTextField(wrappingLabelWithString: message)
+        label.font = .preferredFont(forTextStyle: .caption1)
+        label.textColor = .systemRed
+        label.setAccessibilityIdentifier("popover-control-failure")
+        label.widthAnchor.constraint(equalToConstant: 308).isActive = true
+        contentStack.addArrangedSubview(label)
     }
 
     private func addNotice(_ notice: OigoPopoverNoticePresentation) {
@@ -151,9 +183,12 @@ public final class OigoPopoverViewController: NSViewController {
             content: statusContent(notice.title, tone: notice.tone),
             body: notice.body,
             actionTitle: notice.action.title,
-            action: { [actionHandler] in
-                guard let action = notice.action.action else { return }
-                actionHandler(action)
+            action: { [weak self] in
+                guard let self, let action = notice.action.action else { return }
+                commandHandler(OigoPopoverCommand(
+                    generation: generation,
+                    intent: .presentation(action)
+                ))
             }
         )
         view.setAccessibilityIdentifier("popover-prioritized-notice")
@@ -217,6 +252,7 @@ public final class OigoPopoverViewController: NSViewController {
         let button = NSButton(title: title, target: self, action: #selector(performAction(_:)))
         button.isBordered = false
         buttonActions[ObjectIdentifier(button)] = action
+        focusableControls.append(button)
         return button
     }
 
@@ -260,17 +296,106 @@ public final class OigoPopoverViewController: NSViewController {
         }
     }
 
+    public func beginPresentation() {
+        focusTask?.cancel()
+        focusTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard !Task.isCancelled, let self, let first = focusableControls.first else {
+                return
+            }
+            view.window?.makeFirstResponder(first)
+            focusTask = nil
+        }
+    }
+
+    public func showControlFailure(_ message: String) {
+        controlFailure = message
+        guard let lastPresentation else {
+            return
+        }
+        render(lastPresentation, generation: generation, inputOptions: lastInputOptions)
+    }
+
+    public func clearControlFailure() {
+        guard controlFailure != nil else {
+            return
+        }
+        controlFailure = nil
+        guard let lastPresentation else {
+            return
+        }
+        render(lastPresentation, generation: generation, inputOptions: lastInputOptions)
+    }
+
+    public func dismiss() {
+        focusTask?.cancel()
+        focusTask = nil
+        controlFailure = nil
+        inputSelections.removeAll()
+    }
+
+    private func configureKeyLoop() {
+        guard !focusableControls.isEmpty else {
+            return
+        }
+        for (index, control) in focusableControls.enumerated() {
+            control.nextKeyView = focusableControls[(index + 1) % focusableControls.count]
+        }
+    }
+
+    public func moveFocus(_ direction: OigoPopoverFocusDirection) {
+        switch direction {
+        case .next:
+            view.window?.selectNextKeyView(nil)
+        case .previous:
+            view.window?.selectPreviousKeyView(nil)
+        }
+    }
+
+    public func invokeFocusedControl() {
+        guard let control = view.window?.firstResponder as? NSControl, control.isEnabled else {
+            return
+        }
+        control.performClick(nil)
+    }
+
     @objc private func performAction(_ sender: NSButton) {
         guard let action = buttonActions[ObjectIdentifier(sender)] else {
             return
         }
-        actionHandler(action)
+        commandHandler(OigoPopoverCommand(generation: generation, intent: .presentation(action)))
     }
 
     @objc private func performModeAction(_ sender: NSSegmentedControl) {
         guard sender.isEnabled else {
             return
         }
-        actionHandler(sender.selectedSegment == 0 ? .setMode(.instant) : .setMode(.clean))
+        let action: OigoPresentationAction = sender.selectedSegment == 0
+            ? .setMode(.instant) : .setMode(.clean)
+        commandHandler(OigoPopoverCommand(generation: generation, intent: .presentation(action)))
+    }
+
+    @objc private func showInputMenu(_ sender: NSButton) {
+        let menu = NSMenu()
+        inputSelections.removeAll(keepingCapacity: true)
+        for option in lastInputOptions {
+            let item = NSMenuItem(title: option.title, action: #selector(selectInput(_:)), keyEquivalent: "")
+            item.target = self
+            item.state = option.isSelected ? .on : .off
+            item.isEnabled = option.isEnabled
+            inputSelections[ObjectIdentifier(item)] = option
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: sender.bounds.minX, y: sender.bounds.minY), in: sender)
+    }
+
+    @objc private func selectInput(_ sender: NSMenuItem) {
+        guard let option = inputSelections[ObjectIdentifier(sender)] else {
+            return
+        }
+        commandHandler(OigoPopoverCommand(
+            generation: generation,
+            intent: .selectInput(option.selection, channel: option.channel)
+        ))
     }
 }

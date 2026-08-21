@@ -38,6 +38,14 @@ struct ContractArguments {
                     .standardizedFileURL
                     .resolvingSymlinksInPath()
                 fixtureName = nil
+            case "popover-actions":
+                defaultsSuite = "com.oigo.qa.task13"
+                fixtureRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                    .appendingPathComponent("Tests/OigoNativeUIContractFixtures/task-13", isDirectory: true)
+                    .appendingPathComponent(requestedFixture, isDirectory: true)
+                    .standardizedFileURL
+                    .resolvingSymlinksInPath()
+                fixtureName = nil
             default:
                 throw ContractInputError(category: "invalid-fixture")
             }

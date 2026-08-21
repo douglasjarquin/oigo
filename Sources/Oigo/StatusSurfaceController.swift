@@ -11,21 +11,24 @@ enum OigoStatusSurfaceCommand {
     case history
     case settings
     case quit
-    case presentation(OigoPresentationAction)
+    case popover(OigoPopoverCommand)
 }
 
 @MainActor
-final class StatusSurfaceController: NSObject {
+final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     private let panel: OigoHUDPanel
     private let label: NSTextField
     private let detailLabel: NSTextField
     private let popover = NSPopover()
-    private let popoverController: OigoPopoverViewController
+    private lazy var popoverController = OigoPopoverViewController { [weak self] command in
+        self?.handlePopoverCommand(command)
+    }
     private let utilityMenu = NSMenu()
     private let commandHandler: (OigoStatusSurfaceCommand) -> Void
     private weak var statusItem: NSStatusItem?
     private var dismissalTask: Task<Void, Never>?
     private var recordingTimer: Timer?
+    private var keyboardMonitor: Any?
     private var recordingStartedAt: Date?
     private var recordingPreview = ""
     private var resourceLedger = OigoHUDResourceLedger()
@@ -34,9 +37,6 @@ final class StatusSurfaceController: NSObject {
 
     init(commandHandler: @escaping (OigoStatusSurfaceCommand) -> Void) {
         self.commandHandler = commandHandler
-        popoverController = OigoPopoverViewController { action in
-            commandHandler(.presentation(action))
-        }
         label = NSTextField(labelWithString: "")
         detailLabel = NSTextField(labelWithString: "")
         panel = OigoHUDPanel(
@@ -83,6 +83,7 @@ final class StatusSurfaceController: NSObject {
         popover.contentSize = NSSize(width: 340, height: 360)
         popover.behavior = .transient
         popover.animates = false
+        popover.delegate = self
 
         utilityMenu.autoenablesItems = false
         utilityMenu.addItem(commandItem(title: "History", action: #selector(openHistory)))
@@ -112,6 +113,7 @@ final class StatusSurfaceController: NSObject {
     func publish(
         _ state: OigoPresentationState,
         inputs: OigoPresentationInputs,
+        inputOptions: [OigoPopoverInputOption],
         generation: UInt64
     ) {
         guard generation > presentationGeneration else {
@@ -119,18 +121,52 @@ final class StatusSurfaceController: NSObject {
         }
         presentationGeneration = generation
         let presentation = OigoPopoverPresentation.compose(state: state, inputs: inputs)
-        popoverController.render(presentation)
+        popoverController.render(
+            presentation,
+            generation: generation,
+            inputOptions: inputOptions
+        )
         popover.contentSize = popoverController.preferredContentSize
     }
 
     func teardown() {
         utilityMenu.cancelTracking()
         popover.close()
+        popoverController.dismiss()
+        removeKeyboardMonitor()
         for item in utilityMenu.items {
             item.target = nil
         }
         teardownStatusItemHandler()
         hide()
+        utilityMenu.delegate = nil
+        popover.delegate = nil
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        _ = menu
+    }
+
+    func popoverDidShow(_ notification: Notification) {
+        _ = notification
+        installKeyboardMonitor()
+        popoverController.beginPresentation()
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        _ = notification
+        removeKeyboardMonitor()
+        popoverController.dismiss()
+    }
+
+    func showControlFailure(_ message: String) {
+        popoverController.showControlFailure(message)
+        popover.contentSize = popoverController.preferredContentSize
+    }
+
+    func clearControlFailure() {
+        popoverController.clearControlFailure()
+        popover.contentSize = popoverController.preferredContentSize
     }
 
     @objc private func handleStatusItemEvent() {
@@ -156,6 +192,59 @@ final class StatusSurfaceController: NSObject {
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
+    }
+
+    private func handlePopoverCommand(_ command: OigoPopoverCommand) {
+        guard command.generation == presentationGeneration else {
+            return
+        }
+        switch command.intent {
+        case .dismiss:
+            popover.close()
+        case .moveFocus(let direction):
+            popoverController.moveFocus(direction)
+        case .invokeFocused:
+            popoverController.invokeFocusedControl()
+        case .presentation(let action):
+            if [.pasteAgain, .openHistory, .openSettings, .quit].contains(action) {
+                popover.close()
+            }
+            commandHandler(.popover(command))
+        case .selectInput:
+            commandHandler(.popover(command))
+        }
+    }
+
+    private func installKeyboardMonitor() {
+        removeKeyboardMonitor()
+        keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.window === popoverController.view.window else {
+                return event
+            }
+            let intent: OigoPopoverCommandIntent? = switch event.keyCode {
+            case 53: .dismiss
+            case 48: .moveFocus(event.modifierFlags.contains(.shift) ? .previous : .next)
+            case 36: .invokeFocused(.returnKey)
+            case 49: .invokeFocused(.space)
+            default: nil
+            }
+            guard let intent else {
+                return event
+            }
+            handlePopoverCommand(OigoPopoverCommand(
+                generation: presentationGeneration,
+                intent: intent
+            ))
+            return nil
+        }
+    }
+
+    private func removeKeyboardMonitor() {
+        guard let keyboardMonitor else {
+            return
+        }
+        NSEvent.removeMonitor(keyboardMonitor)
+        self.keyboardMonitor = nil
     }
 
     private func showUtilityMenu() {
