@@ -1,0 +1,8 @@
+{
+  "name": "repeated-interruption",
+  "rows": [],
+  "expectedSections": [],
+  "popoverWidth": 340,
+  "healthyNoScroll": true,
+  "interruptions": 2
+}

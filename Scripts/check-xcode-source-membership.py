@@ -15,6 +15,7 @@ REQUIRED_PRODUCTION_ROOTS = {
 
 OPTIONAL_DECLARED_ROOTS = {
     "Sources/MacUtilityUI": "MacUtilityUI",
+    "Sources/Oigo/UI/Presentation": "OigoPresentation",
     "Sources/OigoUIGallery": "OigoUIGallery",
     "Tests/OigoNativeUIContractTests": "OigoNativeUIContractTests",
 }
@@ -174,6 +175,15 @@ def disk_paths_by_target(repo_root):
         expected.setdefault(target, set())
         found = False
         for walk_root, _, filenames in os.walk(directory):
+            relative_walk_root = os.path.normpath(os.path.relpath(walk_root, repo_root))
+            if any(
+                relative_walk_root == nested_root
+                or relative_walk_root.startswith(nested_root + os.sep)
+                for nested_root, nested_target in DECLARED_ROOTS.items()
+                if nested_target != target
+                and nested_root.startswith(relative_root + os.sep)
+            ):
+                continue
             for name in filenames:
                 if not name.endswith(".swift"):
                     continue

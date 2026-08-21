@@ -1,4 +1,5 @@
 import AppKit
+import OigoPresentation
 
 public enum OigoStatusIdentityVariant: String, Equatable, Sendable {
     case idle

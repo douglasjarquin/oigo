@@ -13,6 +13,22 @@ struct ContractArguments {
             throw ContractInputError(category: "invalid-scenario")
         }
 
+        if let fixture = values["fixture"] {
+            guard values.count == 2,
+                  fixture.range(of: #"^[a-z][a-z0-9-]*$"#, options: .regularExpression) != nil,
+                  scenario == "popover-state-matrix" else {
+                throw ContractInputError(category: "malformed-arguments")
+            }
+            let fixtureRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent("Tests/OigoNativeUIContractFixtures/task-12")
+                .appendingPathComponent(fixture)
+            return ContractArguments(
+                scenario: scenario,
+                defaultsSuite: "com.oigo.qa.task12",
+                fixtureRoot: fixtureRoot
+            )
+        }
+
         let defaultsSuite = try required("defaults-suite", in: values)
         guard defaultsSuite.range(
             of: #"^com\.oigo\.qa\.task[0-9]+$"#,
@@ -48,7 +64,8 @@ struct ContractArguments {
                 throw ContractInputError(category: "malformed-arguments")
             }
             let key = String(option.dropFirst(2))
-            guard ["scenario", "defaults-suite", "fixture-root"].contains(key), values[key] == nil else {
+            guard ["scenario", "defaults-suite", "fixture-root", "fixture"].contains(key),
+                  values[key] == nil else {
                 throw ContractInputError(category: "unknown-or-duplicate-argument")
             }
             values[key] = value
