@@ -130,6 +130,14 @@ final class HUDBaselineScenario: NativeUIContractScenario {
     import Foundation
     import Darwin
 
+    public enum OigoPresentationStatus: String {
+        case idle = "Idle"
+    }
+
+    public struct OigoPresentationState {
+        public let status: OigoPresentationStatus
+    }
+
     public enum OigoHUDProcessingState: String, CaseIterable, Sendable {
         case finalizing = "Finalizing"
         case cleaning = "Cleaning"
@@ -174,7 +182,7 @@ final class HUDBaselineScenario: NativeUIContractScenario {
     final class BaselineDelegate: NSObject, NSApplicationDelegate {
         func applicationDidFinishLaunching(_ notification: Notification) {
             Task { @MainActor in
-        let controller = StatusSurfaceController()
+        let controller = StatusSurfaceController(commandHandler: { _ in })
         guard !controller.baselinePanelCanBecomeKey,
               !controller.baselinePanelCanBecomeMain else {
             print("BASELINE panel-key=\(controller.baselinePanelCanBecomeKey) panel-main=\(controller.baselinePanelCanBecomeMain)")
