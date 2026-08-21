@@ -8,6 +8,7 @@ let package = Package(
         .macOS("26.0")
     ],
     products: [
+        .library(name: "MacUtilityUI", targets: ["MacUtilityUI"]),
         .library(name: "OigoCore", targets: ["OigoCore"]),
         .library(name: "OigoCapture", targets: ["OigoCapture"]),
         .library(name: "OigoTranscription", targets: ["OigoTranscription"]),
@@ -107,6 +108,14 @@ let package = Package(
         )
     ],
     targets: [
+        .target(
+            name: "MacUtilityUI",
+            path: "Sources/MacUtilityUI",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("Foundation")
+            ]
+        ),
         .target(
             name: "OigoCore",
             path: "Sources/OigoCore"
