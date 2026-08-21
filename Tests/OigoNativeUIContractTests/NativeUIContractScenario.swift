@@ -14,17 +14,23 @@ struct ContractArguments {
         }
 
         if let fixture = values["fixture"] {
+            let fixtureTask: (directory: String, defaultsSuite: String)? = switch scenario {
+            case "popover-state-matrix": ("task-12", "com.oigo.qa.task12")
+            case "popover-actions": ("task-13", "com.oigo.qa.task13")
+            default: nil
+            }
             guard values.count == 2,
                   fixture.range(of: #"^[a-z][a-z0-9-]*$"#, options: .regularExpression) != nil,
-                  scenario == "popover-state-matrix" else {
+                  let fixtureTask else {
                 throw ContractInputError(category: "malformed-arguments")
             }
             let fixtureRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                .appendingPathComponent("Tests/OigoNativeUIContractFixtures/task-12")
+                .appendingPathComponent("Tests/OigoNativeUIContractFixtures")
+                .appendingPathComponent(fixtureTask.directory)
                 .appendingPathComponent(fixture)
             return ContractArguments(
                 scenario: scenario,
-                defaultsSuite: "com.oigo.qa.task12",
+                defaultsSuite: fixtureTask.defaultsSuite,
                 fixtureRoot: fixtureRoot
             )
         }
