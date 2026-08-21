@@ -87,6 +87,18 @@ expected = {
     "OigoMenuBar.imageset/oigo-menubar.png": (16, 22, "menu-bar 1x"),
     "OigoMenuBar.imageset/oigo-menubar@2x.png": (32, 44, "menu-bar 2x"),
 }
+expected_app_icon_tuples = {
+    ("appicon-16.png", "mac", "16x16", "1x"),
+    ("appicon-16@2x.png", "mac", "16x16", "2x"),
+    ("appicon-32.png", "mac", "32x32", "1x"),
+    ("appicon-32@2x.png", "mac", "32x32", "2x"),
+    ("appicon-128.png", "mac", "128x128", "1x"),
+    ("appicon-128@2x.png", "mac", "128x128", "2x"),
+    ("appicon-256.png", "mac", "256x256", "1x"),
+    ("appicon-256@2x.png", "mac", "256x256", "2x"),
+    ("appicon-512.png", "mac", "512x512", "1x"),
+    ("appicon-512@2x.png", "mac", "512x512", "2x"),
+}
 for relative, (width, height, representation) in expected.items():
     asset = catalog / relative
     if not asset.is_file():
@@ -99,8 +111,25 @@ app_metadata = read_json(catalog / "AppIcon.appiconset" / "Contents.json")
 menu_metadata = read_json(catalog / "OigoMenuBar.imageset" / "Contents.json")
 if root_metadata != {"info": {"author": "xcode", "version": 1}}:
     fail("malformed asset metadata")
-if len(app_metadata.get("images", [])) != 10 or app_metadata.get("info") != {"author": "xcode", "version": 1}:
+app_images = app_metadata.get("images")
+if not isinstance(app_images, list) or app_metadata.get("info") != {"author": "xcode", "version": 1}:
     fail("malformed asset metadata")
+try:
+    actual_app_icon_tuples = {
+        (image["filename"], image["idiom"], image["size"], image["scale"])
+        for image in app_images
+        if isinstance(image, dict) and set(image) == {"filename", "idiom", "size", "scale"}
+    }
+except (KeyError, TypeError):
+    fail("malformed asset metadata")
+if len(app_images) != len(expected_app_icon_tuples) or len(actual_app_icon_tuples) != len(app_images):
+    fail("malformed AppIcon metadata")
+missing_app_icon_tuples = expected_app_icon_tuples - actual_app_icon_tuples
+if missing_app_icon_tuples:
+    _, _, size, scale = sorted(missing_app_icon_tuples)[0]
+    fail(f"missing AppIcon tuple: {size.split('x')[0]}pt {scale}")
+if actual_app_icon_tuples != expected_app_icon_tuples:
+    fail("unexpected AppIcon tuple")
 if menu_metadata.get("properties", {}).get("template-rendering-intent") != "template":
     fail("menu-bar asset is not declared as a template")
 
