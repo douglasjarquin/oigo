@@ -6,19 +6,32 @@ private final class OigoHUDPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+enum OigoStatusSurfaceCommand {
+    case history
+    case settings
+    case quit
+}
+
 @MainActor
-final class StatusSurfaceController {
+final class StatusSurfaceController: NSObject, NSMenuDelegate {
     private let panel: OigoHUDPanel
     private let label: NSTextField
     private let detailLabel: NSTextField
+    private let popover = NSPopover()
+    private let popoverStatusLabel = NSTextField(labelWithString: "")
+    private let utilityMenu = NSMenu()
+    private let commandHandler: (OigoStatusSurfaceCommand) -> Void
+    private weak var statusItem: NSStatusItem?
     private var dismissalTask: Task<Void, Never>?
     private var recordingTimer: Timer?
     private var recordingStartedAt: Date?
     private var recordingPreview = ""
     private var resourceLedger = OigoHUDResourceLedger()
     private var displayGeneration = 0
+    private var presentationGeneration: UInt64 = 0
 
-    init() {
+    init(commandHandler: @escaping (OigoStatusSurfaceCommand) -> Void) {
+        self.commandHandler = commandHandler
         label = NSTextField(labelWithString: "")
         detailLabel = NSTextField(labelWithString: "")
         panel = OigoHUDPanel(
@@ -58,6 +71,127 @@ final class StatusSurfaceController {
         ])
         panel.contentView = contentView
         panel.orderOut(nil)
+
+        super.init()
+
+        let popoverController = NSViewController()
+        let popoverContent = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 96))
+        popoverStatusLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        popoverStatusLabel.textColor = .secondaryLabelColor
+        popoverStatusLabel.setAccessibilityLabel("Oigo status")
+        popoverStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+        popoverContent.addSubview(popoverStatusLabel)
+        NSLayoutConstraint.activate([
+            popoverStatusLabel.leadingAnchor.constraint(equalTo: popoverContent.leadingAnchor, constant: 18),
+            popoverStatusLabel.trailingAnchor.constraint(equalTo: popoverContent.trailingAnchor, constant: -18),
+            popoverStatusLabel.centerYAnchor.constraint(equalTo: popoverContent.centerYAnchor)
+        ])
+        popoverController.view = popoverContent
+        popover.contentViewController = popoverController
+        popover.contentSize = NSSize(width: 340, height: 96)
+        popover.behavior = .transient
+        popover.animates = false
+
+        utilityMenu.autoenablesItems = false
+        utilityMenu.delegate = self
+        utilityMenu.addItem(commandItem(title: "History", action: #selector(openHistory)))
+        utilityMenu.addItem(commandItem(title: "Settings", action: #selector(openSettings)))
+        utilityMenu.addItem(.separator())
+        utilityMenu.addItem(commandItem(title: "Quit", action: #selector(quit)))
+    }
+
+    func install(statusItem: NSStatusItem) {
+        teardownStatusItemHandler()
+        self.statusItem = statusItem
+        guard let button = statusItem.button else {
+            return
+        }
+        button.target = self
+        button.action = #selector(handleStatusItemEvent)
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    }
+
+    func publish(_ state: OigoPresentationState, generation: UInt64) {
+        guard generation > presentationGeneration else {
+            return
+        }
+        presentationGeneration = generation
+        popoverStatusLabel.stringValue = state.status.rawValue
+        popoverStatusLabel.setAccessibilityValue(state.status.rawValue)
+    }
+
+    func teardown() {
+        utilityMenu.cancelTracking()
+        popover.close()
+        teardownStatusItemHandler()
+        hide()
+        utilityMenu.delegate = nil
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        _ = menu
+    }
+
+    @objc private func handleStatusItemEvent() {
+        guard let event = NSApp.currentEvent else {
+            return
+        }
+        let isUtilityMenuEvent = event.type == .rightMouseUp
+            || (event.type == .leftMouseUp && event.modifierFlags.contains(.control))
+        if isUtilityMenuEvent {
+            showUtilityMenu()
+        } else if event.type == .leftMouseUp {
+            togglePopover()
+        }
+    }
+
+    private func togglePopover() {
+        utilityMenu.cancelTracking()
+        guard let button = statusItem?.button else {
+            return
+        }
+        if popover.isShown {
+            popover.close()
+        } else {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+    }
+
+    private func showUtilityMenu() {
+        popover.close()
+        guard let button = statusItem?.button else {
+            return
+        }
+        utilityMenu.popUp(
+            positioning: nil,
+            at: NSPoint(x: button.bounds.minX, y: button.bounds.minY - 4),
+            in: button
+        )
+    }
+
+    private func commandItem(title: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.isEnabled = true
+        return item
+    }
+
+    private func teardownStatusItemHandler() {
+        statusItem?.button?.target = nil
+        statusItem?.button?.action = nil
+        statusItem = nil
+    }
+
+    @objc private func openHistory() {
+        commandHandler(.history)
+    }
+
+    @objc private func openSettings() {
+        commandHandler(.settings)
+    }
+
+    @objc private func quit() {
+        commandHandler(.quit)
     }
 
     func hide() {
