@@ -71,10 +71,20 @@ public final class InsertionPasteAgainFlow {
         capture: @escaping @MainActor () -> InsertionTargetSnapshot,
         paste: @escaping @MainActor (InsertionTargetSnapshot) -> InsertionResult,
         copyOnly: @escaping @MainActor (InsertionTargetHandoffResult) -> InsertionResult,
+        isCurrent: @escaping @MainActor () -> Bool = { true },
         recordOutcome: @escaping @MainActor (InsertionResult) -> Void,
         discard: @escaping @MainActor (InsertionTargetSnapshot) -> Void = { _ in }
     ) async -> InsertionResult {
         let selection = await handoff.select(capture: capture, discard: discard)
+        guard isCurrent() else {
+            if case .ready(let target) = selection {
+                discard(target)
+            }
+            return InsertionResult(
+                outcome: .failed,
+                reasonCode: .targetHandoffCancelled
+            )
+        }
         let result: InsertionResult
         if Task.isCancelled {
             if case .ready(let target) = selection {
@@ -88,6 +98,9 @@ public final class InsertionPasteAgainFlow {
             case .timedOut, .cancelled:
                 result = copyOnly(selection)
             }
+        }
+        guard isCurrent() else {
+            return result
         }
         recordOutcome(result)
         return result

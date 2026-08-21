@@ -2,11 +2,6 @@ import AppKit
 import OigoCore
 import OigoPresentation
 
-private final class OigoHUDPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
-}
-
 enum OigoStatusSurfaceCommand {
     case history
     case settings
@@ -16,9 +11,7 @@ enum OigoStatusSurfaceCommand {
 
 @MainActor
 final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate {
-    private let panel: OigoHUDPanel
-    private let label: NSTextField
-    private let detailLabel: NSTextField
+    private let hudController = OigoHUDController()
     private let popover = NSPopover()
     private lazy var popoverController = OigoPopoverViewController { [weak self] command in
         self?.handlePopoverCommand(command)
@@ -26,57 +19,13 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
     private let utilityMenu = NSMenu()
     private let commandHandler: (OigoStatusSurfaceCommand) -> Void
     private weak var statusItem: NSStatusItem?
-    private var dismissalTask: Task<Void, Never>?
-    private var recordingTimer: Timer?
     private var keyboardMonitor: Any?
-    private var recordingStartedAt: Date?
-    private var recordingPreview = ""
-    private var resourceLedger = OigoHUDResourceLedger()
-    private var displayGeneration = 0
+    private var hudState: OigoHUDState?
+    private var hudGeneration: UInt64?
     private var presentationGeneration: UInt64 = 0
 
     init(commandHandler: @escaping (OigoStatusSurfaceCommand) -> Void) {
         self.commandHandler = commandHandler
-        label = NSTextField(labelWithString: "")
-        detailLabel = NSTextField(labelWithString: "")
-        panel = OigoHUDPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 72),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: true
-        )
-
-        label.font = .boldSystemFont(ofSize: 14)
-        detailLabel.font = .systemFont(ofSize: 12)
-        detailLabel.textColor = .secondaryLabelColor
-        detailLabel.lineBreakMode = .byTruncatingTail
-        detailLabel.maximumNumberOfLines = 2
-        panel.isFloatingPanel = true
-        panel.level = .statusBar
-        panel.hidesOnDeactivate = false
-        panel.becomesKeyOnlyIfNeeded = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.hasShadow = true
-
-        let contentView = NSView(frame: panel.contentRect(forFrameRect: panel.frame))
-        contentView.wantsLayer = true
-        contentView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        contentView.layer?.cornerRadius = 10
-        let stack = NSStackView(views: [label, detailLabel])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 3
-        contentView.addSubview(stack)
-
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            stack.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
-        ])
-        panel.contentView = contentView
-        panel.orderOut(nil)
-
         super.init()
 
         popover.contentViewController = popoverController
@@ -138,7 +87,7 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
             item.target = nil
         }
         teardownStatusItemHandler()
-        hide()
+        shutdownHUD()
         utilityMenu.delegate = nil
         popover.delegate = nil
     }
@@ -284,113 +233,49 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
         commandHandler(.quit)
     }
 
-    func hide() {
-        displayGeneration &+= 1
-        dismissalTask?.cancel()
-        dismissalTask = nil
-        stopRecordingTimer()
-        resourceLedger.close()
-        recordingStartedAt = nil
-        recordingPreview = ""
-        panel.orderOut(nil)
-    }
-
-    func showRecording(
-        startedAt: Date,
-        preview: String,
-        detail: String? = nil,
-        anchoredTo button: NSStatusBarButton?
+    func presentHUD(
+        _ state: OigoHUDState,
+        generation: UInt64,
+        geometry: HUDTargetGeometrySnapshot?,
+        startedAt: Date? = nil,
+        preview: String = ""
     ) {
-        displayGeneration &+= 1
-        dismissalTask?.cancel()
-        dismissalTask = nil
-        if recordingStartedAt == nil {
-            recordingStartedAt = startedAt
-            recordingPreview = preview
-            resourceLedger.beginRecording()
-            recordingTimer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.refreshRecordingLabel()
-                }
-            }
-            if let recordingTimer {
-                RunLoop.main.add(recordingTimer, forMode: .common)
-            }
-        }
-        recordingPreview = detail ?? preview
-        refreshRecordingLabel()
-        position(anchoredTo: button)
-        panel.orderFront(nil)
-    }
-
-    func showProcessing(
-        _ state: OigoHUDProcessingState,
-        detail: String,
-        anchoredTo button: NSStatusBarButton?
-    ) {
-        displayGeneration &+= 1
-        let generation = displayGeneration
-        dismissalTask?.cancel()
-        dismissalTask = nil
-        stopRecordingTimer()
-        recordingStartedAt = nil
-        label.stringValue = state.rawValue
-        detailLabel.stringValue = detail
-        position(anchoredTo: button)
-        panel.orderFront(nil)
-        guard [.pasteAttempted, .pasted, .copied, .completedPasteFailed, .failed].contains(state) else {
-            return
-        }
-        dismissalTask = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(nanoseconds: 1_800_000_000)
-            } catch {
-                return
-            }
-            guard let self, self.displayGeneration == generation else {
-                return
-            }
-            self.hide()
-        }
-    }
-
-    private func refreshRecordingLabel() {
-        guard let recordingStartedAt else {
-            return
-        }
-        let elapsed = max(0, Date().timeIntervalSince(recordingStartedAt))
-        let minutes = Int(elapsed) / 60
-        let seconds = Int(elapsed) % 60
-        label.stringValue = "● Recording  " + String(format: "%02d:%02d", minutes, seconds)
-        detailLabel.stringValue = OigoHUDPreviewPolicy.bounded(recordingPreview)
-    }
-
-    private func stopRecordingTimer() {
-        recordingTimer?.invalidate()
-        recordingTimer = nil
-        recordingPreview = ""
-        resourceLedger.endRecording()
-    }
-
-    private func position(anchoredTo button: NSStatusBarButton?) {
-        if let button, let window = button.window {
-            let buttonFrame = window.convertToScreen(button.convert(button.bounds, to: nil))
-            var origin = NSPoint(
-                x: buttonFrame.midX - (panel.frame.width / 2),
-                y: buttonFrame.minY - panel.frame.height - 8
+        if hudGeneration != generation || hudState != state {
+            let displays = AccessibilityHUDGeometryCapture.displayGeometry()
+            let fallbackDisplayID = geometry?.targetDisplayID ?? displays.first?.id
+            let placement = HUDPlacementInput(
+                snapshot: geometry,
+                currentGeneration: generation,
+                displays: displays,
+                frontmostDisplayID: fallbackDisplayID,
+                mainDisplayID: fallbackDisplayID,
+                panelSize: HUDSize(width: 336, height: 96)
             )
-            if let screen = window.screen ?? NSScreen.main {
-                let visibleFrame = screen.visibleFrame
-                origin.x = min(
-                    max(origin.x, visibleFrame.minX + 8),
-                    visibleFrame.maxX - panel.frame.width - 8
-                )
-                origin.y = min(
-                    max(origin.y, visibleFrame.minY + 8),
-                    visibleFrame.maxY - panel.frame.height - 8
-                )
+            guard hudController.present(
+                state,
+                generation: generation,
+                placementInput: placement,
+                startedAt: startedAt
+            ) else {
+                return
             }
-            panel.setFrameOrigin(origin)
+            hudState = state
+            hudGeneration = generation
         }
+        if !preview.isEmpty {
+            _ = hudController.updatePreview(preview, generation: generation)
+        }
+    }
+
+    func hideHUD(generation: UInt64) {
+        guard hudController.hide(generation: generation) else { return }
+        hudState = nil
+        hudGeneration = nil
+    }
+
+    func shutdownHUD() {
+        hudController.shutdown()
+        hudState = nil
+        hudGeneration = nil
     }
 }

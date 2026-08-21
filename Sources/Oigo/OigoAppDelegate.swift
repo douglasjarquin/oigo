@@ -50,9 +50,14 @@ private final class DestinationHandoffWaiter {
 }
 
 private enum OigoHUDPublication {
-    case recording(startedAt: Date, preview: String, detail: String?)
-    case processing(OigoHUDProcessingState, detail: String)
-    case hidden
+    case visible(
+        state: OigoHUDState,
+        generation: UInt64,
+        geometry: HUDTargetGeometrySnapshot?,
+        startedAt: Date?,
+        preview: String
+    )
+    case hidden(generation: UInt64?)
 }
 
 private struct OigoAppDelegatePresentationSnapshot {
@@ -64,7 +69,6 @@ private struct OigoAppDelegatePresentationSnapshot {
     let shortcutTitle: String
     let shortcutToolTip: String
     let hud: OigoHUDPublication
-    let anchor: NSStatusBarButton?
 }
 
 @available(macOS 26.0, *)
@@ -133,6 +137,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var settings = OigoSettingsStore().load()
     private var targetSnapshot: InsertionTargetSnapshot?
+    private var targetSnapshotGeneration: UInt64?
     private var insertionDisplayStatus: OigoHUDProcessingState?
     private var failureDetail: String?
     private var lastFailureCode: String?
@@ -149,6 +154,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var recordingStartedAt: Date?
     private var previewThrottle = OigoHUDPreviewThrottle()
     private let operationGate = AppOperationGate()
+    private lazy var hudGeometrySession = AccessibilityHUDGeometryCapture.makeSession()
+    private var hudGeometrySnapshot: HUDTargetGeometrySnapshot?
+    private var hudGeneration: UInt64?
     private var presentationPublicationGeneration: UInt64 = 0
     private var presentationPublicationFence = OigoPresentationGenerationFence()
     private var maintenanceHandle: AppOperationHandle?
@@ -251,6 +259,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         storageCapability.shutdown()
         deviceInventoryMonitor.stop()
         removeWorkspaceInterruptionObservers()
+        hudGeometrySession.shutdown()
+        hudGeometrySnapshot = nil
+        hudGeneration = nil
+        statusSurface.shutdownHUD()
         statusSurface.teardown()
         if let statusItem {
             NSStatusBar.system.removeStatusItem(statusItem)
@@ -684,6 +696,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         guard operationGate.isAcceptingCommands else {
             return
         }
+        let interruptedGeneration = hudGeneration
         let handle = operationGate.preempt(.interruption)
         operationGate.run(handle, completes: true) { @MainActor [weak self] in
             guard let self else {
@@ -695,7 +708,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             self.lastSession = self.coordinator.currentSession ?? self.lastSession
             self.recordingStartedAt = nil
-            self.clearTargetSnapshot()
+            self.clearTargetSnapshot(generation: interruptedGeneration)
+            self.hudGeneration = handle.generation
             self.livePreview = ""
             self.insertionDisplayStatus = nil
             self.shortcutBridge.reset()
@@ -771,33 +785,29 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             shortcutBridge.reset()
             return
         }
-        switch operationGate.beginAndRun(kind, completes: false, operation: { @MainActor [weak self] in
-            guard let self else {
-                return
-            }
-            await self.performStartDictation()
-            guard let handle = self.operationGate.currentHandle,
-                  self.operationGate.isCurrent(handle) else {
-                return
-            }
-            if self.coordinator.state == .recording {
-                _ = self.shortcutBridge.observeState()
-                if self.finishRequestedAfterStart {
-                    self.finishRequestedAfterStart = false
-                    await self.performFinishDictation()
-                    if self.operationGate.isCurrent(handle) {
-                        self.operationGate.complete(handle)
-                    }
-                }
-            } else {
-                self.shortcutBridge.reset()
-                self.operationGate.complete(handle)
-            }
-        }) {
+        switch operationGate.begin(kind) {
         case .failure(let reason):
             shortcutBridge.reset()
             showBusy(reason)
-        case .success:
+        case .success(let handle):
+            operationGate.run(handle, completes: false) { @MainActor [weak self] in
+                guard let self else { return }
+                await self.performStartDictation(handle: handle)
+                guard self.operationGate.isCurrent(handle) else { return }
+                if self.coordinator.state == .recording {
+                    _ = self.shortcutBridge.observeState()
+                    if self.finishRequestedAfterStart {
+                        self.finishRequestedAfterStart = false
+                        await self.performFinishDictation(handle: handle)
+                        if self.operationGate.isCurrent(handle) {
+                            self.operationGate.complete(handle)
+                        }
+                    }
+                } else {
+                    self.shortcutBridge.reset()
+                    self.operationGate.complete(handle)
+                }
+            }
             updateSurface()
         }
     }
@@ -836,7 +846,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         operationGate.run(handle, completes: true) { @MainActor [weak self] in
-            await self?.performFinishDictation()
+            await self?.performFinishDictation(handle: handle)
         }
         updateSurface()
     }
@@ -851,8 +861,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     self.operationGate.complete(handle)
                 }
                 self.recordingStartedAt = nil
-                self.clearTargetSnapshot()
-                self.statusSurface.hide()
+                self.clearTargetSnapshot(generation: handle?.generation)
+                if let generation = handle?.generation {
+                    self.statusSurface.hideHUD(generation: generation)
+                }
                 self.updateSurface()
                 return
             }
@@ -861,28 +873,45 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 self.operationGate.complete(handle)
             }
             self.recordingStartedAt = nil
-            self.clearTargetSnapshot()
+            self.clearTargetSnapshot(generation: handle?.generation)
             self.insertionDisplayStatus = nil
-            self.statusSurface.hide()
+            if let generation = handle?.generation {
+                self.statusSurface.hideHUD(generation: generation)
+            }
             self.updateSurface()
         }
     }
 
-    private func performStartDictation() async {
+    private func performStartDictation(handle: AppOperationHandle) async {
         do {
+            guard operationGate.isCurrent(handle) else { return }
             switch coordinator.state {
             case .idle, .complete, .failed, .cancelled, .interrupted:
                 insertionDisplayStatus = nil
                 failureDetail = nil
                 lastFailureCode = nil
                 shortcutFeedbackDetail = nil
+                hudGeneration = handle.generation
+                hudGeometrySnapshot = hudGeometrySession.beginDictation(
+                    generation: handle.generation
+                )
+                updateSurface()
                 let microphoneStateBeforeRequest = microphonePermissionState()
-                targetSnapshot = try await insertion.captureTargetBeforeMicrophonePermission {
+                let capturedTarget = try await insertion.captureTargetBeforeMicrophonePermission {
                     try await self.ensureMicrophonePermission()
                 }
+                guard operationGate.isCurrent(handle) else {
+                    insertion.discardTarget(capturedTarget)
+                    clearTargetSnapshot(generation: handle.generation)
+                    return
+                }
+                targetSnapshot = capturedTarget
+                targetSnapshotGeneration = handle.generation
                 try Task.checkCancellation()
                 guard microphoneStateBeforeRequest == .granted else {
-                    clearTargetSnapshot()
+                    clearTargetSnapshot(generation: handle.generation)
+                    statusSurface.hideHUD(generation: handle.generation)
+                    hudGeneration = nil
                     shortcutBridge.reset()
                     failureDetail = "microphone_permission_retry_required"
                     lastFailureCode = "microphone_permission_retry_required"
@@ -921,7 +950,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                         configuration: snapshot,
                         onUpdate: { [weak self] update in
                             Task { @MainActor [weak self] in
-                                self?.applyTranscriptionUpdate(update)
+                                self?.applyTranscriptionUpdate(
+                                    update,
+                                    generation: handle.generation
+                                )
                             }
                         }
                     )
@@ -1000,7 +1032,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     )
                 }
                 insertionDisplayStatus = Self.displayStatus(for: result.outcome)
-                clearTargetSnapshot()
+                clearTargetSnapshot(generation: handle.generation)
                 livePreview = ""
             case .preparing, .finalizing, .cleaning, .inserting:
                 throw DictationTransitionError.illegal(
@@ -1021,7 +1053,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             )
             lastSession = coordinator.currentSession ?? lastSession
             recordingStartedAt = nil
-            clearTargetSnapshot()
+            clearTargetSnapshot(generation: handle.generation)
+            guard operationGate.isCurrent(handle) else { return }
             livePreview = ""
             applyTerminalDisplay(cancelled: true)
             updateSurface()
@@ -1037,7 +1070,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             markStorageUnhealthyIfNeeded(error)
             shortcutBridge.reset()
             lastSession = coordinator.currentSession ?? lastSession
-            clearTargetSnapshot()
+            clearTargetSnapshot(generation: handle.generation)
+            guard operationGate.isCurrent(handle) else { return }
             recordingStartedAt = nil
             applyTerminalDisplay(error: error, cancelled: false)
             if let session = coordinator.currentSession,
@@ -1050,8 +1084,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func performFinishDictation() async {
+    private func performFinishDictation(handle: AppOperationHandle) async {
         do {
+            guard operationGate.isCurrent(handle) else { return }
             guard coordinator.state == .recording else {
                 throw DictationTransitionError.illegal(
                     from: coordinator.state,
@@ -1128,7 +1163,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
             insertionDisplayStatus = Self.displayStatus(for: result.outcome)
-            clearTargetSnapshot()
+            clearTargetSnapshot(generation: handle.generation)
             livePreview = ""
             if historyWindow != nil {
                 refreshHistory()
@@ -1140,7 +1175,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             shortcutBridge.reset()
             lastSession = coordinator.currentSession ?? lastSession
             recordingStartedAt = nil
-            clearTargetSnapshot()
+            clearTargetSnapshot(generation: handle.generation)
+            guard operationGate.isCurrent(handle) else { return }
             livePreview = ""
             applyTerminalDisplay(cancelled: true)
             updateSurface()
@@ -1152,7 +1188,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             markStorageUnhealthyIfNeeded(error)
             shortcutBridge.reset()
             lastSession = coordinator.currentSession ?? lastSession
-            clearTargetSnapshot()
+            clearTargetSnapshot(generation: handle.generation)
+            guard operationGate.isCurrent(handle) else { return }
             recordingStartedAt = nil
             applyTerminalDisplay(error: error, cancelled: false)
             if let session = coordinator.currentSession,
@@ -1659,88 +1696,96 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         historyWindow?.window?.orderOut(nil)
         NSApp.hide(nil)
-        switch operationGate.beginAndRun(.pasteAgain, completes: true, operation: { @MainActor [weak self] in
-            guard let self else {
-                return
-            }
-            defer {
-                self.updateSurface()
-            }
-            guard self.storageCapability.health.isReady else {
-                self.historyWindow?.showMessage(self.storageCapability.health.statusMessage)
-                self.historyWindow?.showAndFocus()
-                if source == .clean {
-                    self.historyWindow?.showCleanTranscript()
+        switch operationGate.begin(.pasteAgain) {
+        case .failure(let reason):
+            showBusy(reason)
+        case .success(let handle):
+            hudGeneration = handle.generation
+            hudGeometrySnapshot = hudGeometrySession.beginPasteAgain(
+                generation: handle.generation
+            )
+            updateSurface()
+            operationGate.run(handle, completes: true) { @MainActor [weak self] in
+                guard let self else { return }
+                defer {
+                    self.clearHUDGeometry(generation: handle.generation)
+                    self.updateSurface()
                 }
-                return
-            }
-            _ = await self.pasteAgainFlow.run(
-                capture: {
-                    self.insertion.captureTarget()
-                },
-                paste: { target in
-                    self.insertion.pasteAgain(
-                        for: entry.session,
-                        source: source,
-                        store: store,
-                        target: target
-                    )
-                },
-                copyOnly: { selection in
-                    let reasonCode: InsertionReasonCode = switch selection {
-                    case .timedOut:
-                        .targetHandoffTimedOut
-                    case .cancelled:
-                        .targetHandoffCancelled
-                    case .ready:
-                        .targetHandoffCancelled
-                    }
-                    return self.insertion.copyText(
-                        for: entry.session,
-                        source: source,
-                        store: store,
-                        reasonCode: reasonCode
-                    )
-                },
-                recordOutcome: { result in
-                    guard self.operationGate.currentKind == .pasteAgain else {
-                        return
-                    }
-                    do {
-                        let updated = try store.update(
-                            entry.session,
-                            state: entry.session.metadata.state,
-                            at: Date(),
-                            insertionOutcome: result.outcome,
-                            insertionFailureReason: result.reason,
-                            insertionTextSource: source
-                        )
-                        self.lastSession = updated
-                        self.insertionDisplayStatus = Self.displayStatus(for: result.outcome)
-                        self.historyWindow?.showMessage(
-                            Self.pasteAgainMessage(source: source, result: result)
-                        )
-                        self.refreshHistory()
-                    } catch {
-                        self.markStorageUnhealthyIfNeeded(error)
-                        self.historyWindow?.showMessage(
-                            Self.friendlyError("Paste Again failed", error)
-                        )
-                    }
+                guard self.operationGate.isCurrent(handle) else { return }
+                guard self.storageCapability.health.isReady else {
+                    self.historyWindow?.showMessage(self.storageCapability.health.statusMessage)
                     self.historyWindow?.showAndFocus()
                     if source == .clean {
                         self.historyWindow?.showCleanTranscript()
                     }
-                },
-                discard: { target in
-                    self.insertion.discardTarget(target)
+                    return
                 }
-            )
-        }) {
-        case .failure(let reason):
-            showBusy(reason)
-        case .success:
-            break
+                _ = await self.pasteAgainFlow.run(
+                    capture: {
+                        self.insertion.captureTarget()
+                    },
+                    paste: { target in
+                        self.insertion.pasteAgain(
+                            for: entry.session,
+                            source: source,
+                            store: store,
+                            target: target
+                        )
+                    },
+                    copyOnly: { selection in
+                        let reasonCode: InsertionReasonCode = switch selection {
+                        case .timedOut:
+                            .targetHandoffTimedOut
+                        case .cancelled:
+                            .targetHandoffCancelled
+                        case .ready:
+                            .targetHandoffCancelled
+                        }
+                        return self.insertion.copyText(
+                            for: entry.session,
+                            source: source,
+                            store: store,
+                            reasonCode: reasonCode
+                        )
+                    },
+                    isCurrent: {
+                        self.operationGate.isCurrent(handle)
+                    },
+                    recordOutcome: { result in
+                        guard self.operationGate.isCurrent(handle) else {
+                            return
+                        }
+                        do {
+                            let updated = try store.update(
+                                entry.session,
+                                state: entry.session.metadata.state,
+                                at: Date(),
+                                insertionOutcome: result.outcome,
+                                insertionFailureReason: result.reason,
+                                insertionTextSource: source
+                            )
+                            self.lastSession = updated
+                            self.insertionDisplayStatus = Self.displayStatus(for: result.outcome)
+                            self.historyWindow?.showMessage(
+                                Self.pasteAgainMessage(source: source, result: result)
+                            )
+                            self.refreshHistory()
+                        } catch {
+                            self.markStorageUnhealthyIfNeeded(error)
+                            self.historyWindow?.showMessage(
+                                Self.friendlyError("Paste Again failed", error)
+                            )
+                        }
+                        self.historyWindow?.showAndFocus()
+                        if source == .clean {
+                            self.historyWindow?.showCleanTranscript()
+                        }
+                    },
+                    discard: { target in
+                        self.insertion.discardTarget(target)
+                    }
+                )
+            }
         }
     }
 
@@ -1941,7 +1986,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         maintenanceCoordinator.request(trigger)
     }
 
-    private func applyTranscriptionUpdate(_ update: TranscriptionUpdate) {
+    private func applyTranscriptionUpdate(
+        _ update: TranscriptionUpdate,
+        generation: UInt64
+    ) {
+        guard hudGeneration == generation else { return }
         if update.liveDegradation != nil {
             livePreview = ""
             updateSurface()
@@ -1994,6 +2043,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         let activeConfiguration = coordinator.activeConfiguration.map {
             presentationConfiguration($0, appliesTo: .active, devices: inputDevices)
         }
+        let terminal = presentationTerminal(generation: generation)
         let presentationInputs = OigoPresentationInputs(
             generation: generation,
             operationGate: .init(
@@ -2030,7 +2080,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 appliesTo: .next,
                 mode: Self.presentationMode(settingsSnapshot.defaultMode)
             ),
-            terminal: presentationTerminal(generation: generation),
+            terminal: terminal,
             latestSession: lastSession.map(Self.presentationLatestSession),
             playback: Self.presentationPlayback(playback.currentState()),
             onboarding: Self.presentationOnboarding(onboarding),
@@ -2057,8 +2107,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             launchAtLogin: OigoLaunchAtLoginPresentation(status: launchAtLoginController.status),
             shortcutTitle: shortcutCopy.title,
             shortcutToolTip: shortcutCopy.toolTip,
-            hud: presentationHUD(coordinatorState: coordinatorState),
-            anchor: statusItem?.button
+            hud: presentationHUD(
+                coordinatorState: coordinatorState,
+                operationHandle: operationHandle,
+                terminal: terminal
+            )
         )
     }
 
@@ -2078,21 +2131,18 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             statusItem?.button?.title = "Oigo"
             statusItem?.button?.toolTip = snapshot.shortcutToolTip
             switch snapshot.hud {
-            case .recording(let startedAt, let preview, let detail):
-                statusSurface.showRecording(
-                    startedAt: startedAt,
-                    preview: preview,
-                    detail: detail,
-                    anchoredTo: snapshot.anchor
-                )
-            case .processing(let state, let detail):
-                statusSurface.showProcessing(
+            case .visible(let state, let generation, let geometry, let startedAt, let preview):
+                statusSurface.presentHUD(
                     state,
-                    detail: detail,
-                    anchoredTo: snapshot.anchor
+                    generation: generation,
+                    geometry: geometry,
+                    startedAt: startedAt,
+                    preview: preview
                 )
-            case .hidden:
-                statusSurface.hide()
+            case .hidden(let generation):
+                if let generation {
+                    statusSurface.hideHUD(generation: generation)
+                }
             }
         }
     }
@@ -2293,26 +2343,75 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func presentationHUD(coordinatorState: DictationState) -> OigoHUDPublication {
-        if coordinatorState == .recording {
-            let previewEnabled = coordinator.activeConfiguration?.previewEnabled
-                ?? settings.showVolatilePreview
-            let detail = coordinator.liveRecordingHUDDetail
-            return .recording(
-                startedAt: recordingStartedAt ?? Date(),
-                preview: previewEnabled && detail == nil ? livePreview : "",
-                detail: detail
+    private func presentationHUD(
+        coordinatorState: DictationState,
+        operationHandle: AppOperationHandle?,
+        terminal: OigoTerminalPresentationInput?
+    ) -> OigoHUDPublication {
+        guard let generation = hudGeneration else {
+            return .hidden(generation: nil)
+        }
+        if operationHandle?.kind == .pasteAgain,
+           operationHandle?.generation == generation {
+            return .visible(
+                state: .pasteAgainDestination,
+                generation: generation,
+                geometry: hudGeometrySnapshot,
+                startedAt: nil,
+                preview: ""
             )
         }
-        if let insertionDisplayStatus {
-            return .processing(
-                insertionDisplayStatus,
-                detail: shortcutFeedbackDetail
-                    ?? failureDetail
-                    ?? Self.hudDetail(for: insertionDisplayStatus)
-            )
+
+        let state: OigoHUDState?
+        switch coordinatorState {
+        case .preparing:
+            state = .preparing
+        case .recording:
+            state = coordinator.liveRecordingHUDDetail == nil ? .recording : .degradedRecording
+        case .finalizing:
+            state = .finalizing
+        case .cleaning:
+            state = .cleaning
+        case .inserting:
+            state = .pasting
+        case .idle, .complete, .failed, .cancelled, .interrupted:
+            state = terminal.map(hudTerminalState)
         }
-        return .hidden
+        guard let state else {
+            return .hidden(generation: generation)
+        }
+        let previewEnabled = coordinator.activeConfiguration?.previewEnabled
+            ?? settings.showVolatilePreview
+        return .visible(
+            state: state,
+            generation: generation,
+            geometry: hudGeometrySnapshot,
+            startedAt: state == .recording || state == .degradedRecording
+                ? (recordingStartedAt ?? Date()) : nil,
+            preview: state == .recording && previewEnabled ? livePreview : ""
+        )
+    }
+
+    private func hudTerminalState(_ terminal: OigoTerminalPresentationInput) -> OigoHUDState {
+        switch terminal.outcome {
+        case .completed:
+            .terminal
+        case .pasteAttempted, .pasted:
+            .pasteAttempted
+        case .copied:
+            .copyOnly
+        case .cleanupFallback:
+            .cleanupFallback
+        case .insertionFailed, .failed:
+            .preservedFailure
+        case .retryRequired:
+            .savedRetry
+        case .cancelled:
+            (lastSession?.metadata.rawTextByteCount ?? 0) > 0
+                ? .cancelledAfterRaw : .cancelledBeforeRaw
+        case .interrupted:
+            .interrupted
+        }
     }
 
     private static func presentationOperationKind(
@@ -3248,11 +3347,23 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         await DestinationHandoffWaiter().wait()
     }
 
-    private func clearTargetSnapshot() {
-        if let targetSnapshot {
-            insertion.discardTarget(targetSnapshot)
+    private func clearTargetSnapshot(generation: UInt64?) {
+        guard let generation else { return }
+        if targetSnapshotGeneration == generation {
+            if let targetSnapshot {
+                insertion.discardTarget(targetSnapshot)
+            }
+            targetSnapshot = nil
+            targetSnapshotGeneration = nil
         }
-        targetSnapshot = nil
+        clearHUDGeometry(generation: generation)
+    }
+
+    private func clearHUDGeometry(generation: UInt64) {
+        if hudGeometrySnapshot?.generation == generation {
+            hudGeometrySession.endDictation(generation: generation)
+            hudGeometrySnapshot = nil
+        }
     }
 
     private static func pasteAgainMessage(
