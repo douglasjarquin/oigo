@@ -4,7 +4,7 @@ public enum OigoHUDShellPolicy {
     public static let recordingTimerInterval: TimeInterval = 1.0
     public static let previewInterval: TimeInterval = 0.2
     public static let maxPreviewUpdatesPerSecond = 5
-    public static let previewMaxCharacters = 200
+    public static let previewMaxCharacters = 180
     public static let previewMaxLines = 2
     public static let ordinaryTerminalDismissal: TimeInterval = 1.8
     public static let actionableTerminalDismissal: TimeInterval = 3.0

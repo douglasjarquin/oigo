@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 
 #if canImport(MacUtilityUI)
@@ -12,6 +13,9 @@ final class HUDStatesGalleryScenario: GalleryScenario {
     }
 
     override class func makeWindow(configuration: GalleryConfiguration) -> NSWindow {
+        guard let fixture = HUDStatesGalleryFixture.load(from: configuration.fixtureRoot) else {
+            HUDStatesGalleryFixture.rejectInput()
+        }
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 940, height: 700),
             styleMask: [.titled, .closable, .resizable],
@@ -23,7 +27,10 @@ final class HUDStatesGalleryScenario: GalleryScenario {
         window.minSize = NSSize(width: 900, height: 640)
         window.appearance = NSAppearance(named: .darkAqua)
         window.center()
-        window.contentViewController = HUDStatesGalleryViewController(configuration: configuration)
+        window.contentViewController = HUDStatesGalleryViewController(
+            configuration: configuration,
+            fixture: fixture
+        )
         return window
     }
 }
@@ -52,6 +59,38 @@ fileprivate struct HUDStatesGalleryFixture: Decodable {
     let fixture: String
     let states: [State]
     let cadence: Cadence
+
+    static func load(from root: URL) -> Self? {
+        let url = root.appendingPathComponent("fixture.json")
+        guard let data = try? Data(contentsOf: url),
+              let fixture = try? JSONDecoder().decode(Self.self, from: data),
+              fixture.scenario == "hud-states",
+              fixture.fixture == "exhaustive",
+              fixture.states.count == 18,
+              Set(fixture.states.map(\.id)) == requiredStateIDs,
+              fixture.states.allSatisfy({ state in
+                  [state.id, state.title, state.detail, state.tone, state.iconRole,
+                   state.actionability, state.dismissal]
+                      .allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+              }),
+              fixture.cadence.ordinaryDismissalSeconds > 0,
+              fixture.cadence.actionableDismissalSeconds > 0 else {
+            return nil
+        }
+        return fixture
+    }
+
+    private static let requiredStateIDs: Set<String> = [
+        "preparing", "recording", "degraded-recording", "finalizing", "cleaning", "pasting",
+        "paste-attempted", "copied", "copy-only", "saved-retry", "preserved-failure",
+        "cleanup-fallback", "cancelled-before-raw", "cancelled-after-raw", "interrupted",
+        "paste-again-destination", "terminal", "shutdown"
+    ]
+
+    static func rejectInput() -> Never {
+        FileHandle.standardError.write(Data("ERROR rejected-input:malformed-hud-states-fixture\n".utf8))
+        exit(64)
+    }
 }
 
 @MainActor
@@ -72,9 +111,9 @@ private final class HUDStatesGalleryViewController: NSViewController {
     private var panelProbe: HUDGalleryPanelProbe?
     private var captured = false
 
-    init(configuration: GalleryConfiguration) {
+    init(configuration: GalleryConfiguration, fixture: HUDStatesGalleryFixture) {
         self.configuration = configuration
-        fixture = Self.loadFixture(from: configuration.fixtureRoot)
+        self.fixture = fixture
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -85,6 +124,7 @@ private final class HUDStatesGalleryViewController: NSViewController {
 
     override func loadView() {
         let root = NSView()
+        root.appearance = NSAppearance(named: .darkAqua)
         root.wantsLayer = true
         root.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
@@ -290,22 +330,6 @@ private final class HUDStatesGalleryViewController: NSViewController {
         try? data.write(to: configuration.evidenceRoot.appendingPathComponent(name), options: .atomic)
     }
 
-    private static func loadFixture(from root: URL) -> HUDStatesGalleryFixture {
-        let url = root.appendingPathComponent("fixture.json")
-        guard let data = try? Data(contentsOf: url),
-              let fixture = try? JSONDecoder().decode(HUDStatesGalleryFixture.self, from: data),
-              fixture.scenario == "hud-states",
-              fixture.fixture == "exhaustive",
-              fixture.states.count == 18 else {
-            return HUDStatesGalleryFixture(
-                scenario: "hud-states",
-                fixture: "unavailable",
-                states: [],
-                cadence: .init(ordinaryDismissalSeconds: -1, actionableDismissalSeconds: -1)
-            )
-        }
-        return fixture
-    }
 }
 
 @MainActor
@@ -326,7 +350,7 @@ private final class HUDStateCard: NSStackView {
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         layer?.cornerRadius = 12
-        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.72).cgColor
+        layer?.backgroundColor = NSColor(calibratedWhite: 0.12, alpha: 0.97).cgColor
         layer?.borderWidth = 1
         layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.6).cgColor
 
@@ -339,11 +363,11 @@ private final class HUDStateCard: NSStackView {
         heading.spacing = 8
 
         title.stringValue = state.title
-        title.textColor = .labelColor
+        title.textColor = .white
         title.maximumNumberOfLines = 2
         title.lineBreakMode = .byWordWrapping
         detail.stringValue = state.detail
-        detail.textColor = .secondaryLabelColor
+        detail.textColor = NSColor(calibratedWhite: 0.85, alpha: 1)
         detail.maximumNumberOfLines = 3
         detail.lineBreakMode = .byWordWrapping
         detail.preferredMaxLayoutWidth = 245
@@ -372,7 +396,9 @@ private final class HUDStateCard: NSStackView {
 
     func apply(textScale: CGFloat, reducedMotion: Bool) {
         title.font = .systemFont(ofSize: 14 * textScale, weight: .semibold)
+        title.textColor = .white
         detail.font = .systemFont(ofSize: 12 * textScale)
+        detail.textColor = NSColor(calibratedWhite: 0.85, alpha: 1)
         metadata.font = .monospacedSystemFont(ofSize: 10 * textScale, weight: .regular)
         layer?.borderColor = Self.color(for: state.tone).withAlphaComponent(reducedMotion ? 0.75 : 0.45).cgColor
     }
@@ -413,6 +439,7 @@ private final class HUDGalleryPanelProbe {
 
     init(configuration: GalleryConfiguration, state: HUDStatesGalleryFixture.State) {
         panel = MacUIFloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 336, height: 96))
+        panel.appearance = NSAppearance(named: .darkAqua)
         content = HUDGalleryPanelContent(state: state)
         panel.contentView = content
         panel.setContentSize(NSSize(width: 336, height: 96))
@@ -519,25 +546,27 @@ private final class HUDGalleryPanelContent: NSStackView {
     init(state: HUDStatesGalleryFixture.State) {
         self.state = state
         super.init(frame: .zero)
+        appearance = NSAppearance(named: .darkAqua)
         orientation = .vertical
         alignment = .leading
         spacing = 5
         edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
         wantsLayer = true
         layer?.cornerRadius = 14
-        layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.97).cgColor
+        layer?.backgroundColor = NSColor(calibratedWhite: 0.12, alpha: 0.97).cgColor
 
         title.font = .systemFont(ofSize: 14, weight: .semibold)
+        title.textColor = .white
         detail.font = .systemFont(ofSize: 12)
-        detail.textColor = .secondaryLabelColor
+        detail.textColor = NSColor(calibratedWhite: 0.85, alpha: 1)
         detail.maximumNumberOfLines = 2
         detail.lineBreakMode = .byWordWrapping
         detail.preferredMaxLayoutWidth = 304
         detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         elapsedLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-        elapsedLabel.textColor = .secondaryLabelColor
+        elapsedLabel.textColor = NSColor(calibratedWhite: 0.85, alpha: 1)
         previewLabel.font = .systemFont(ofSize: 12)
-        previewLabel.textColor = .secondaryLabelColor
+        previewLabel.textColor = NSColor(calibratedWhite: 0.85, alpha: 1)
         previewLabel.maximumNumberOfLines = 2
         previewLabel.lineBreakMode = .byWordWrapping
         previewLabel.preferredMaxLayoutWidth = 304
