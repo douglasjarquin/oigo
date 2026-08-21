@@ -302,6 +302,14 @@ final class PasteAgainHandoffScenario: NativeUIContractScenario {
               let geometry = try? String(contentsOf: geometryURL, encoding: .utf8) else {
             throw ContractInputError(category: "missing-paste-again-handoff-source")
         }
+        guard let pasteAgainStart = delegate.range(of: "private func beginPasteAgain("),
+              let pasteAgainEnd = delegate.range(
+                  of: "\n    private func ",
+                  range: pasteAgainStart.upperBound..<delegate.endIndex
+              ) else {
+            throw ContractInputError(category: "missing-paste-again-handoff-source")
+        }
+        let pasteAgainSource = String(delegate[pasteAgainStart.lowerBound..<pasteAgainEnd.lowerBound])
         guard delegate.contains("operationGate.isCurrent(handle)"),
               occurrences(of: "hudGeometrySession.beginDictation(", in: delegate) == 1,
               occurrences(of: "hudGeometrySession.beginPasteAgain(", in: delegate) == 1,
@@ -320,6 +328,10 @@ final class PasteAgainHandoffScenario: NativeUIContractScenario {
               handoff.contains("guard isCurrent() else"),
               geometry.contains("func beginPasteAgain(generation: UInt64)") else {
             throw ContractInputError(category: "incomplete-paste-again-handoff-source")
+        }
+        guard pasteAgainSource.contains("operationGate.run(handle, completes: false)"),
+              pasteAgainSource.contains("self.operationGate.complete(handle)") else {
+            throw ContractInputError(category: "paste-again-terminal-before-gate-release")
         }
         guard !delegate.contains("frontmostApplication =="),
               !delegate.contains("AppOperationGate()\n    private let operationGate"),

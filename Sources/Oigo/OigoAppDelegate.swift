@@ -1705,11 +1705,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 generation: handle.generation
             )
             updateSurface()
-            operationGate.run(handle, completes: true) { @MainActor [weak self] in
+            operationGate.run(handle, completes: false) { @MainActor [weak self] in
                 guard let self else { return }
                 defer {
-                    self.clearHUDGeometry(generation: handle.generation)
-                    self.updateSurface()
+                    if self.operationGate.isCurrent(handle) {
+                        self.operationGate.complete(handle)
+                        self.clearHUDGeometry(generation: handle.generation)
+                        self.updateSurface()
+                    }
                 }
                 guard self.operationGate.isCurrent(handle) else { return }
                 guard self.storageCapability.health.isReady else {
