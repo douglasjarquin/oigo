@@ -1,0 +1,71 @@
+{
+  "name": "multi-display-negative-origin",
+  "currentGeneration": 14,
+  "panelSize": ["240", "52"],
+  "gap": "10",
+  "screenInset": "8",
+  "displays": [
+    { "id": 17, "visibleFrame": ["-1920", "0", "1920", "1080"] },
+    { "id": 42, "visibleFrame": ["0", "25", "1512", "957"] }
+  ],
+  "mainDisplayID": 42,
+  "frontmostDisplayID": 42,
+  "cases": [
+    {
+      "name": "negative-origin-below",
+      "snapshotGeneration": 14,
+      "targetDisplayID": 17,
+      "fieldFrame": ["-1800", "100", "160", "32"],
+      "windowFrame": ["-1880", "40", "1500", "980"],
+      "expectedStrategy": "below-field",
+      "expectedFrame": ["-1840", "38", "240", "52"]
+    },
+    {
+      "name": "edge-field-above",
+      "snapshotGeneration": 14,
+      "targetDisplayID": 17,
+      "fieldFrame": ["-1850", "20", "120", "32"],
+      "windowFrame": ["-1880", "0", "1500", "1000"],
+      "expectedStrategy": "above-field",
+      "expectedFrame": ["-1910", "62", "240", "52"]
+    },
+    {
+      "name": "window-only",
+      "snapshotGeneration": 14,
+      "targetDisplayID": 17,
+      "fieldFrame": ["nan", "20", "0", "32"],
+      "windowFrame": ["-1700", "80", "1000", "800"],
+      "expectedStrategy": "window-edge",
+      "expectedFrame": ["-1320", "88", "240", "52"]
+    },
+    {
+      "name": "invalid-geometry",
+      "snapshotGeneration": 14,
+      "targetDisplayID": 17,
+      "fieldFrame": ["nan", "nan", "0", "0"],
+      "windowFrame": ["nan", "0", "0", "0"],
+      "expectedStrategy": "screen-bottom",
+      "expectedFrame": ["-1080", "8", "240", "52"]
+    },
+    {
+      "name": "display-removal",
+      "snapshotGeneration": 14,
+      "targetDisplayID": 99,
+      "fieldFrame": ["-1800", "100", "160", "32"],
+      "windowFrame": ["-1880", "40", "1500", "980"],
+      "expectedStrategy": "main-screen",
+      "expectedFrame": ["636", "33", "240", "52"]
+    },
+    {
+      "name": "stale-generation",
+      "snapshotGeneration": 13,
+      "targetDisplayID": 17,
+      "fieldFrame": ["-1800", "100", "160", "32"],
+      "windowFrame": ["-1880", "40", "1500", "980"],
+      "expectedStrategy": "main-screen",
+      "expectedFrame": ["636", "33", "240", "52"]
+    }
+  ],
+  "repeatCount": 4,
+  "interruptionCount": 3
+}
