@@ -83,6 +83,8 @@
         A00000010000000000000056 /* DictionaryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000049 /* DictionaryStore.swift */; };
         A00000010000000000000057 /* TerminologyNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000004A /* TerminologyNormalizer.swift */; };
         A00000010000000000000058 /* OigoDiagnosticsExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000004B /* OigoDiagnosticsExport.swift */; };
+        A00000010000000000000059 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000007 /* Foundation.framework */; };
+        A0000001000000000000005A /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000008 /* AppKit.framework */; };
 
 /* End PBXBuildFile section */
 
@@ -194,6 +196,7 @@
         B00000010000000000000026 /* ProductContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductContracts.swift; sourceTree = "<group>"; };
         B00000010000000000000027 /* PerformanceContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceContracts.swift; sourceTree = "<group>"; };
         B00000010000000000000028 /* libOigoHotKey.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoHotKey.a; sourceTree = BUILT_PRODUCTS_DIR; };
+        B00000010000000000000050 /* OigoUIGallery.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OigoUIGallery.app; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000029 /* GlobalShortcutRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutRegistration.swift; sourceTree = "<group>"; };
         B00000010000000000000030 /* GlobalShortcutIntentController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutIntentController.swift; sourceTree = "<group>"; };
         B00000010000000000000031 /* ShortcutPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutPresentation.swift; sourceTree = "<group>"; };
@@ -296,6 +299,15 @@
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
+        D00000010000000000000015 /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A00000010000000000000059 /* Foundation.framework in Frameworks */,
+                A0000001000000000000005A /* AppKit.framework in Frameworks */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -308,6 +320,7 @@
                 C00000010000000000000007 /* OigoTranscription */,
                 C00000010000000000000008 /* OigoInsertion */,
                 C00000010000000000000009 /* OigoHotKey */,
+                C00000010000000000000010 /* OigoUIGallery */,
                 B0000001000000000000000C /* Info.plist */,
                 C00000010000000000000004 /* Frameworks */,
                 C00000010000000000000005 /* Products */,
@@ -432,11 +445,20 @@
                 B00000010000000000000013 /* libOigoTranscription.a */,
                 B0000001000000000000001B /* libOigoInsertion.a */,
                 B00000010000000000000028 /* libOigoHotKey.a */,
+                B00000010000000000000050 /* OigoUIGallery.app */,
             );
             name = Products;
             sourceTree = "<group>";
         };
 /* End PBXGroup section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+        C00000010000000000000010 /* OigoUIGallery */ = {
+            isa = PBXFileSystemSynchronizedRootGroup;
+            path = Sources/OigoUIGallery;
+            sourceTree = "<group>";
+        };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXNativeTarget section */
         E00000010000000000000001 /* Oigo */ = {
@@ -546,6 +568,26 @@
             productReference = B00000010000000000000028 /* libOigoHotKey.a */;
             productType = "com.apple.product-type.library.static";
         };
+        E00000010000000000000007 /* OigoUIGallery */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = P00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoUIGallery" */;
+            buildPhases = (
+                D00000010000000000000014 /* Sources */,
+                D00000010000000000000015 /* Frameworks */,
+                D00000010000000000000016 /* Resources */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+            );
+            fileSystemSynchronizedGroups = (
+                C00000010000000000000010 /* OigoUIGallery */,
+            );
+            name = OigoUIGallery;
+            productName = OigoUIGallery;
+            productReference = B00000010000000000000050 /* OigoUIGallery.app */;
+            productType = "com.apple.product-type.application";
+        };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -573,6 +615,9 @@
                     E00000010000000000000006 = {
                         CreatedOnToolsVersion = 16.0;
                     };
+                    E00000010000000000000007 = {
+                        CreatedOnToolsVersion = 16.0;
+                    };
                 };
             };
             buildConfigurationList = G00000010000000000000011 /* Build configuration list for PBXProject "Oigo" */;
@@ -594,12 +639,20 @@
                 E00000010000000000000004 /* OigoTranscription */,
                 E00000010000000000000005 /* OigoInsertion */,
                 E00000010000000000000006 /* OigoHotKey */,
+                E00000010000000000000007 /* OigoUIGallery */,
             );
         };
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
         D00000010000000000000005 /* Resources */ = {
+            isa = PBXResourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        D00000010000000000000016 /* Resources */ = {
             isa = PBXResourcesBuildPhase;
             buildActionMask = 2147483647;
             files = (
@@ -704,6 +757,13 @@
                 A0000001000000000000001D /* InsertionContracts.swift in Sources */,
                 A0000001000000000000001E /* InsertionService.swift in Sources */,
                 A00000010000000000000046 /* InsertionTargetHandoff.swift in Sources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        D00000010000000000000014 /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -921,6 +981,40 @@
             };
             name = Release;
         };
+        P00000010000000000000001 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = "$(ARCHS_STANDARD)";
+                CODE_SIGNING_ALLOWED = NO;
+                CODE_SIGN_IDENTITY = "";
+                GENERATE_INFOPLIST_FILE = YES;
+                INFOPLIST_KEY_CFBundleDisplayName = OigoUIGallery;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                ONLY_ACTIVE_ARCH = NO;
+                PRODUCT_BUNDLE_IDENTIFIER = com.oigo.qa.gallery;
+                PRODUCT_NAME = OigoUIGallery;
+                SKIP_INSTALL = YES;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Debug;
+        };
+        P00000010000000000000002 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = "$(ARCHS_STANDARD)";
+                CODE_SIGNING_ALLOWED = NO;
+                CODE_SIGN_IDENTITY = "";
+                GENERATE_INFOPLIST_FILE = YES;
+                INFOPLIST_KEY_CFBundleDisplayName = OigoUIGallery;
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                ONLY_ACTIVE_ARCH = NO;
+                PRODUCT_BUNDLE_IDENTIFIER = com.oigo.qa.gallery;
+                PRODUCT_NAME = OigoUIGallery;
+                SKIP_INSTALL = YES;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Release;
+        };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -983,6 +1077,15 @@
             buildConfigurations = (
                 O00000010000000000000001 /* Debug */,
                 O00000010000000000000002 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        P00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoUIGallery" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                P00000010000000000000001 /* Debug */,
+                P00000010000000000000002 /* Release */,
             );
             defaultConfigurationIsVisible = 0;
             defaultConfigurationName = Release;
