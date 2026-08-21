@@ -100,6 +100,8 @@ public final class MacUIFormRow: NSStackView {
         labelView.alignment = .right
         labelView.textColor = .labelColor
         labelView.font = .preferredFont(forTextStyle: .body)
+        labelView.lineBreakMode = .byWordWrapping
+        labelView.maximumNumberOfLines = 0
         super.init(frame: .zero)
         orientation = .horizontal
         alignment = .firstBaseline
@@ -153,7 +155,15 @@ public final class MacUIPermissionRow: NSStackView {
         orientation = .horizontal
         alignment = .centerY
         spacing = 12
-        addArrangedSubview(MacUIStatusRow(content: status, title: name, trailingValue: status.label))
+        let statusRow = MacUIStatusRow(content: status, title: name, trailingValue: status.label)
+        statusRow.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        statusRow.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        statusRow.arrangedSubviews.dropFirst().first?.setContentCompressionResistancePriority(
+            .required,
+            for: .horizontal
+        )
+        addArrangedSubview(statusRow)
+        button.setContentHuggingPriority(.required, for: .horizontal)
         addArrangedSubview(button)
     }
 
@@ -179,7 +189,15 @@ public final class MacUIStorageHealthRow: NSStackView {
         orientation = .horizontal
         alignment = .centerY
         spacing = 12
-        addArrangedSubview(MacUIStatusRow(content: status, title: name, trailingValue: status.label))
+        let statusRow = MacUIStatusRow(content: status, title: name, trailingValue: status.label)
+        statusRow.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        statusRow.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        statusRow.arrangedSubviews.dropFirst().first?.setContentCompressionResistancePriority(
+            .required,
+            for: .horizontal
+        )
+        addArrangedSubview(statusRow)
+        button.setContentHuggingPriority(.required, for: .horizontal)
         addArrangedSubview(button)
     }
 
@@ -475,13 +493,20 @@ public final class MacUIStatusRow: NSStackView {
 
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .preferredFont(forTextStyle: .body)
+        titleLabel.lineBreakMode = .byWordWrapping
+        titleLabel.maximumNumberOfLines = 0
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         addArrangedSubview(titleLabel)
 
         if let trailingValue {
             let valueLabel = NSTextField(labelWithString: trailingValue)
             valueLabel.textColor = .secondaryLabelColor
             valueLabel.alignment = .right
-            valueLabel.setContentHuggingPriority(.required, for: .horizontal)
+            valueLabel.lineBreakMode = .byWordWrapping
+            valueLabel.maximumNumberOfLines = 0
+            valueLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            valueLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
             addArrangedSubview(valueLabel)
         }
         setAccessibilityElement(true)
@@ -516,6 +541,9 @@ public final class MacUIStatusBadge: NSStackView {
         let label = NSTextField(labelWithString: content.label)
         label.font = .preferredFont(forTextStyle: .caption1)
         label.textColor = content.tone.color
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 0
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addArrangedSubview(label)
     }
 
@@ -546,7 +574,9 @@ public final class MacUIInlineNotice: NSStackView {
         layer?.cornerRadius = 8
         layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
 
-        addArrangedSubview(MacUIStatusRow(content: content, title: content.label))
+        let statusRow = MacUIStatusRow(content: content, title: content.label)
+        statusRow.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        addArrangedSubview(statusRow)
         let bodyLabel = NSTextField(wrappingLabelWithString: body)
         bodyLabel.textColor = .secondaryLabelColor
         bodyLabel.font = .preferredFont(forTextStyle: .callout)

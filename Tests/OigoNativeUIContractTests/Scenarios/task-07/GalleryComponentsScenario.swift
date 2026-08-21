@@ -23,6 +23,20 @@ final class GalleryComponentsScenario: NativeUIContractScenario {
             let panelTerminalizes: Bool
         }
 
+        struct SelectionEvidence: Decodable {
+            let selectedMode: String
+            let selectedValue: String
+            let focusedElement: String
+            let persistentVisualTreatment: String
+        }
+
+        struct LongLabelLayout: Decodable {
+            let viewportWidth: Int
+            let measuredWidth: Int
+            let wrapped: Bool
+            let controlsVisible: Bool
+        }
+
         struct Result: Decodable {
             let reportedSuccess: Bool
             let processExitStatus: Int
@@ -37,6 +51,8 @@ final class GalleryComponentsScenario: NativeUIContractScenario {
         let components: [Component]
         let panel: Panel
         let lifecycle: Lifecycle
+        let selection: SelectionEvidence
+        let longLabelLayout: LongLabelLayout
         let focusObservations: [[String]]
         let dirty: Bool?
         let result: Result?
@@ -117,6 +133,19 @@ final class GalleryComponentsScenario: NativeUIContractScenario {
             !$0.accessibilityRole.isEmpty && !$0.accessibilityLabel.isEmpty
         }) else {
             throw ContractInputError(category: "invalid-accessibility-metadata")
+        }
+        guard fixture.selection.selectedMode == "Dark + Large Text",
+              fixture.selection.selectedValue == "selected",
+              !fixture.selection.focusedElement.isEmpty,
+              fixture.selection.focusedElement != fixture.selection.selectedMode,
+              fixture.selection.persistentVisualTreatment == "accent-fill-and-border" else {
+            throw ContractInputError(category: "invalid-selection-evidence")
+        }
+        guard fixture.longLabelLayout.viewportWidth == 760,
+              fixture.longLabelLayout.measuredWidth == 760,
+              fixture.longLabelLayout.wrapped,
+              fixture.longLabelLayout.controlsVisible else {
+            throw ContractInputError(category: "invalid-long-label-layout")
         }
 
         let actionable = [
