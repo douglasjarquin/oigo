@@ -85,6 +85,8 @@
         A00000010000000000000058 /* OigoDiagnosticsExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000004B /* OigoDiagnosticsExport.swift */; };
         A00000010000000000000059 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000007 /* Foundation.framework */; };
         A0000001000000000000005A /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000008 /* AppKit.framework */; };
+        A0000001000000000000005B /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000007 /* Foundation.framework */; };
+        A0000001000000000000005C /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000008 /* AppKit.framework */; };
 
 /* End PBXBuildFile section */
 
@@ -197,6 +199,7 @@
         B00000010000000000000027 /* PerformanceContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceContracts.swift; sourceTree = "<group>"; };
         B00000010000000000000028 /* libOigoHotKey.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoHotKey.a; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000050 /* OigoUIGallery.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OigoUIGallery.app; sourceTree = BUILT_PRODUCTS_DIR; };
+        B00000010000000000000051 /* libMacUtilityUI.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libMacUtilityUI.a; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000029 /* GlobalShortcutRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutRegistration.swift; sourceTree = "<group>"; };
         B00000010000000000000030 /* GlobalShortcutIntentController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutIntentController.swift; sourceTree = "<group>"; };
         B00000010000000000000031 /* ShortcutPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutPresentation.swift; sourceTree = "<group>"; };
@@ -308,6 +311,15 @@
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
+        D00000010000000000000018 /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A0000001000000000000005B /* Foundation.framework in Frameworks */,
+                A0000001000000000000005C /* AppKit.framework in Frameworks */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -321,6 +333,7 @@
                 C00000010000000000000008 /* OigoInsertion */,
                 C00000010000000000000009 /* OigoHotKey */,
                 C00000010000000000000010 /* OigoUIGallery */,
+                C00000010000000000000011 /* MacUtilityUI */,
                 B0000001000000000000000C /* Info.plist */,
                 C00000010000000000000004 /* Frameworks */,
                 C00000010000000000000005 /* Products */,
@@ -446,6 +459,7 @@
                 B0000001000000000000001B /* libOigoInsertion.a */,
                 B00000010000000000000028 /* libOigoHotKey.a */,
                 B00000010000000000000050 /* OigoUIGallery.app */,
+                B00000010000000000000051 /* libMacUtilityUI.a */,
             );
             name = Products;
             sourceTree = "<group>";
@@ -456,6 +470,11 @@
         C00000010000000000000010 /* OigoUIGallery */ = {
             isa = PBXFileSystemSynchronizedRootGroup;
             path = Sources/OigoUIGallery;
+            sourceTree = "<group>";
+        };
+        C00000010000000000000011 /* MacUtilityUI */ = {
+            isa = PBXFileSystemSynchronizedRootGroup;
+            path = Sources/MacUtilityUI;
             sourceTree = "<group>";
         };
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -588,6 +607,25 @@
             productReference = B00000010000000000000050 /* OigoUIGallery.app */;
             productType = "com.apple.product-type.application";
         };
+        E00000010000000000000008 /* MacUtilityUI */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = Q00000010000000000000011 /* Build configuration list for PBXNativeTarget "MacUtilityUI" */;
+            buildPhases = (
+                D00000010000000000000017 /* Sources */,
+                D00000010000000000000018 /* Frameworks */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+            );
+            fileSystemSynchronizedGroups = (
+                C00000010000000000000011 /* MacUtilityUI */,
+            );
+            name = MacUtilityUI;
+            productName = MacUtilityUI;
+            productReference = B00000010000000000000051 /* libMacUtilityUI.a */;
+            productType = "com.apple.product-type.library.static";
+        };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -618,6 +656,9 @@
                     E00000010000000000000007 = {
                         CreatedOnToolsVersion = 16.0;
                     };
+                    E00000010000000000000008 = {
+                        CreatedOnToolsVersion = 16.0;
+                    };
                 };
             };
             buildConfigurationList = G00000010000000000000011 /* Build configuration list for PBXProject "Oigo" */;
@@ -640,6 +681,7 @@
                 E00000010000000000000005 /* OigoInsertion */,
                 E00000010000000000000006 /* OigoHotKey */,
                 E00000010000000000000007 /* OigoUIGallery */,
+                E00000010000000000000008 /* MacUtilityUI */,
             );
         };
 /* End PBXProject section */
@@ -761,6 +803,13 @@
             runOnlyForDeploymentPostprocessing = 0;
         };
         D00000010000000000000014 /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        D00000010000000000000017 /* Sources */ = {
             isa = PBXSourcesBuildPhase;
             buildActionMask = 2147483647;
             files = (
@@ -1015,6 +1064,30 @@
             };
             name = Release;
         };
+        Q00000010000000000000001 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = "$(ARCHS_STANDARD)";
+                CODE_SIGNING_ALLOWED = NO;
+                CODE_SIGN_IDENTITY = "";
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_NAME = MacUtilityUI;
+                SKIP_INSTALL = YES;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Debug;
+        };
+        Q00000010000000000000002 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = "$(ARCHS_STANDARD)";
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_NAME = MacUtilityUI;
+                SKIP_INSTALL = YES;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Release;
+        };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1086,6 +1159,15 @@
             buildConfigurations = (
                 P00000010000000000000001 /* Debug */,
                 P00000010000000000000002 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        Q00000010000000000000011 /* Build configuration list for PBXNativeTarget "MacUtilityUI" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                Q00000010000000000000001 /* Debug */,
+                Q00000010000000000000002 /* Release */,
             );
             defaultConfigurationIsVisible = 0;
             defaultConfigurationName = Release;
