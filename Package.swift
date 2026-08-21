@@ -96,6 +96,14 @@ let package = Package(
         .executable(
             name: "oigo-issue14-contract-tests",
             targets: ["OigoIssue14ContractTests"]
+        ),
+        .executable(
+            name: "oigo-native-ui-contract-tests",
+            targets: ["OigoNativeUIContractTests"]
+        ),
+        .executable(
+            name: "OigoUIGallery",
+            targets: ["OigoUIGallery"]
         )
     ],
     targets: [
@@ -266,6 +274,17 @@ let package = Package(
             name: "OigoIssue14ContractTests",
             dependencies: ["OigoCore"],
             path: "Tests/OigoIssue14ContractTests"
+        ),
+        .executableTarget(
+            name: "OigoNativeUIContractTests",
+            path: "Tests/OigoNativeUIContractTests"
+        ),
+        .executableTarget(
+            name: "OigoUIGallery",
+            path: "Sources/OigoUIGallery",
+            linkerSettings: [
+                .linkedFramework("AppKit")
+            ]
         )
     ]
 )
