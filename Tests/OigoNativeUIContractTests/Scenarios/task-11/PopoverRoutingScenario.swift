@@ -156,6 +156,7 @@ final class PopoverRoutingScenario: NativeUIContractScenario {
               !gallery.contains("window.orderFront(nil)"),
               !gallery.contains("window.orderOut(nil)"),
               gallery.contains("recordHostObservation()"),
+              !gallery.contains("assertion="),
               gallery.contains("entries=History,Settings,separator,Quit"),
               gallery.contains("activation-policy=") else {
             throw ContractInputError(category: "invalid-gallery-activation-evidence")
