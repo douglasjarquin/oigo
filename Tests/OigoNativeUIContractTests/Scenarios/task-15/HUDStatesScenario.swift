@@ -61,6 +61,7 @@ final class HUDStatesScenario: NativeUIContractScenario {
             fixture: fixture
         )
         guard output.contains("PASS hud-state-matrix"),
+              output.contains("PASS hud-preview-bound"),
               output.contains("PASS hud-cadence"),
               output.contains("PASS hud-generation") else {
             throw ContractInputError(category: "unexpected-hud-contract-output")
@@ -238,6 +239,14 @@ final class HUDStatesScenario: NativeUIContractScenario {
     }
     guard statePass else { exit(1) }
     print("PASS hud-state-matrix")
+
+    let previewInput = String(repeating: "a", count: 179) + "👩‍💻" + String(repeating: "b", count: 70)
+    let preview = OigoHUDShellPolicy.boundedPreview(previewInput)
+    let expectedPreview = String(repeating: "a", count: 179) + "👩‍💻"
+    guard OigoHUDShellPolicy.previewMaxCharacters == 180,
+          preview.count == 180,
+          preview == expectedPreview else { exit(5) }
+    print("PASS hud-preview-bound")
 
     var cadence = OigoHUDLifecycle()
     guard cadence.present(.recording, generation: 10, visible: true) else { exit(1) }
