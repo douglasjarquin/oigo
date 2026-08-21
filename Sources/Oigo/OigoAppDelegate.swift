@@ -89,7 +89,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         registrar: shortcutRegistrar,
         onEvent: { [weak self] event in self?.handleGlobalShortcut(event) }
     )
-    private let statusSurface = StatusSurfaceController()
+    private lazy var statusSurface = StatusSurfaceController { [weak self] command in
+        switch command {
+        case .history:
+            self?.openHistory()
+        case .settings:
+            self?.openSettings()
+        case .quit:
+            self?.quit()
+        }
+    }
     private let settingsStore = OigoSettingsStore()
     private let onboardingStore = OigoOnboardingStore()
     private let storageCapability: DurableSessionCapability
@@ -119,14 +128,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var historyCursor: SessionHistoryCursor?
     private var historyHasMore = false
     private var statusItem: NSStatusItem?
-    private var toggleItem: NSMenuItem?
-    private var shortcutStatusItem: NSMenuItem?
-    private var modeMenuItem: NSMenuItem?
-    private var instantModeItem: NSMenuItem?
-    private var cleanModeItem: NSMenuItem?
-    private var storageStatusItem: NSMenuItem?
-    private var retryStorageItem: NSMenuItem?
-    private var launchAtLoginItem: NSMenuItem?
     private var settings = OigoSettingsStore().load()
     private var targetSnapshot: InsertionTargetSnapshot?
     private var insertionDisplayStatus: OigoHUDProcessingState?
@@ -247,7 +248,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         storageCapability.shutdown()
         deviceInventoryMonitor.stop()
         removeWorkspaceInterruptionObservers()
-        statusSurface.hide()
+        statusSurface.teardown()
+        if let statusItem {
+            NSStatusBar.system.removeStatusItem(statusItem)
+            self.statusItem = nil
+        }
         playback.stop()
         operationGate.cancelCurrent()
         let needsBoundedQuit = coordinator.hasActiveWork
@@ -615,107 +620,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func configureStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "Oigo"
-
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        let toggle = NSMenuItem(
-            title: "Start Dictation",
-            action: #selector(toggleDictation),
-            keyEquivalent: ""
-        )
-        toggle.target = self
-        menu.addItem(toggle)
-
-        let storageStatus = NSMenuItem(
-            title: DurableSessionHealth.checking.statusMessage,
-            action: nil,
-            keyEquivalent: ""
-        )
-        storageStatus.isEnabled = false
-        menu.addItem(storageStatus)
-
-        let retryStorage = NSMenuItem(
-            title: "Retry Storage",
-            action: #selector(retryStorageAction),
-            keyEquivalent: ""
-        )
-        retryStorage.target = self
-        menu.addItem(retryStorage)
-        let shortcutStatus = NSMenuItem(
-            title: "Global Shortcut Inactive - Open Settings…",
-            action: #selector(openSettings),
-            keyEquivalent: ""
-        )
-        shortcutStatus.target = self
-        menu.addItem(shortcutStatus)
-
-        let mode = NSMenuItem(
-            title: "Mode",
-            action: nil,
-            keyEquivalent: ""
-        )
-        let modeMenu = NSMenu()
-        let instant = NSMenuItem(
-            title: OigoProcessingMode.instant.displayName,
-            action: #selector(selectInstantMode),
-            keyEquivalent: ""
-        )
-        instant.target = self
-        let clean = NSMenuItem(
-            title: OigoProcessingMode.clean.displayName,
-            action: #selector(selectCleanMode),
-            keyEquivalent: ""
-        )
-        clean.target = self
-        modeMenu.addItem(instant)
-        modeMenu.addItem(clean)
-        mode.submenu = modeMenu
-        menu.addItem(mode)
-
-        let history = NSMenuItem(
-            title: "Recent Dictations…",
-            action: #selector(openHistory),
-            keyEquivalent: ""
-        )
-        history.target = self
-        menu.addItem(history)
-
-        let settings = NSMenuItem(
-            title: "Settings…",
-            action: #selector(openSettings),
-            keyEquivalent: ","
-        )
-        settings.target = self
-        menu.addItem(settings)
-
-        let launchAtLogin = NSMenuItem(
-            title: "Launch at Login",
-            action: #selector(toggleLaunchAtLogin),
-            keyEquivalent: ""
-        )
-        launchAtLogin.target = self
-        menu.addItem(launchAtLogin)
-
-        menu.addItem(.separator())
-
-        let quit = NSMenuItem(
-            title: "Quit Oigo",
-            action: #selector(quit),
-            keyEquivalent: "q"
-        )
-        quit.target = self
-        menu.addItem(quit)
-
-        item.menu = menu
         statusItem = item
-        toggleItem = toggle
-        shortcutStatusItem = shortcutStatus
-        modeMenuItem = mode
-        instantModeItem = instant
-        cleanModeItem = clean
-        storageStatusItem = storageStatus
-        retryStorageItem = retryStorage
-        launchAtLoginItem = launchAtLogin
+        statusSurface.install(statusItem: item)
     }
 
     private func registerShortcut() {
@@ -2111,29 +2017,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func publishPresentation(_ snapshot: OigoAppDelegatePresentationSnapshot) {
         presentationPublicationFence.publish(snapshot.publication) { publication in
             let adapter = publication.adapters
-            toggleItem?.title = adapter.toggleTitle
-            toggleItem?.action = adapter.toggleCommand == .retryStorage
-                ? #selector(retryStorageAction) : #selector(toggleDictation)
-            toggleItem?.isEnabled = adapter.toggleEnabled
-            instantModeItem?.state = snapshot.defaultMode == .instant ? .on : .off
-            cleanModeItem?.state = snapshot.defaultMode == .clean ? .on : .off
-            modeMenuItem?.isEnabled = adapter.modeEnabled
-            instantModeItem?.toolTip = adapter.settingsApplyToNextDictation
-                ? NextDictationSettingsPolicy.nextDictationCopy
-                : nil
-            cleanModeItem?.toolTip = adapter.settingsApplyToNextDictation
-                ? NextDictationSettingsPolicy.nextDictationCopy
-                : nil
+            statusSurface.publish(publication.state, generation: publication.generation)
             settingsWindow?.setAppliesToNextDictation(adapter.settingsApplyToNextDictation)
             historyWindow?.setCommandAvailability(snapshot.availability)
             onboardingWindow?.setCommandAvailability(snapshot.availability)
-            storageStatusItem?.title = snapshot.storageMessage
-            retryStorageItem?.isEnabled = adapter.retryStorageEnabled
-            launchAtLoginItem?.state = snapshot.launchAtLogin.menuStateOn ? .on : .off
-            launchAtLoginItem?.title = snapshot.launchAtLogin.menuTitle
-            launchAtLoginItem?.toolTip = snapshot.launchAtLogin.menuToolTip
             statusItem?.button?.title = "Oigo"
-            shortcutStatusItem?.title = snapshot.shortcutTitle
             statusItem?.button?.toolTip = snapshot.shortcutToolTip
             switch snapshot.hud {
             case .recording(let startedAt, let preview, let detail):

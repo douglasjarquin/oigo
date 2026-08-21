@@ -5,6 +5,7 @@ struct ContractArguments {
     let scenario: String
     let defaultsSuite: String
     let fixtureRoot: URL
+    let fixtureName: String?
 
     static func parse(_ arguments: [String]) throws -> ContractArguments {
         let values = try parseOptions(arguments)
@@ -13,25 +14,46 @@ struct ContractArguments {
             throw ContractInputError(category: "invalid-scenario")
         }
 
-        let defaultsSuite = try required("defaults-suite", in: values)
-        guard defaultsSuite.range(
-            of: #"^com\.oigo\.qa\.task[0-9]+$"#,
-            options: .regularExpression
-        ) != nil else {
-            throw ContractInputError(category: "invalid-defaults-suite")
-        }
+        let defaultsSuite: String
+        let fixtureRoot: URL
+        let fixtureName: String?
+        if scenario == "popover-routing", let requestedFixture = values["fixture"] {
+            guard values["defaults-suite"] == nil, values["fixture-root"] == nil,
+                  requestedFixture.range(of: #"^[a-z][a-z0-9-]*$"#, options: .regularExpression) != nil else {
+                throw ContractInputError(category: "invalid-fixture")
+            }
+            defaultsSuite = "com.oigo.qa.task11"
+            fixtureRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent("Tests/OigoNativeUIContractFixtures/task-11", isDirectory: true)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+            fixtureName = requestedFixture
+        } else {
+            guard values["fixture"] == nil else {
+                throw ContractInputError(category: "unknown-or-duplicate-argument")
+            }
+            defaultsSuite = try required("defaults-suite", in: values)
+            guard defaultsSuite.range(
+                of: #"^com\.oigo\.qa\.task[0-9]+$"#,
+                options: .regularExpression
+            ) != nil else {
+                throw ContractInputError(category: "invalid-defaults-suite")
+            }
 
-        let fixtureRoot = URL(fileURLWithPath: try required("fixture-root", in: values))
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-        guard fixtureRoot.path.hasPrefix("/"), isOwnedTaskPath(fixtureRoot) else {
-            throw ContractInputError(category: "invalid-fixture-root")
+            fixtureRoot = URL(fileURLWithPath: try required("fixture-root", in: values))
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+            guard fixtureRoot.path.hasPrefix("/"), isOwnedTaskPath(fixtureRoot) else {
+                throw ContractInputError(category: "invalid-fixture-root")
+            }
+            fixtureName = nil
         }
 
         return ContractArguments(
             scenario: scenario,
             defaultsSuite: defaultsSuite,
-            fixtureRoot: fixtureRoot
+            fixtureRoot: fixtureRoot,
+            fixtureName: fixtureName
         )
     }
 
@@ -48,7 +70,7 @@ struct ContractArguments {
                 throw ContractInputError(category: "malformed-arguments")
             }
             let key = String(option.dropFirst(2))
-            guard ["scenario", "defaults-suite", "fixture-root"].contains(key), values[key] == nil else {
+            guard ["scenario", "defaults-suite", "fixture-root", "fixture"].contains(key), values[key] == nil else {
                 throw ContractInputError(category: "unknown-or-duplicate-argument")
             }
             values[key] = value
