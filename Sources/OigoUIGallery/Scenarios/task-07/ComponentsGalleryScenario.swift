@@ -11,7 +11,7 @@ final class ComponentsGalleryScenario: GalleryScenario {
 
     override class func makeWindow(configuration: GalleryConfiguration) -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 920, height: 780),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 620),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
@@ -98,8 +98,10 @@ private final class ComponentsGalleryViewController: NSViewController {
         for item in [Mode.normal, .dark, .largeText, .darkLarge, .reducedMotion, .longLabels] {
             let button = NSButton(title: item.rawValue, target: self, action: #selector(changeMode(_:)))
             button.setButtonType(.toggle)
+            button.bezelStyle = .rounded
             button.identifier = NSUserInterfaceItemIdentifier(item.rawValue)
             button.setAccessibilityLabel("Show " + item.rawValue + " component scenario")
+            button.setContentHuggingPriority(.required, for: .horizontal)
             modes.addArrangedSubview(button)
             modeButtons.append(button)
         }
@@ -141,6 +143,8 @@ private final class ComponentsGalleryViewController: NSViewController {
 
     override func viewDidAppear() {
         super.viewDidAppear()
+        applyScenarioAppearance()
+        updateModeButtonAppearance()
         installKeyboardActivation()
         focusButtons.first?.window?.makeFirstResponder(focusButtons.first)
     }
@@ -161,6 +165,9 @@ private final class ComponentsGalleryViewController: NSViewController {
         }
         mode = selectedMode
         renderBody()
+        if selectedMode == .longLabels {
+            sender.window?.setContentSize(NSSize(width: 760, height: 620))
+        }
         sender.window?.makeFirstResponder(sender)
     }
 
@@ -172,13 +179,12 @@ private final class ComponentsGalleryViewController: NSViewController {
         }
         focusButtons.removeAll()
 
-        view.window?.appearance = [.dark, .darkLarge].contains(mode)
-            ? NSAppearance(named: .darkAqua)
-            : NSAppearance(named: .aqua)
+        applyScenarioAppearance()
         for button in modeButtons {
             button.state = button.identifier?.rawValue == mode.rawValue ? .on : .off
             button.setAccessibilityValue(button.state == .on ? "selected" : "not selected")
         }
+        updateModeButtonAppearance()
         modeLabel.stringValue = "Scenario: " + mode.rawValue
             + (mode == .reducedMotion ? " - animations terminalized" : "")
         modeLabel.setAccessibilityLabel(modeLabel.stringValue)
@@ -386,6 +392,37 @@ private final class ComponentsGalleryViewController: NSViewController {
         return button
     }
 
+    private func applyScenarioAppearance() {
+        let appearance = [.dark, .darkLarge].contains(mode)
+            ? NSAppearance(named: .darkAqua)
+            : NSAppearance(named: .aqua)
+        view.appearance = appearance
+        view.window?.appearance = appearance
+    }
+
+    private func updateModeButtonAppearance() {
+        for button in modeButtons {
+            let selected = button.state == .on
+            button.wantsLayer = true
+            button.layer?.cornerRadius = 6
+            button.layer?.borderWidth = selected ? 1.5 : 0
+            button.layer?.borderColor = selected
+                ? NSColor.controlAccentColor.cgColor
+                : NSColor.clear.cgColor
+            button.layer?.backgroundColor = selected
+                ? NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor
+                : NSColor.clear.cgColor
+            button.bezelColor = selected
+                ? NSColor.controlAccentColor.withAlphaComponent(0.22)
+                : nil
+            button.contentTintColor = selected ? NSColor.controlAccentColor : nil
+            button.image = selected
+                ? NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Selected")
+                : nil
+            button.imagePosition = selected ? .imageLeading : .noImage
+        }
+    }
+
     private func configureFocusOrder(
         in root: NSView,
         destructive: NSButton,
@@ -478,9 +515,22 @@ private final class ComponentsGalleryViewController: NSViewController {
     }
 
     @objc private func showFloatingPanel() {
-        floatingPanel?.terminalize()
+        if let previousPanel = floatingPanel {
+            if let parent = previousPanel.parent {
+                removeFloatingPanelFromAccessibilityHierarchy(previousPanel, from: parent)
+                parent.removeChildWindow(previousPanel)
+            }
+            previousPanel.terminalize()
+        }
         let panel = MacUIFloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 96))
         panel.title = "Synthetic Nonactivating Panel"
+        panel.setAccessibilityElement(true)
+        panel.setAccessibilityRole(.window)
+        panel.setAccessibilitySubrole(.floatingWindow)
+        panel.setAccessibilityLabel("Synthetic floating panel window")
+        panel.setAccessibilityTitle(panel.title)
+        panel.setAccessibilityIdentifier("task7.synthetic.floating-panel")
+        panel.isFloatingPanel = true
         let panelContent = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 96))
         panelContent.wantsLayer = true
         panelContent.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
@@ -489,7 +539,8 @@ private final class ComponentsGalleryViewController: NSViewController {
         panelContent.layer?.borderColor = NSColor.separatorColor.cgColor
         panelContent.setAccessibilityElement(true)
         panelContent.setAccessibilityRole(.group)
-        panelContent.setAccessibilityLabel("Synthetic floating panel")
+        panelContent.setAccessibilityLabel("Synthetic floating panel content")
+        panelContent.setAccessibilityIdentifier("task7.synthetic.floating-panel.content")
         let label = NSTextField(labelWithString: "Nonactivating - key: false - main: false")
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -500,9 +551,12 @@ private final class ComponentsGalleryViewController: NSViewController {
             label.centerYAnchor.constraint(equalTo: panelContent.centerYAnchor)
         ])
         panel.contentView = panelContent
+        panel.setAccessibilityChildren([panelContent])
         if let parent = view.window {
             let frame = parent.frame
             panel.setFrameOrigin(NSPoint(x: frame.midX - 180, y: frame.maxY - 132))
+            panel.setAccessibilityParent(parent)
+            parent.setAccessibilityChildren((parent.accessibilityChildren() ?? []) + [panel])
             parent.addChildWindow(panel, ordered: .above)
         }
         panel.orderFront(nil)
@@ -520,10 +574,18 @@ private final class ComponentsGalleryViewController: NSViewController {
         loadingView = nil
         transcriptView = nil
         if let panel = floatingPanel, let parent = panel.parent {
+            removeFloatingPanelFromAccessibilityHierarchy(panel, from: parent)
             parent.removeChildWindow(panel)
         }
         floatingPanel?.terminalize()
         floatingPanel = nil
+    }
+
+    private func removeFloatingPanelFromAccessibilityHierarchy(_ panel: NSPanel, from parent: NSWindow) {
+        let remainingChildren = (parent.accessibilityChildren() ?? []).filter {
+            ($0 as AnyObject) !== panel
+        }
+        parent.setAccessibilityChildren(remainingChildren)
     }
 
     @available(*, unavailable)
