@@ -15,6 +15,7 @@ The SVG is generation input only and must never be shipped as a runtime resource
 
 `Oigo/Assets.xcassets` is the only Task 8 production resource catalog.
 `AppIcon.appiconset` contains the required 16, 32, 128, 256, and 512 point macOS representations at both 1x and 2x.
+Each AppIcon metadata tuple is exact: filename, `mac` idiom, point size, and scale must appear once for every required representation.
 `OigoMenuBar.imageset` contains a 16 point menu-bar representation at 1x and 2x.
 
 Generate the catalog with `zsh Scripts/generate-oigo-assets.sh --output Oigo/Assets.xcassets` only when the destination is absent.

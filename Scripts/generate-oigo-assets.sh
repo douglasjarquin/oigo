@@ -40,16 +40,16 @@ APP_BACKGROUND = (11, 12, 16, 255)
 APP_FOREGROUND = (245, 245, 247, 255)
 TEMPLATE_FOREGROUND = (0, 0, 0, 255)
 APP_REPRESENTATIONS = (
-    ("appicon-16.png", 16, "16x"),
-    ("appicon-16@2x.png", 32, "16x 2x"),
-    ("appicon-32.png", 32, "32x"),
-    ("appicon-32@2x.png", 64, "32x 2x"),
-    ("appicon-128.png", 128, "128x"),
-    ("appicon-128@2x.png", 256, "128x 2x"),
-    ("appicon-256.png", 256, "256x"),
-    ("appicon-256@2x.png", 512, "256x 2x"),
-    ("appicon-512.png", 512, "512x"),
-    ("appicon-512@2x.png", 1024, "512x 2x"),
+    ("appicon-16.png", 16, 16, "1x"),
+    ("appicon-16@2x.png", 32, 16, "2x"),
+    ("appicon-32.png", 32, 32, "1x"),
+    ("appicon-32@2x.png", 64, 32, "2x"),
+    ("appicon-128.png", 128, 128, "1x"),
+    ("appicon-128@2x.png", 256, 128, "2x"),
+    ("appicon-256.png", 256, 256, "1x"),
+    ("appicon-256@2x.png", 512, 256, "2x"),
+    ("appicon-512.png", 512, 512, "1x"),
+    ("appicon-512@2x.png", 1024, 512, "2x"),
 )
 
 
@@ -179,10 +179,9 @@ def main():
         app_directory = output / "AppIcon.appiconset"
         app_directory.mkdir()
         app_images = []
-        for filename, size, representation in APP_REPRESENTATIONS:
+        for filename, size, point_size, scale in APP_REPRESENTATIONS:
             (app_directory / filename).write_bytes(png_bytes(size, size, app_pixels(size, segments)))
-            point_size, scale = representation.replace("x", "").split(" ")[0], "2x" if "2x" in representation else "1x"
-            app_images.append({"filename": filename, "idiom": "mac", "scale": scale, "size": point_size + "x" + point_size})
+            app_images.append({"filename": filename, "idiom": "mac", "scale": scale, "size": f"{point_size}x{point_size}"})
         write_json(app_directory / "Contents.json", {"images": app_images, "info": {"author": "xcode", "version": 1}})
         menu_directory = output / "OigoMenuBar.imageset"
         menu_directory.mkdir()
