@@ -1,3 +1,5 @@
+import Foundation
+
 public enum OigoPresentationStateRow: String, CaseIterable, Equatable, Sendable {
     case storageChecking = "storage-checking"
     case storageReadyIdle = "storage-ready-idle"
@@ -46,7 +48,7 @@ public enum OigoPresentationStatus: String, Equatable, Sendable {
     case quitting
 }
 
-public enum OigoPresentationAction: String, Equatable, Sendable {
+public enum OigoPresentationAction: Equatable, Sendable {
     case startDictation
     case stopDictation
     case retryStorage
@@ -54,11 +56,32 @@ public enum OigoPresentationAction: String, Equatable, Sendable {
     case chooseInput
     case installAssets
     case openSettings
-    case openSystemSettings
+    case openSystemSettings(URL)
+    case setMode(OigoProcessingModePresentationValue)
     case openDataLocation
     case copy
     case pasteAgain
     case openHistory
+    case quit
+
+    var category: String {
+        switch self {
+        case .startDictation: "start-dictation"
+        case .stopDictation: "stop-dictation"
+        case .retryStorage: "retry-storage"
+        case .retryTranscription: "retry-transcription"
+        case .chooseInput: "choose-input"
+        case .installAssets: "install-assets"
+        case .openSettings: "open-settings"
+        case .openSystemSettings: "open-system-settings"
+        case .setMode(let mode): "set-mode-" + mode.rawValue
+        case .openDataLocation: "open-data-location"
+        case .copy: "copy"
+        case .pasteAgain: "paste-again"
+        case .openHistory: "open-history"
+        case .quit: "quit"
+        }
+    }
 }
 
 public enum OigoActionDisabledReason: Equatable, Sendable {
@@ -90,9 +113,9 @@ public enum OigoPrimaryPresentationAction: Equatable, Sendable {
 
     var category: String {
         switch self {
-        case .enabled(let action): "enabled-" + action.rawValue
+        case .enabled(let action): "enabled-" + action.category
         case .disabled(let action, let reason):
-            "disabled-" + (action?.rawValue ?? "none") + "-" + reason.category
+            "disabled-" + (action?.category ?? "none") + "-" + reason.category
         }
     }
 }

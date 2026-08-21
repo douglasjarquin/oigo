@@ -6,7 +6,7 @@ struct GalleryConfiguration {
     let sessionRoot: URL
     let fixtureRoot: URL
     let evidenceRoot: URL
-    let appearance: String?
+    let appearance: String
 
     static func parse(_ arguments: [String], environment: [String: String]) throws -> GalleryConfiguration {
         let values = try parseOptions(arguments)
@@ -27,8 +27,8 @@ struct GalleryConfiguration {
         guard try required("permission-provider", in: values) == "synthetic" else {
             throw GalleryInputError(category: "invalid-permission-provider")
         }
-        let appearance = values["appearance"]
-        guard appearance == nil || appearance == "dark" else {
+        let appearance = values["appearance"] ?? "system"
+        guard ["system", "light", "dark"].contains(appearance) else {
             throw GalleryInputError(category: "invalid-appearance")
         }
 
@@ -82,8 +82,7 @@ struct GalleryConfiguration {
             "scenario", "defaults-suite", "session-root", "fixture-root", "evidence-root",
             "pasteboard-provider", "permission-provider", "appearance"
         ])
-        guard arguments.count.isMultiple(of: 2),
-              (allowed.count - 1) * 2 ... allowed.count * 2 ~= arguments.count else {
+        guard arguments.count == (allowed.count - 1) * 2 || arguments.count == allowed.count * 2 else {
             throw GalleryInputError(category: "malformed-arguments")
         }
         var values: [String: String] = [:]

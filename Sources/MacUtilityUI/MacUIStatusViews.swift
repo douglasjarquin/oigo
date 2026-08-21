@@ -130,6 +130,11 @@ public final class MacUIInlineNotice: NSStackView {
         layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
     }
 
+    public override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is unavailable")

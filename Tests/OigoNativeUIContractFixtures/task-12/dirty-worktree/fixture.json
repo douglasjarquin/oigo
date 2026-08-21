@@ -1,0 +1,8 @@
+{
+  "name": "dirty-worktree",
+  "rows": [],
+  "expectedSections": [],
+  "popoverWidth": 340,
+  "healthyNoScroll": true,
+  "dirty": true
+}
