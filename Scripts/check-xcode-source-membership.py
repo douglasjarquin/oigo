@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 
-PRODUCTION_ROOTS = {
+REQUIRED_PRODUCTION_ROOTS = {
     "Sources/Oigo": "Oigo",
     "Sources/OigoCore": "OigoCore",
     "Sources/OigoCapture": "OigoCapture",
@@ -14,6 +14,13 @@ PRODUCTION_ROOTS = {
     "Sources/OigoInsertion": "OigoInsertion",
     "Sources/OigoHotKey": "OigoHotKey",
 }
+
+OPTIONAL_DECLARED_ROOTS = {
+    "Sources/MacUtilityUI": "MacUtilityUI",
+    "Sources/OigoUIGallery": "OigoUIGallery",
+}
+
+DECLARED_ROOTS = REQUIRED_PRODUCTION_ROOTS | OPTIONAL_DECLARED_ROOTS
 
 
 def load_objects(pbxproj):
@@ -68,7 +75,7 @@ def file_repo_path(objects, file_ref_id, parents, cache):
     return os.path.normpath(joined)
 
 
-def compiled_paths_by_target(objects):
+def compiled_paths_by_target(objects, repo_root):
     parents = group_parents(objects)
     cache = {}
     phase_to_target = {}
@@ -95,6 +102,33 @@ def compiled_paths_by_target(objects):
                     % (target_name, path)
                 )
             compiled[target_name].add(path)
+
+    for obj in objects.values():
+        if obj.get("isa") != "PBXNativeTarget":
+            continue
+        target_name = obj.get("name")
+        compiled.setdefault(target_name, set())
+        for group_id in obj.get("fileSystemSynchronizedGroups", []):
+            group = objects.get(group_id, {})
+            if group.get("isa") != "PBXFileSystemSynchronizedRootGroup":
+                raise SystemExit(
+                    "Xcode target %s has an invalid synchronized source group"
+                    % target_name
+                )
+            relative_root = os.path.normpath(group.get("path", ""))
+            if not relative_root or relative_root.startswith(".."):
+                raise SystemExit(
+                    "Xcode target %s has an unsafe synchronized source root"
+                    % target_name
+                )
+            directory = os.path.join(repo_root, relative_root)
+            for walk_root, _, filenames in os.walk(directory):
+                for name in filenames:
+                    if name.endswith(".swift"):
+                        full = os.path.join(walk_root, name)
+                        compiled[target_name].add(
+                            os.path.normpath(os.path.relpath(full, repo_root))
+                        )
     if not compiled:
         raise SystemExit("Oigo.xcodeproj has no Swift sources phases")
     return compiled
@@ -102,8 +136,12 @@ def compiled_paths_by_target(objects):
 
 def disk_paths_by_target(repo_root):
     expected = {}
-    for relative_root, target in PRODUCTION_ROOTS.items():
+    for relative_root, target in DECLARED_ROOTS.items():
         directory = os.path.join(repo_root, relative_root)
+        if not os.path.isdir(directory):
+            if relative_root in REQUIRED_PRODUCTION_ROOTS:
+                raise SystemExit("%s is missing" % relative_root)
+            continue
         expected.setdefault(target, set())
         found = False
         for walk_root, _, filenames in os.walk(directory):
@@ -114,7 +152,7 @@ def disk_paths_by_target(repo_root):
                 full = os.path.join(walk_root, name)
                 rel = os.path.relpath(full, repo_root)
                 expected[target].add(os.path.normpath(rel))
-        if not found:
+        if not found and relative_root in REQUIRED_PRODUCTION_ROOTS:
             raise SystemExit("%s has no Swift sources" % relative_root)
     return expected
 
@@ -125,11 +163,11 @@ def main():
     repo_root = os.path.abspath(sys.argv[1])
     pbxproj = os.path.join(repo_root, "Oigo.xcodeproj/project.pbxproj")
     objects = load_objects(pbxproj)
-    compiled = compiled_paths_by_target(objects)
+    compiled = compiled_paths_by_target(objects, repo_root)
     expected = disk_paths_by_target(repo_root)
     problems = []
     for target in sorted(set(compiled) | set(expected)):
-        if target not in PRODUCTION_ROOTS.values() and compiled.get(target):
+        if target not in DECLARED_ROOTS.values() and compiled.get(target):
             problems.append(
                 "unexpected Xcode native target compiles Swift: %s (%s)"
                 % (target, ", ".join(sorted(compiled[target])))
