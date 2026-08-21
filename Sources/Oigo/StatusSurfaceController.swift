@@ -119,7 +119,7 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate {
             return
         }
         presentationGeneration = generation
-        let presentation = OigoPopoverPresentation.project(state: state, inputs: inputs)
+        let presentation = OigoPopoverPresentation.compose(state: state, inputs: inputs)
         popoverController.render(presentation)
         popover.contentSize = popoverController.preferredContentSize
     }

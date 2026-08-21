@@ -7,7 +7,7 @@ enum Task12PopoverFixture {
             preconditionFailure("unknown Task 12 presentation row")
         }
         let value = inputs(for: row)
-        return OigoPopoverPresentation.project(
+        return OigoPopoverPresentation.compose(
             state: OigoPresentationState.project(value),
             inputs: value
         )

@@ -42,6 +42,7 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
             )
         }
         let repository = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        try validateAuthoritativeMapper(repository)
         guard FileManager.default.fileExists(
             atPath: repository.appendingPathComponent(
                 "Sources/Oigo/UI/Presentation/OigoPopoverPresentation.swift"
@@ -132,6 +133,28 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
                   failures.accessibility else {
                 throw ContractInputError(category: "malformed-state-combination")
             }
+        }
+    }
+
+    private static func validateAuthoritativeMapper(_ repository: URL) throws {
+        let presentation = repository.appendingPathComponent("Sources/Oigo/UI/Presentation")
+        let sources = try FileManager.default.contentsOfDirectory(
+            at: presentation,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "swift" }.sorted { $0.path < $1.path }
+        let declarations = try sources.flatMap { source -> [String] in
+            let contents = try String(contentsOf: source, encoding: .utf8)
+            return contents.split(separator: "\n", omittingEmptySubsequences: false).compactMap { line in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                return trimmed.contains("public static func project")
+                    ? "\(source.lastPathComponent):\(trimmed)"
+                    : nil
+            }
+        }
+        guard declarations == [
+            "OigoPresentationProjection.swift:public static func project(_ inputs: OigoPresentationInputs) -> OigoPresentationState {"
+        ] else {
+            throw ContractInputError(category: "multiple-presentation-mappers")
         }
     }
 
@@ -325,7 +348,7 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
     let rows = OigoPresentationStateRow.allCases
     let models = rows.map { row -> OigoPopoverPresentation in
         let value = inputs(row)
-        return OigoPopoverPresentation.project(state: OigoPresentationState.project(value), inputs: value)
+        return OigoPopoverPresentation.compose(state: OigoPresentationState.project(value), inputs: value)
     }
     guard rows.count == 23,
           Set(rows.map(\.rawValue)).count == 23,
@@ -335,7 +358,7 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
             == ["header", "primary-action", "shortcut", "mode", "microphone", "latest-dictation", "footer"] else {
         exit(1)
     }
-    let priority = OigoPopoverPresentation.project(
+    let priority = OigoPopoverPresentation.compose(
         state: OigoPresentationState.project(inputs(.storageUnavailable)),
         inputs: inputs(.storageUnavailable)
     )
@@ -345,7 +368,7 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
     print("PRIORITY notice=\(priority.notice?.category ?? "none") count=\(priority.notice == nil ? 0 : 1) start=\(priorityStartEnabled ? "enabled" : "disabled")")
     func model(_ row: OigoPresentationStateRow) -> OigoPopoverPresentation {
         let value = inputs(row)
-        return OigoPopoverPresentation.project(state: OigoPresentationState.project(value), inputs: value)
+        return OigoPopoverPresentation.compose(state: OigoPresentationState.project(value), inputs: value)
     }
     print("SHORTCUT start=\(model(.shortcutInactiveConflict).primaryAction.isEnabled ? "enabled" : "disabled")")
     print("ACCESSIBILITY posture=\(model(.accessibilityUnavailable).copyOnly.rawValue)")

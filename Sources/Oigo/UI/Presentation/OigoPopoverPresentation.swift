@@ -81,7 +81,7 @@ public struct OigoPopoverPresentation: Equatable, Sendable {
     public let latest: OigoPopoverLatestPresentation?
     public let copyOnly: OigoCopyOnlyPosture
 
-    public static func project(
+    public static func compose(
         state: OigoPresentationState,
         inputs: OigoPresentationInputs
     ) -> OigoPopoverPresentation {
