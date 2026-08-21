@@ -87,10 +87,16 @@ public enum OigoShortcutRegistrationPresentationStatus: String, Equatable, Senda
 public struct OigoShortcutPresentationInput: Equatable, Sendable {
     public let registration: OigoShortcutRegistrationPresentationStatus
     public let isConfigured: Bool
+    public let displayName: String
 
-    public init(registration: OigoShortcutRegistrationPresentationStatus, isConfigured: Bool) {
+    public init(
+        registration: OigoShortcutRegistrationPresentationStatus,
+        isConfigured: Bool,
+        displayName: String = "Option-Space"
+    ) {
         self.registration = registration
         self.isConfigured = isConfigured
+        self.displayName = String(displayName.prefix(64))
     }
 }
 
@@ -177,22 +183,30 @@ public enum OigoConfigurationApplication: String, Equatable, Sendable {
     case next
 }
 
+public enum OigoProcessingModePresentationValue: String, Equatable, Sendable {
+    case instant
+    case clean
+}
+
 public struct OigoDictationConfigurationPresentationInput: Equatable, Sendable {
     public let localeIdentifier: OigoLocaleIdentifier
     public let input: OigoInputSelectionPresentationStatus
     public let channelIndex: Int
     public let appliesTo: OigoConfigurationApplication
+    public let mode: OigoProcessingModePresentationValue
 
     public init(
         localeIdentifier: OigoLocaleIdentifier,
         input: OigoInputSelectionPresentationStatus,
         channelIndex: Int,
-        appliesTo: OigoConfigurationApplication
+        appliesTo: OigoConfigurationApplication,
+        mode: OigoProcessingModePresentationValue = .instant
     ) {
         self.localeIdentifier = localeIdentifier
         self.input = input
         self.channelIndex = max(0, channelIndex)
         self.appliesTo = appliesTo
+        self.mode = mode
     }
 }
 
@@ -248,6 +262,12 @@ public enum OigoLatestSessionPresentationState: String, Equatable, Sendable {
     case interrupted
 }
 
+public enum OigoLatestSessionPresentationSource: String, Equatable, Sendable {
+    case instant
+    case clean
+    case unknown
+}
+
 public struct OigoLatestSessionPresentationInput: Equatable, Sendable {
     public let id: UUID
     public let state: OigoLatestSessionPresentationState
@@ -255,6 +275,8 @@ public struct OigoLatestSessionPresentationInput: Equatable, Sendable {
     public let hasAudio: Bool
     public let hasTranscript: Bool
     public let failure: OigoTerminalPresentationFailure?
+    public let durationSeconds: Int?
+    public let source: OigoLatestSessionPresentationSource
 
     public init(
         id: UUID,
@@ -262,7 +284,9 @@ public struct OigoLatestSessionPresentationInput: Equatable, Sendable {
         createdAt: Date,
         hasAudio: Bool,
         hasTranscript: Bool,
-        failure: OigoTerminalPresentationFailure?
+        failure: OigoTerminalPresentationFailure?,
+        durationSeconds: Int? = nil,
+        source: OigoLatestSessionPresentationSource = .unknown
     ) {
         self.id = id
         self.state = state
@@ -270,6 +294,8 @@ public struct OigoLatestSessionPresentationInput: Equatable, Sendable {
         self.hasAudio = hasAudio
         self.hasTranscript = hasTranscript
         self.failure = failure
+        self.durationSeconds = durationSeconds.map { min(max(0, $0), 86_400) }
+        self.source = source
     }
 }
 
@@ -376,6 +402,7 @@ public struct OigoPresentationInputs: Equatable, Sendable, CustomStringConvertib
     public let playback: OigoPlaybackPresentationInput
     public let onboarding: OigoOnboardingPresentationInput
     public let shutdown: OigoShutdownPresentationInput
+    public let presentationDate: Date
 
     public init(
         generation: UInt64,
@@ -392,7 +419,8 @@ public struct OigoPresentationInputs: Equatable, Sendable, CustomStringConvertib
         latestSession: OigoLatestSessionPresentationInput?,
         playback: OigoPlaybackPresentationInput,
         onboarding: OigoOnboardingPresentationInput,
-        shutdown: OigoShutdownPresentationInput
+        shutdown: OigoShutdownPresentationInput,
+        presentationDate: Date = Date(timeIntervalSince1970: 0)
     ) {
         self.generation = generation
         self.operationGate = operationGate
@@ -409,6 +437,7 @@ public struct OigoPresentationInputs: Equatable, Sendable, CustomStringConvertib
         self.playback = playback
         self.onboarding = onboarding
         self.shutdown = shutdown
+        self.presentationDate = presentationDate
     }
 
     public var sanitizedContractOutput: String {

@@ -15,15 +15,27 @@ private final class GalleryApplicationDelegate: NSObject, NSApplicationDelegate,
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.appearance = switch configuration.appearance {
+        case "light":
+            NSAppearance(named: .aqua)
+        case "dark":
+            NSAppearance(named: .darkAqua)
+        default:
+            nil
+        }
         let window = scenario.makeWindow(configuration: configuration)
         self.window = window
         window.delegate = self
+        if configuration.scenario == "popover-states" {
+            window.setContentSize(NSSize(width: 760, height: 580))
+            window.center()
+        }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         print("HOST_READY scenario=" + configuration.scenario + " windows=1")
         fflush(stdout)
         terminationTimer = Timer.scheduledTimer(
-            timeInterval: 20,
+            timeInterval: configuration.scenario == "popover-states" ? 120 : 20,
             target: self,
             selector: #selector(terminateAfterBound),
             userInfo: nil,

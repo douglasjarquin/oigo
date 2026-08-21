@@ -1,5 +1,6 @@
 import AppKit
 import OigoCore
+import OigoPresentation
 
 private final class OigoHUDPanel: NSPanel {
     override var canBecomeKey: Bool { false }
@@ -10,6 +11,7 @@ enum OigoStatusSurfaceCommand {
     case history
     case settings
     case quit
+    case presentation(OigoPresentationAction)
 }
 
 @MainActor
@@ -18,7 +20,7 @@ final class StatusSurfaceController: NSObject {
     private let label: NSTextField
     private let detailLabel: NSTextField
     private let popover = NSPopover()
-    private let popoverStatusLabel = NSTextField(labelWithString: "")
+    private let popoverController: OigoPopoverViewController
     private let utilityMenu = NSMenu()
     private let commandHandler: (OigoStatusSurfaceCommand) -> Void
     private weak var statusItem: NSStatusItem?
@@ -32,6 +34,9 @@ final class StatusSurfaceController: NSObject {
 
     init(commandHandler: @escaping (OigoStatusSurfaceCommand) -> Void) {
         self.commandHandler = commandHandler
+        popoverController = OigoPopoverViewController { action in
+            commandHandler(.presentation(action))
+        }
         label = NSTextField(labelWithString: "")
         detailLabel = NSTextField(labelWithString: "")
         panel = OigoHUDPanel(
@@ -74,21 +79,8 @@ final class StatusSurfaceController: NSObject {
 
         super.init()
 
-        let popoverController = NSViewController()
-        let popoverContent = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 96))
-        popoverStatusLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        popoverStatusLabel.textColor = .secondaryLabelColor
-        popoverStatusLabel.setAccessibilityLabel("Oigo status")
-        popoverStatusLabel.translatesAutoresizingMaskIntoConstraints = false
-        popoverContent.addSubview(popoverStatusLabel)
-        NSLayoutConstraint.activate([
-            popoverStatusLabel.leadingAnchor.constraint(equalTo: popoverContent.leadingAnchor, constant: 18),
-            popoverStatusLabel.trailingAnchor.constraint(equalTo: popoverContent.trailingAnchor, constant: -18),
-            popoverStatusLabel.centerYAnchor.constraint(equalTo: popoverContent.centerYAnchor)
-        ])
-        popoverController.view = popoverContent
         popover.contentViewController = popoverController
-        popover.contentSize = NSSize(width: 340, height: 96)
+        popover.contentSize = NSSize(width: 340, height: 360)
         popover.behavior = .transient
         popover.animates = false
 
@@ -114,9 +106,21 @@ final class StatusSurfaceController: NSObject {
         guard generation > presentationGeneration else {
             return
         }
+        statusItem?.button?.toolTip = state.status.rawValue
+    }
+
+    func publish(
+        _ state: OigoPresentationState,
+        inputs: OigoPresentationInputs,
+        generation: UInt64
+    ) {
+        guard generation > presentationGeneration else {
+            return
+        }
         presentationGeneration = generation
-        popoverStatusLabel.stringValue = state.status.rawValue
-        popoverStatusLabel.setAccessibilityValue(state.status.rawValue)
+        let presentation = OigoPopoverPresentation.compose(state: state, inputs: inputs)
+        popoverController.render(presentation)
+        popover.contentSize = popoverController.preferredContentSize
     }
 
     func teardown() {

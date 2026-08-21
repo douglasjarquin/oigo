@@ -17,21 +17,31 @@ struct ContractArguments {
         let defaultsSuite: String
         let fixtureRoot: URL
         let fixtureName: String?
-        if scenario == "popover-routing", let requestedFixture = values["fixture"] {
-            guard values["defaults-suite"] == nil, values["fixture-root"] == nil,
+        if let requestedFixture = values["fixture"] {
+            guard values.count == 2,
                   requestedFixture.range(of: #"^[a-z][a-z0-9-]*$"#, options: .regularExpression) != nil else {
                 throw ContractInputError(category: "invalid-fixture")
             }
-            defaultsSuite = "com.oigo.qa.task11"
-            fixtureRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                .appendingPathComponent("Tests/OigoNativeUIContractFixtures/task-11", isDirectory: true)
-                .standardizedFileURL
-                .resolvingSymlinksInPath()
-            fixtureName = requestedFixture
-        } else {
-            guard values["fixture"] == nil else {
-                throw ContractInputError(category: "unknown-or-duplicate-argument")
+            switch scenario {
+            case "popover-routing":
+                defaultsSuite = "com.oigo.qa.task11"
+                fixtureRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                    .appendingPathComponent("Tests/OigoNativeUIContractFixtures/task-11", isDirectory: true)
+                    .standardizedFileURL
+                    .resolvingSymlinksInPath()
+                fixtureName = requestedFixture
+            case "popover-state-matrix":
+                defaultsSuite = "com.oigo.qa.task12"
+                fixtureRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                    .appendingPathComponent("Tests/OigoNativeUIContractFixtures/task-12", isDirectory: true)
+                    .appendingPathComponent(requestedFixture, isDirectory: true)
+                    .standardizedFileURL
+                    .resolvingSymlinksInPath()
+                fixtureName = nil
+            default:
+                throw ContractInputError(category: "invalid-fixture")
             }
+        } else {
             defaultsSuite = try required("defaults-suite", in: values)
             guard defaultsSuite.range(
                 of: #"^com\.oigo\.qa\.task[0-9]+$"#,

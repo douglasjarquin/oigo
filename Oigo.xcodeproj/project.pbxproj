@@ -10,6 +10,13 @@
         A00000010000000000000001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000001 /* main.swift */; };
         A00000010000000000000002 /* OigoAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000002 /* OigoAppDelegate.swift */; };
         A00000010000000000000003 /* StatusSurfaceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000003 /* StatusSurfaceController.swift */; };
+        A00000010000000000000061 /* libMacUtilityUI.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000051 /* libMacUtilityUI.a */; };
+        A00000010000000000000062 /* libOigoCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000B /* libOigoCore.a */; };
+        A00000010000000000000063 /* libMacUtilityUI.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000051 /* libMacUtilityUI.a */; };
+        A00000010000000000000064 /* libOigoPresentation.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000055 /* libOigoPresentation.a */; };
+        A00000010000000000000065 /* libOigoPresentation.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000055 /* libOigoPresentation.a */; };
+        A00000010000000000000066 /* libOigoCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000B /* libOigoCore.a */; };
+        A00000010000000000000067 /* libMacUtilityUI.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000051 /* libMacUtilityUI.a */; };
         A00000010000000000000004 /* GlobalHotKeyRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000004 /* GlobalHotKeyRegistrar.swift */; };
         A00000010000000000000005 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000005 /* SettingsWindowController.swift */; };
         A00000010000000000000006 /* DictationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000006 /* DictationCoordinator.swift */; };
@@ -156,6 +163,41 @@
             remoteGlobalIDString = E00000010000000000000003;
             remoteInfo = OigoCapture;
         };
+        K0000001000000000000000A /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = F00000010000000000000001 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = E00000010000000000000008;
+            remoteInfo = MacUtilityUI;
+        };
+        K0000001000000000000000D /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = F00000010000000000000001 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = E0000001000000000000000A;
+            remoteInfo = OigoPresentation;
+        };
+        K0000001000000000000000E /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = F00000010000000000000001 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = E0000001000000000000000A;
+            remoteInfo = OigoPresentation;
+        };
+        K0000001000000000000000F /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = F00000010000000000000001 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = E00000010000000000000002;
+            remoteInfo = OigoCore;
+        };
+        K00000010000000000000010 /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = F00000010000000000000001 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = E00000010000000000000008;
+            remoteInfo = MacUtilityUI;
+        };
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
@@ -202,6 +244,7 @@
         B00000010000000000000028 /* libOigoHotKey.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoHotKey.a; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000050 /* OigoUIGallery.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OigoUIGallery.app; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000051 /* libMacUtilityUI.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libMacUtilityUI.a; sourceTree = BUILT_PRODUCTS_DIR; };
+        B00000010000000000000055 /* libOigoPresentation.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoPresentation.a; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000052 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Oigo/Assets.xcassets; sourceTree = "<group>"; };
         B00000010000000000000053 /* OigoNativeUIContractTests */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = OigoNativeUIContractTests; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000029 /* GlobalShortcutRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutRegistration.swift; sourceTree = "<group>"; };
@@ -250,6 +293,8 @@
                 A00000010000000000000021 /* libOigoInsertion.a in Frameworks */,
                 A00000010000000000000034 /* libOigoHotKey.a in Frameworks */,
                 A00000010000000000000026 /* ServiceManagement.framework in Frameworks */,
+                A00000010000000000000061 /* libMacUtilityUI.a in Frameworks */,
+                A00000010000000000000064 /* libOigoPresentation.a in Frameworks */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -312,6 +357,9 @@
             files = (
                 A00000010000000000000059 /* Foundation.framework in Frameworks */,
                 A0000001000000000000005A /* AppKit.framework in Frameworks */,
+                A00000010000000000000062 /* libOigoCore.a in Frameworks */,
+                A00000010000000000000063 /* libMacUtilityUI.a in Frameworks */,
+                A00000010000000000000065 /* libOigoPresentation.a in Frameworks */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -321,6 +369,15 @@
             files = (
                 A0000001000000000000005B /* Foundation.framework in Frameworks */,
                 A0000001000000000000005C /* AppKit.framework in Frameworks */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        D0000001000000000000001C /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A00000010000000000000066 /* libOigoCore.a in Frameworks */,
+                A00000010000000000000067 /* libMacUtilityUI.a in Frameworks */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -477,6 +534,7 @@
                 B00000010000000000000050 /* OigoUIGallery.app */,
                 B00000010000000000000051 /* libMacUtilityUI.a */,
                 B00000010000000000000053 /* OigoNativeUIContractTests */,
+                B00000010000000000000055 /* libOigoPresentation.a */,
             );
             name = Products;
             sourceTree = "<group>";
@@ -528,9 +586,10 @@
                 J00000010000000000000004 /* PBXTargetDependency */,
                 J00000010000000000000007 /* PBXTargetDependency */,
                 J00000010000000000000008 /* PBXTargetDependency */,
+                J0000001000000000000000B /* PBXTargetDependency */,
+                J0000001000000000000000E /* PBXTargetDependency */,
             );
             fileSystemSynchronizedGroups = (
-                C00000010000000000000012 /* Oigo Presentation */,
                 C00000010000000000000013 /* Oigo Identity */,
             );
             name = Oigo;
@@ -634,6 +693,7 @@
             buildRules = (
             );
             dependencies = (
+                J0000001000000000000000F /* PBXTargetDependency */,
             );
             fileSystemSynchronizedGroups = (
                 C00000010000000000000010 /* OigoUIGallery */,
@@ -681,6 +741,27 @@
             productReference = B00000010000000000000053 /* OigoNativeUIContractTests */;
             productType = "com.apple.product-type.tool";
         };
+        E0000001000000000000000A /* OigoPresentation */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = S00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoPresentation" */;
+            buildPhases = (
+                D0000001000000000000001B /* Sources */,
+                D0000001000000000000001C /* Frameworks */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+                J00000010000000000000010 /* PBXTargetDependency */,
+                J00000010000000000000011 /* PBXTargetDependency */,
+            );
+            fileSystemSynchronizedGroups = (
+                C00000010000000000000012 /* Oigo Presentation */,
+            );
+            name = OigoPresentation;
+            productName = OigoPresentation;
+            productReference = B00000010000000000000055 /* libOigoPresentation.a */;
+            productType = "com.apple.product-type.library.static";
+        };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -717,6 +798,9 @@
                     E00000010000000000000009 = {
                         CreatedOnToolsVersion = 16.0;
                     };
+                    E0000001000000000000000A = {
+                        CreatedOnToolsVersion = 16.0;
+                    };
                 };
             };
             buildConfigurationList = G00000010000000000000011 /* Build configuration list for PBXProject "Oigo" */;
@@ -741,6 +825,7 @@
                 E00000010000000000000007 /* OigoUIGallery */,
                 E00000010000000000000008 /* MacUtilityUI */,
                 E00000010000000000000009 /* OigoNativeUIContractTests */,
+                E0000001000000000000000A /* OigoPresentation */,
             );
         };
 /* End PBXProject section */
@@ -883,6 +968,13 @@
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
+        D0000001000000000000001B /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -935,6 +1027,31 @@
             isa = PBXTargetDependency;
             target = E00000010000000000000003 /* OigoCapture */;
             targetProxy = K00000010000000000000009 /* PBXContainerItemProxy */;
+        };
+        J0000001000000000000000B /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = E00000010000000000000008 /* MacUtilityUI */;
+            targetProxy = K0000001000000000000000A /* PBXContainerItemProxy */;
+        };
+        J0000001000000000000000E /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = E0000001000000000000000A /* OigoPresentation */;
+            targetProxy = K0000001000000000000000D /* PBXContainerItemProxy */;
+        };
+        J0000001000000000000000F /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = E0000001000000000000000A /* OigoPresentation */;
+            targetProxy = K0000001000000000000000E /* PBXContainerItemProxy */;
+        };
+        J00000010000000000000010 /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = E00000010000000000000002 /* OigoCore */;
+            targetProxy = K0000001000000000000000F /* PBXContainerItemProxy */;
+        };
+        J00000010000000000000011 /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = E00000010000000000000008 /* MacUtilityUI */;
+            targetProxy = K00000010000000000000010 /* PBXContainerItemProxy */;
         };
 /* End PBXTargetDependency section */
 
@@ -1183,6 +1300,30 @@
             };
             name = Release;
         };
+        S00000010000000000000001 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = "$(ARCHS_STANDARD)";
+                CODE_SIGNING_ALLOWED = NO;
+                CODE_SIGN_IDENTITY = "";
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_NAME = OigoPresentation;
+                SKIP_INSTALL = YES;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Debug;
+        };
+        S00000010000000000000002 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = "$(ARCHS_STANDARD)";
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_NAME = OigoPresentation;
+                SKIP_INSTALL = YES;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Release;
+        };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1272,6 +1413,15 @@
             buildConfigurations = (
                 R00000010000000000000001 /* Debug */,
                 R00000010000000000000002 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        S00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoPresentation" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                S00000010000000000000001 /* Debug */,
+                S00000010000000000000002 /* Release */,
             );
             defaultConfigurationIsVisible = 0;
             defaultConfigurationName = Release;

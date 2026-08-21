@@ -1,0 +1,4 @@
+{
+  "name": "malformed-state",
+  "rows": "not-an-array"
+}

@@ -28,7 +28,7 @@ struct GalleryConfiguration {
             throw GalleryInputError(category: "invalid-permission-provider")
         }
         let appearance = values["appearance"]
-        guard appearance == nil || appearance == "dark" else {
+        guard appearance.map({ ["system", "light", "dark"].contains($0) }) ?? true else {
             throw GalleryInputError(category: "invalid-appearance")
         }
 
