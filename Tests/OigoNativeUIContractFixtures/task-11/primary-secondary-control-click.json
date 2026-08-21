@@ -1,0 +1,19 @@
+{
+  "name": "primary-secondary-control-click",
+  "generation": 12,
+  "staleGeneration": 11,
+  "routes": [
+    {"event": "primary", "opens": "popover", "closes": "utility-menu"},
+    {"event": "secondary", "opens": "utility-menu", "closes": "popover"},
+    {"event": "control-primary", "opens": "utility-menu", "closes": "popover"}
+  ],
+  "menuEntries": ["History", "Settings", "separator", "Quit"],
+  "popoverWidth": 340,
+  "transient": true,
+  "appActivation": "accessory-no-frontmost-after-dismissal",
+  "monitorsAfterTeardown": 0,
+  "observersAfterTeardown": 0,
+  "dirty": false,
+  "reportedSuccess": false,
+  "processExitStatus": 0
+}
