@@ -48,6 +48,24 @@ private final class DestinationHandoffWaiter {
     }
 }
 
+private enum OigoHUDPublication {
+    case recording(startedAt: Date, preview: String, detail: String?)
+    case processing(OigoHUDProcessingState, detail: String)
+    case hidden
+}
+
+private struct OigoAppDelegatePresentationSnapshot {
+    let publication: OigoPresentationPublication
+    let availability: AppCommandAvailability
+    let defaultMode: OigoProcessingMode
+    let storageMessage: String
+    let launchAtLogin: OigoLaunchAtLoginPresentation
+    let shortcutTitle: String
+    let shortcutToolTip: String
+    let hud: OigoHUDPublication
+    let anchor: NSStatusBarButton?
+}
+
 @available(macOS 26.0, *)
 @MainActor
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
@@ -127,6 +145,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var recordingStartedAt: Date?
     private var previewThrottle = OigoHUDPreviewThrottle()
     private let operationGate = AppOperationGate()
+    private var presentationPublicationGeneration: UInt64 = 0
+    private var presentationPublicationFence = OigoPresentationGenerationFence()
     private var maintenanceHandle: AppOperationHandle?
     nonisolated(unsafe) private var maintenanceStore: SessionStore?
     nonisolated(unsafe) private var maintenancePolicy = SessionRetentionPolicy.default
@@ -220,6 +240,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
+        presentationPublicationFence.shutdown()
         unregisterShortcut()
         shortcutBridge.reset()
         let storageWasChecking = storageCapability.health == .checking
@@ -1987,71 +2008,416 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateSurface() {
-        let isRecording = coordinator.state == .recording
-        let setupComplete = onboardingStore.load().isComplete
-        let storageReady = storageCapability.health.isReady
-        let availability = commandAvailability
-        let canToggle = availability.canStartDictation || availability.canStopDictation
-        toggleItem?.title = storageReady
-            ? (isRecording || availability.canStopDictation ? "Stop Dictation" : "Start Dictation")
-            : "Storage unavailable"
-        toggleItem?.action = storageReady ? #selector(toggleDictation) : #selector(retryStorageAction)
-        toggleItem?.isEnabled = setupComplete && (storageReady ? canToggle : true)
-        instantModeItem?.state = settings.defaultMode == .instant ? .on : .off
-        cleanModeItem?.state = settings.defaultMode == .clean ? .on : .off
-        modeMenuItem?.isEnabled = setupComplete && storageReady && operationGate.isAcceptingCommands
-        instantModeItem?.toolTip = availability.settingsApplyToNextDictation
-            ? NextDictationSettingsPolicy.nextDictationCopy
-            : nil
-        cleanModeItem?.toolTip = availability.settingsApplyToNextDictation
-            ? NextDictationSettingsPolicy.nextDictationCopy
-            : nil
-        settingsWindow?.setAppliesToNextDictation(availability.settingsApplyToNextDictation)
-        historyWindow?.setCommandAvailability(availability)
-        onboardingWindow?.setCommandAvailability(availability)
-        storageStatusItem?.title = displayedStorageHealth.statusMessage
-        retryStorageItem?.isEnabled = !storageReady && storageCapability.health != .checking
-        let launchPresentation = OigoLaunchAtLoginPresentation(status: launchAtLoginController.status)
-        launchAtLoginItem?.state = launchPresentation.menuStateOn ? .on : .off
-        launchAtLoginItem?.title = launchPresentation.menuTitle
-        launchAtLoginItem?.toolTip = launchPresentation.menuToolTip
-        statusItem?.button?.title = "Oigo"
-        switch shortcutRegistrar.status {
-        case .active(let shortcut, _):
-            if let error = shortcutConfiguration.lastError {
-                shortcutStatusItem?.title = "Global Shortcut Active - Open Settings…"
-                statusItem?.button?.toolTip = "Global shortcut active: \(shortcut.displayName). Last registration error: \(error)"
-            } else {
-                shortcutStatusItem?.title = "Global Shortcut: " + shortcut.displayName
-                statusItem?.button?.toolTip = shortcutFeedbackDetail
-                    ?? "Global shortcut active: " + shortcut.displayName
-            }
-        case .inactive(let message):
-            let error = shortcutConfiguration.lastError ?? message
-            shortcutStatusItem?.title = "Global Shortcut Inactive - Open Settings…"
-            statusItem?.button?.toolTip = "Global Shortcut Inactive: " + error
-        }
+        presentationPublicationGeneration += 1
+        let snapshot = capturePresentationInputs(generation: presentationPublicationGeneration)
+        publishPresentation(snapshot)
+    }
 
-        if isRecording {
+    private func capturePresentationInputs(generation: UInt64) -> OigoAppDelegatePresentationSnapshot {
+        let coordinatorState = coordinator.state
+        let onboarding = onboardingStore.load()
+        let storageHealth = displayedStorageHealth
+        let operationHandle = operationGate.currentHandle
+        let acceptingCommands = operationGate.isAcceptingCommands
+        let availability = AppCommandAvailability.evaluate(
+            coordinatorState: coordinatorState,
+            occupiedKind: operationHandle?.kind,
+            acceptingCommands: acceptingCommands,
+            setupComplete: onboarding.isComplete,
+            storageReady: storageHealth.isReady
+        )
+        let settingsSnapshot = settings
+        let shortcutStatus = shortcutRegistrar.status
+        let shortcutError = shortcutConfiguration.lastError
+        let inputDevices = currentInputDevices()
+        let localeIdentifier = presentationLocaleIdentifier(
+            coordinator.activeConfiguration?.resolvedLocaleIdentifier
+                ?? transcription?.configuredLocaleIdentifier
+                ?? settingsSnapshot.localeIdentifier
+        )
+        let inputStatus = Self.presentationInputStatus(
+            selection: settingsSnapshot.selectedInput,
+            devices: inputDevices
+        )
+        let activeConfiguration = coordinator.activeConfiguration.map {
+            presentationConfiguration($0, appliesTo: .active, devices: inputDevices)
+        }
+        let presentationInputs = OigoPresentationInputs(
+            generation: generation,
+            operationGate: .init(
+                activeOperation: operationHandle.map {
+                    .init(generation: $0.generation, kind: Self.presentationOperationKind($0.kind))
+                },
+                busyReason: Self.presentationBusyReason(availability.busyReason)
+            ),
+            coordinator: .init(
+                state: Self.presentationCoordinatorState(coordinatorState),
+                generation: operationHandle?.generation ?? generation
+            ),
+            storage: .init(status: Self.presentationStorageStatus(storageHealth)),
+            shortcut: .init(
+                registration: Self.presentationShortcutStatus(shortcutStatus, error: shortcutError),
+                isConfigured: true
+            ),
+            permissions: .init(
+                microphone: Self.presentationPermission(microphonePermissionState()),
+                accessibility: Self.presentationPermission(accessibilityPermissionState())
+            ),
+            input: .init(selection: inputStatus, channelIndex: settingsSnapshot.selectedInputChannel),
+            localeAssets: .init(
+                localeIdentifier: localeIdentifier,
+                status: Self.presentationAssetStatus(transcription?.currentAssetState),
+                generation: generation
+            ),
+            activeConfiguration: activeConfiguration,
+            nextConfiguration: .init(
+                localeIdentifier: presentationLocaleIdentifier(settingsSnapshot.localeIdentifier),
+                input: inputStatus,
+                channelIndex: settingsSnapshot.selectedInputChannel,
+                appliesTo: .next
+            ),
+            terminal: presentationTerminal(generation: generation),
+            latestSession: lastSession.map(Self.presentationLatestSession),
+            playback: Self.presentationPlayback(playback.currentState()),
+            onboarding: Self.presentationOnboarding(onboarding),
+            shutdown: .init(
+                status: acceptingCommands ? .inactive : .requested,
+                fencedOperationCount: operationGate.fencedLoserCount
+            )
+        )
+        let presentationState = OigoPresentationState.project(presentationInputs)
+        let publication = OigoPresentationPublication(
+            inputs: presentationInputs,
+            state: presentationState
+        )
+        let shortcutCopy = Self.presentationShortcutCopy(
+            shortcutStatus,
+            error: shortcutError,
+            feedback: shortcutFeedbackDetail
+        )
+        return OigoAppDelegatePresentationSnapshot(
+            publication: publication,
+            availability: availability,
+            defaultMode: settingsSnapshot.defaultMode,
+            storageMessage: storageHealth.statusMessage,
+            launchAtLogin: OigoLaunchAtLoginPresentation(status: launchAtLoginController.status),
+            shortcutTitle: shortcutCopy.title,
+            shortcutToolTip: shortcutCopy.toolTip,
+            hud: presentationHUD(coordinatorState: coordinatorState),
+            anchor: statusItem?.button
+        )
+    }
+
+    private func publishPresentation(_ snapshot: OigoAppDelegatePresentationSnapshot) {
+        presentationPublicationFence.publish(snapshot.publication) { publication in
+            let adapter = publication.adapters
+            toggleItem?.title = adapter.toggleTitle
+            toggleItem?.action = adapter.toggleCommand == .retryStorage
+                ? #selector(retryStorageAction) : #selector(toggleDictation)
+            toggleItem?.isEnabled = adapter.toggleEnabled
+            instantModeItem?.state = snapshot.defaultMode == .instant ? .on : .off
+            cleanModeItem?.state = snapshot.defaultMode == .clean ? .on : .off
+            modeMenuItem?.isEnabled = adapter.modeEnabled
+            instantModeItem?.toolTip = adapter.settingsApplyToNextDictation
+                ? NextDictationSettingsPolicy.nextDictationCopy
+                : nil
+            cleanModeItem?.toolTip = adapter.settingsApplyToNextDictation
+                ? NextDictationSettingsPolicy.nextDictationCopy
+                : nil
+            settingsWindow?.setAppliesToNextDictation(adapter.settingsApplyToNextDictation)
+            historyWindow?.setCommandAvailability(snapshot.availability)
+            onboardingWindow?.setCommandAvailability(snapshot.availability)
+            storageStatusItem?.title = snapshot.storageMessage
+            retryStorageItem?.isEnabled = adapter.retryStorageEnabled
+            launchAtLoginItem?.state = snapshot.launchAtLogin.menuStateOn ? .on : .off
+            launchAtLoginItem?.title = snapshot.launchAtLogin.menuTitle
+            launchAtLoginItem?.toolTip = snapshot.launchAtLogin.menuToolTip
+            statusItem?.button?.title = "Oigo"
+            shortcutStatusItem?.title = snapshot.shortcutTitle
+            statusItem?.button?.toolTip = snapshot.shortcutToolTip
+            switch snapshot.hud {
+            case .recording(let startedAt, let preview, let detail):
+                statusSurface.showRecording(
+                    startedAt: startedAt,
+                    preview: preview,
+                    detail: detail,
+                    anchoredTo: snapshot.anchor
+                )
+            case .processing(let state, let detail):
+                statusSurface.showProcessing(
+                    state,
+                    detail: detail,
+                    anchoredTo: snapshot.anchor
+                )
+            case .hidden:
+                statusSurface.hide()
+            }
+        }
+    }
+
+    private func presentationLocaleIdentifier(_ candidate: String) -> OigoLocaleIdentifier {
+        if let identifier = OigoLocaleIdentifier(candidate), !candidate.isEmpty {
+            return identifier
+        }
+        if let identifier = OigoLocaleIdentifier(Locale.current.identifier) {
+            return identifier
+        }
+        guard let fallback = OigoLocaleIdentifier("en-US") else {
+            preconditionFailure("the built-in presentation locale must be valid")
+        }
+        return fallback
+    }
+
+    private func presentationConfiguration(
+        _ configuration: DictationConfigurationSnapshot,
+        appliesTo: OigoConfigurationApplication,
+        devices: [OigoInputDevice]
+    ) -> OigoDictationConfigurationPresentationInput {
+        OigoDictationConfigurationPresentationInput(
+            localeIdentifier: presentationLocaleIdentifier(configuration.resolvedLocaleIdentifier),
+            input: Self.presentationInputStatus(
+                selection: configuration.inputSelection,
+                devices: devices
+            ),
+            channelIndex: configuration.inputChannelIndex,
+            appliesTo: appliesTo
+        )
+    }
+
+    private func presentationTerminal(generation: UInt64) -> OigoTerminalPresentationInput? {
+        let outcome: OigoTerminalPresentationOutcome?
+        switch insertionDisplayStatus {
+        case .pasteAttempted:
+            outcome = .pasteAttempted
+        case .pasted:
+            outcome = .pasted
+        case .copied:
+            outcome = .copied
+        case .completedPasteFailed:
+            outcome = .insertionFailed
+        case .failed:
+            outcome = .failed
+        case .finalizing, .cleaning, .pasting, nil:
+            outcome = nil
+        }
+        guard let outcome else {
+            return nil
+        }
+        return OigoTerminalPresentationInput(
+            generation: generation,
+            outcome: outcome,
+            failure: outcome == .failed || outcome == .insertionFailed ? .insertion : nil
+        )
+    }
+
+    private func presentationHUD(coordinatorState: DictationState) -> OigoHUDPublication {
+        if coordinatorState == .recording {
             let previewEnabled = coordinator.activeConfiguration?.previewEnabled
                 ?? settings.showVolatilePreview
-            let degradedDetail = coordinator.liveRecordingHUDDetail
-            statusSurface.showRecording(
+            let detail = coordinator.liveRecordingHUDDetail
+            return .recording(
                 startedAt: recordingStartedAt ?? Date(),
-                preview: previewEnabled && degradedDetail == nil ? livePreview : "",
-                detail: degradedDetail,
-                anchoredTo: statusItem?.button
+                preview: previewEnabled && detail == nil ? livePreview : "",
+                detail: detail
             )
-        } else if let insertionDisplayStatus {
-            statusSurface.showProcessing(
+        }
+        if let insertionDisplayStatus {
+            return .processing(
                 insertionDisplayStatus,
                 detail: shortcutFeedbackDetail
                     ?? failureDetail
-                    ?? Self.hudDetail(for: insertionDisplayStatus),
-                anchoredTo: statusItem?.button
+                    ?? Self.hudDetail(for: insertionDisplayStatus)
             )
+        }
+        return .hidden
+    }
+
+    private static func presentationOperationKind(
+        _ kind: AppOperationKind
+    ) -> OigoPresentationOperationKind {
+        switch kind {
+        case .dictation: .dictation
+        case .retry: .retry
+        case .cleanAgain: .cleanAgain
+        case .reapplyDictionary: .reapplyDictionary
+        case .pasteAgain: .pasteAgain
+        case .onboardingTest: .onboardingTest
+        case .interruption: .interruption
+        case .shutdown: .shutdown
+        case .maintenance: .maintenance
+        }
+    }
+
+    private static func presentationBusyReason(
+        _ reason: AppOperationBusyReason?
+    ) -> OigoOperationBusyPresentationReason? {
+        switch reason {
+        case .shutdown: .shutdown
+        case .occupied(let kind): .occupied(presentationOperationKind(kind))
+        case nil: nil
+        }
+    }
+
+    private static func presentationCoordinatorState(
+        _ state: DictationState
+    ) -> OigoCoordinatorPresentationState {
+        switch state {
+        case .idle: .idle
+        case .preparing: .preparing
+        case .recording: .recording
+        case .finalizing: .finalizing
+        case .cleaning: .cleaning
+        case .inserting: .inserting
+        case .complete: .complete
+        case .failed: .failed
+        case .cancelled: .cancelled
+        case .interrupted: .interrupted
+        }
+    }
+
+    private static func presentationStorageStatus(
+        _ health: DurableSessionHealth
+    ) -> OigoStoragePresentationStatus {
+        switch health {
+        case .ready: .ready
+        case .checking: .degraded
+        case .recoverablyUnavailable, .fatallyInvalid: .unavailable
+        }
+    }
+
+    private static func presentationShortcutStatus(
+        _ status: GlobalShortcutRegistrationStatus,
+        error: String?
+    ) -> OigoShortcutRegistrationPresentationStatus {
+        switch status {
+        case .active:
+            error == nil ? .registered : .failed
+        case .inactive:
+            error == nil ? .unavailable : .conflict
+        }
+    }
+
+    private static func presentationPermission(
+        _ permission: OigoPermissionState
+    ) -> OigoPermissionPresentationStatus {
+        switch permission {
+        case .unknown: .notDetermined
+        case .granted: .granted
+        case .denied: .denied
+        }
+    }
+
+    private static func presentationInputStatus(
+        selection: OigoInputSelection,
+        devices: [OigoInputDevice]
+    ) -> OigoInputSelectionPresentationStatus {
+        let visibleDevices = OigoInputDeviceCatalog.visibleDevices(from: devices)
+        guard !visibleDevices.isEmpty else {
+            return .noAvailableInput
+        }
+        switch selection {
+        case .systemDefault:
+            return .systemDefault
+        case .pinned(let uid):
+            return visibleDevices.contains(where: { $0.uid == uid })
+                ? .pinnedAvailable : .pinnedUnavailable
+        }
+    }
+
+    private static func presentationAssetStatus(
+        _ state: SpeechAssetState?
+    ) -> OigoLocaleAssetPresentationStatus {
+        switch state {
+        case .ready: .ready
+        case .installing: .installing
+        case .failed: .failed
+        case .unavailable: .unavailable
+        case nil: .idle
+        }
+    }
+
+    private static func presentationLatestSession(
+        _ session: DictationSession
+    ) -> OigoLatestSessionPresentationInput {
+        let state: OigoLatestSessionPresentationState = switch session.metadata.state {
+        case .preparing: .preparing
+        case .recording: .recording
+        case .stopping: .stopping
+        case .retrying: .retrying
+        case .completed: .complete
+        case .failed: .failed
+        case .cancelled: .cancelled
+        case .interrupted: .interrupted
+        }
+        return OigoLatestSessionPresentationInput(
+            id: session.id,
+            state: state,
+            createdAt: session.metadata.createdAt,
+            hasAudio: (session.metadata.audioByteCount ?? 0) > 0,
+            hasTranscript: (session.metadata.rawTextByteCount ?? 0) > 0,
+            failure: session.metadata.failureCode == nil ? nil : .unknown
+        )
+    }
+
+    private static func presentationPlayback(
+        _ state: AudioPlaybackState
+    ) -> OigoPlaybackPresentationInput {
+        let status: OigoPlaybackPresentationStatus
+        if state.isPlaying {
+            status = .playing
         } else {
-            statusSurface.hide()
+            status = switch state.outcome {
+            case .completed: .completed
+            case .stopped: .stopped
+            case .replaced: .replaced
+            case .failed: .failed
+            case .shutdown: .shutdown
+            case nil: .idle
+            }
+        }
+        return OigoPlaybackPresentationInput(generation: state.generation, status: status)
+    }
+
+    private static func presentationOnboarding(
+        _ state: OigoOnboardingState
+    ) -> OigoOnboardingPresentationInput {
+        let stage: OigoOnboardingPresentationStage = switch state.step {
+        case .system, .language: .welcome
+        case .microphone: .microphone
+        case .shortcut, .insertion: .ready
+        case .testDictation: .test
+        case .recovery: .ready
+        case .complete: .complete
+        }
+        return OigoOnboardingPresentationInput(
+            stage: stage,
+            status: state.isComplete ? .passed : .running,
+            failure: nil
+        )
+    }
+
+    private static func presentationShortcutCopy(
+        _ status: GlobalShortcutRegistrationStatus,
+        error: String?,
+        feedback: String?
+    ) -> (title: String, toolTip: String) {
+        switch status {
+        case .active(let shortcut, _):
+            if let error {
+                return (
+                    "Global Shortcut Active - Open Settings…",
+                    "Global shortcut active: \(shortcut.displayName). Last registration error: \(error)"
+                )
+            }
+            return (
+                "Global Shortcut: " + shortcut.displayName,
+                feedback ?? "Global shortcut active: " + shortcut.displayName
+            )
+        case .inactive(let message):
+            return (
+                "Global Shortcut Inactive - Open Settings…",
+                "Global Shortcut Inactive: " + (error ?? message)
+            )
         }
     }
 
