@@ -98,8 +98,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             self?.openSettings()
         case .quit:
             self?.quit()
-        case .presentation(let action):
-            self?.performPopoverAction(action)
+        case .popover(let command):
+            self?.performPopoverCommand(command)
         }
     }
     private let settingsStore = OigoSettingsStore()
@@ -2069,6 +2069,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             statusSurface.publish(
                 publication.state,
                 inputs: publication.inputs,
+                inputOptions: popoverInputOptions(),
                 generation: publication.generation
             )
             settingsWindow?.setAppliesToNextDictation(adapter.settingsApplyToNextDictation)
@@ -2096,7 +2097,21 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func performPopoverAction(_ action: OigoPresentationAction) {
+    private func performPopoverCommand(_ command: OigoPopoverCommand) {
+        switch command.intent {
+        case .presentation(let action):
+            performPopoverAction(action, generation: command.generation)
+        case .selectInput(let selection, let channel):
+            applyPopoverInputSelection(selection, channel: channel)
+        case .dismiss, .moveFocus, .invokeFocused:
+            break
+        }
+    }
+
+    private func performPopoverAction(
+        _ action: OigoPresentationAction,
+        generation: UInt64
+    ) {
         switch action {
         case .startDictation, .stopDictation:
             handleMouseToggle()
@@ -2109,9 +2124,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .openSystemSettings(let url):
             openSystemSettings(url)
         case .setMode(.instant):
-            selectInstantMode()
+            applyPopoverMode(.instant, generation: generation)
         case .setMode(.clean):
-            selectCleanMode()
+            applyPopoverMode(.clean, generation: generation)
         case .openDataLocation:
             openDataFolder()
         case .copy:
@@ -2122,6 +2137,43 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             openHistory()
         case .quit:
             quit()
+        }
+    }
+
+    private func applyPopoverMode(_ mode: OigoProcessingMode, generation: UInt64) {
+        guard generation == presentationPublicationGeneration else {
+            return
+        }
+        applyPopoverSettings(settings.with(defaultMode: mode))
+    }
+
+    private func applyPopoverInputSelection(
+        _ selection: OigoInputSelection,
+        channel: Int
+    ) {
+        applyPopoverSettings(settings.with(
+            selectedInput: selection,
+            selectedInputChannel: channel
+        ))
+    }
+
+    private func applyPopoverSettings(_ candidate: OigoSettings) {
+        statusSurface.clearControlFailure()
+        if let message = applySettings(candidate) {
+            statusSurface.showControlFailure(message)
+        }
+    }
+
+    private func popoverInputOptions() -> [OigoPopoverInputOption] {
+        OigoInputMenu.items(devices: currentInputDevices(), selected: settings.selectedInput).map {
+            OigoPopoverInputOption(
+                title: $0.title,
+                selection: $0.selection,
+                channel: $0.selection == settings.selectedInput
+                    ? settings.selectedInputChannel : OigoInputChannelPolicy.defaultIndex,
+                isSelected: $0.selection == settings.selectedInput,
+                isEnabled: !$0.isUnavailable
+            )
         }
     }
 
@@ -2475,28 +2527,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 "Global Shortcut Inactive - Open Settings…",
                 "Global Shortcut Inactive: " + (error ?? message)
             )
-        }
-    }
-
-    @objc private func selectInstantMode() {
-        let updatedSettings = settings.with(defaultMode: .instant)
-        do {
-            try settingsStore.save(updatedSettings)
-            settings = updatedSettings
-            updateSurface()
-        } catch {
-            showSettingsPersistenceFailure(error)
-        }
-    }
-
-    @objc private func selectCleanMode() {
-        let updatedSettings = settings.with(defaultMode: .clean)
-        do {
-            try settingsStore.save(updatedSettings)
-            settings = updatedSettings
-            updateSurface()
-        } catch {
-            showSettingsPersistenceFailure(error)
         }
     }
 

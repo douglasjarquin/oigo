@@ -1,0 +1,6 @@
+SCENARIO GREEN bounded summary rollback stale callback action routing keyboard teardown
+COMMAND swift run oigo-native-ui-contract-tests --scenario popover-actions --fixture bounded-summary-and-rollback
+RUNS 2
+CONTRACT_OUTPUT_EQUAL true
+PASS popover-actions fixture=bounded-summary-and-rollback latest-limit=1 latest-trigger=event rollback=committed stale=ignored copy-read=invocation-only keyboard=deterministic resources=0
+RESULT exit=0 observable=PASS
