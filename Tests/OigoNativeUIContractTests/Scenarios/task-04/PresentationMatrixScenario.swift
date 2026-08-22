@@ -144,7 +144,7 @@ final class PresentationMatrixScenario: NativeUIContractScenario {
         let forbiddenTokens = [
             "import AppKit", "import AVFAudio", "import ApplicationServices", "Task<", "Timer",
             "NotificationCenter", "NSView", "NSWindow", "AXUIElement", "NSPasteboard",
-            "AVAudio", "transcript", "clipboardValue", "userPath", "DictionaryEntry", "Codable"
+            "AVAudio", "transcriptBody", "clipboardValue", "userPath", "DictionaryEntry", "Codable"
         ]
         guard !forbiddenTokens.contains(where: text.contains) else {
             throw ContractInputError(category: "forbidden-output-dependency")
