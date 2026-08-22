@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  html,body{margin:0;padding:0}
+  body{background:#0a0a0c}
+  a{color:#3f8cff;text-decoration:none}
+  a:hover{color:#6ba6ff;text-decoration:underline}
+  @keyframes oigo-pulse{0%,100%{opacity:1}50%{opacity:.45}}
+</style>
+</helmet>
+<div style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;background:#0a0a0c;color:#e8e8ec;padding:48px 56px;display:flex;flex-direction:column;gap:64px;min-width:1240px;max-width:1400px">
+
+  <header style="display:flex;flex-direction:column;gap:16px;border-bottom:1px solid rgba(255,255,255,.09);padding-bottom:40px">
+    <div style="display:flex;align-items:center;gap:16px">
+      <svg width="34" height="45" viewBox="0 0 24 32" style="color:#f5f5f7"><path d="M9.4 5.2 C10.2 3.7 11 2.8 12.4 2.8 C17.8 2.8 20.2 8.3 20.2 16 C20.2 23.7 17.6 29.2 12 29.2 C7 29.2 4 25.2 3.8 19.4 C3.7 13.6 5.6 9.6 8.8 8.4 C11.2 7.5 13.1 8.8 12.9 10.9 C12.7 12.9 10.6 13.4 10 15.1 C9.4 16.8 10.6 18.2 12.3 18.1" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path></svg>
+      <div>
+        <div style="font-size:30px;font-weight:700;letter-spacing:-.01em;color:#f5f5f7">Oigo Design System</div>
+        <div style="font:12px 'SF Mono',ui-monospace,monospace;color:#8e8e93;margin-top:4px">v1.0 · macOS app + marketing · Aug 2026</div>
+      </div>
+    </div>
+    <div style="font-size:14px;line-height:1.6;color:#98989d;max-width:720px;text-wrap:pretty">Oigo dresses as a native macOS citizen: system fonts, system colors, system materials. The design system adds only what the platform doesn't provide — the mark, state semantics, HUD anatomy, voice. When in doubt, do what macOS would do.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;font:11px 'SF Mono',ui-monospace,monospace;color:#8e8e93">
+      <sc-for list="{{ toc }}" as="t" hint-placeholder-count="10">
+        <span style="padding:4px 12px;border-radius:100px;border:1px solid rgba(255,255,255,.12)">{{ t }}</span>
+      </sc-for>
+    </div>
+  </header>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font:12px 'SF Mono',ui-monospace,monospace;color:#3f8cff">01</div>
+      <h2 style="margin:0;font-size:24px;font-weight:700;color:#f5f5f7">Logo &amp; iconography</h2>
+      <div style="font-size:13.5px;line-height:1.6;color:#98989d;max-width:680px;text-wrap:pretty">The mark is an O whose left wall curls inward like an ear — it also reads as a G. One continuous stroke, always outlined, never filled. “¿Oigo?” — <em>I can hear you.</em></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px">
+      <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:16px">
+        <div style="font-size:13px;font-weight:600;color:#c9c9ce">Primary mark</div>
+        <div style="display:flex;gap:28px;align-items:flex-end">
+          <svg width="88" height="115" viewBox="0 0 24 32" style="color:#f5f5f7"><path d="M9.4 5.2 C10.2 3.7 11 2.8 12.4 2.8 C17.8 2.8 20.2 8.3 20.2 16 C20.2 23.7 17.6 29.2 12 29.2 C7 29.2 4 25.2 3.8 19.4 C3.7 13.6 5.6 9.6 8.8 8.4 C11.2 7.5 13.1 8.8 12.9 10.9 C12.7 12.9 10.6 13.4 10 15.1 C9.4 16.8 10.6 18.2 12.3 18.1" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"></path></svg>
+          <svg width="40" height="52" viewBox="0 0 24 32" style="color:#f5f5f7"><path d="M9.4 5.2 C10.2 3.7 11 2.8 12.4 2.8 C17.8 2.8 20.2 8.3 20.2 16 C20.2 23.7 17.6 29.2 12 29.2 C7 29.2 4 25.2 3.8 19.4 C3.7 13.6 5.6 9.6 8.8 8.4 C11.2 7.5 13.1 8.8 12.9 10.9 C12.7 12.9 10.6 13.4 10 15.1 C9.4 16.8 10.6 18.2 12.3 18.1" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"></path></svg>
+          <svg width="14" height="18" viewBox="0 0 24 32" style="color:#f5f5f7"><path d="M9.4 5.2 C10.2 3.7 11 2.8 12.4 2.8 C17.8 2.8 20.2 8.3 20.2 16 C20.2 23.7 17.6 29.2 12 29.2 C7 29.2 4 25.2 3.8 19.4 C3.7 13.6 5.6 9.6 8.8 8.4 C11.2 7.5 13.1 8.8 12.9 10.9 C12.7 12.9 10.6 13.4 10 15.1 C9.4 16.8 10.6 18.2 12.3 18.1" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"></path></svg>
+        </div>
+        <div style="font:11px/1.6 'SF Mono',ui-monospace,monospace;color:#8e8e93">stroke 2.4 · round caps · currentColor<br>menu-bar size (13×17): stroke 2.6</div>
+      </div>
+      <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:16px">
+        <div style="font-size:13px;font-weight:600;color:#c9c9ce">App icon</div>
+        <div style="display:flex;gap:18px;align-items:flex-end">
+          <div style="width:92px;height:92px;border-radius:21px;background:#0b0c10;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),0 8px 20px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center">
+            <svg width="54" height="70" viewBox="0 0 24 32" style="color:#f5f5f7"><path d="M9.4 5.2 C10.2 3.7 11 2.8 12.4 2.8 C17.8 2.8 20.2 8.3 20.2 16 C20.2 23.7 17.6 29.2 12 29.2 C7 29.2 4 25.2 3.8 19.4 C3.7 13.6 5.6 9.6 8.8 8.4 C11.2 7.5 13.1 8.8 12.9 10.9 C12.7 12.9 10.6 13.4 10 15.1 C9.4 16.8 10.6 18.2 12.3 18.1" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"></path></svg>
+          </div>
+          <div style="width:92px;height:92px;border-radius:21px;background:#f2f2f4;box-shadow:inset 0 0 0 1px rgba(0,0,0,.08),0 8px 20px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center">
+            <svg width="54" height="70" viewBox="0 0 24 32" style="color:#1d1d1f"><path d="M9.4 5.2 C10.2 3.7 11 2.8 12.4 2.8 C17.8 2.8 20.2 8.3 20.2 16 C20.2 23.7 17.6 29.2 12 29.2 C7 29.2 4 25.2 3.8 19.4 C3.7 13.6 5.6 9.6 8.8 8.4 C11.2 7.5 13.1 8.8 12.9 10.9 C12.7 12.9 10.6 13.4 10 15.1 C9.4 16.8 10.6 18.2 12.3 18.1" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"></path></svg>
+          </div>
+        </div>
+        <div style="font:11px/1.6 'SF Mono',ui-monospace,monospace;color:#8e8e93">squircle #0b0c10 (default) or #f2f2f4<br>mark at 59% of icon height, centered</div>
+      </div>
+      <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:14px">
+        <div style="font-size:13px;font-weight:600;color:#c9c9ce">Rules</div>
+        <div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;line-height:1.5;color:#98989d">
+          <div style="display:flex;gap:8px"><span style="color:#28c840">✓</span><span>Menu bar uses template rendering — currentColor, adapts to menu bar appearance</span></div>
+          <div style="display:flex;gap:8px"><span style="color:#28c840">✓</span><span>Recording is the only time the mark itself changes color (red)</span></div>
+          <div style="display:flex;gap:8px"><span style="color:#ff453a">✕</span><span>Never fill the mark, add gradients, or rotate it</span></div>
+          <div style="display:flex;gap:8px"><span style="color:#ff453a">✕</span><span>Never redraw the ear curl — use the provided path</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font:12px 'SF Mono',ui-monospace,monospace;color:#3f8cff">02</div>
+      <h2 style="margin:0;font-size:24px;font-weight:700;color:#f5f5f7">Color</h2>
+      <div style="font-size:13.5px;line-height:1.6;color:#98989d;max-width:680px;text-wrap:pretty">In-app color is macOS system color, expressed as <span style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px">light-dark()</span> pairs so every surface adapts. Semantic accents are reserved: red means recording, orange means attention, blue means information or action, green means confirmed.</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="font-size:13px;font-weight:600;color:#c9c9ce">Semantic accents</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+        <sc-for list="{{ accents }}" as="c" hint-placeholder-count="4">
+          <div style="border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,.08)">
+            <div style="height:64px;background: {{ c.hex }}"></div>
+            <div style="padding:12px 14px;background:#141417;display:flex;flex-direction:column;gap:3px">
+              <span style="font-size:13px;font-weight:600;color:#f0f0f2">{{ c.name }}</span>
+              <span style="font:11px 'SF Mono',ui-monospace,monospace;color:#8e8e93">{{ c.hex }} · {{ c.dark }}</span>
+              <span style="font-size:11.5px;line-height:1.45;color:#8e8e93;margin-top:3px">{{ c.use }}</span>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:13px;font-weight:600;color:#c9c9ce">Surfaces — app (light-dark pairs)</div>
+        <div style="border-radius:10px;border:1px solid rgba(255,255,255,.08);overflow:hidden">
+          <sc-for list="{{ surfaces }}" as="sw" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;background:#141417;border-bottom:1px solid rgba(255,255,255,.05)">
+              <span style="display:flex;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,.14)"><span style="width:26px;height:26px;background: {{ sw.l }}"></span><span style="width:26px;height:26px;background: {{ sw.d }}"></span></span>
+              <span style="font-size:12.5px;color:#f0f0f2;width:150px">{{ sw.name }}</span>
+              <span style="font:11px 'SF Mono',ui-monospace,monospace;color:#8e8e93">light-dark({{ sw.l }}, {{ sw.d }})</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:13px;font-weight:600;color:#c9c9ce">Surfaces — marketing (dark only)</div>
+        <div style="border-radius:10px;border:1px solid rgba(255,255,255,.08);overflow:hidden">
+          <sc-for list="{{ mktSurfaces }}" as="sw" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;background:#141417;border-bottom:1px solid rgba(255,255,255,.05)">
+              <span style="width:54px;height:26px;border-radius:6px;border:1px solid rgba(255,255,255,.14);background: {{ sw.hex }}"></span>
+              <span style="font-size:12.5px;color:#f0f0f2;width:150px">{{ sw.name }}</span>
+              <span style="font:11px 'SF Mono',ui-monospace,monospace;color:#8e8e93">{{ sw.hex }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="font-size:12px;line-height:1.55;color:#8e8e93;text-wrap:pretty">The landing page is permanently dark — privacy-forward, terminal-adjacent. Marketing never uses light mode; the app always supports both.</div>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font:12px 'SF Mono',ui-monospace,monospace;color:#3f8cff">03</div>
+      <h2 style="margin:0;font-size:24px;font-weight:700;color:#f5f5f7">Typography</h2>
+      <div style="font-size:13.5px;line-height:1.6;color:#98989d;max-width:680px;text-wrap:pretty">Two families, both system: SF Pro Text for everything, SF Mono for shortcuts, timers, transcripts, and technical annotations. Timers and clocks always set <span style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px">font-variant-numeric: tabular-nums</span>.</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:20px">
+      <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column">
+        <sc-for list="{{ type }}" as="t" hint-placeholder-count="8">
+          <div style="display:flex;align-items:baseline;gap:20px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.05)">
+            <span style="width:290px;flex:none;font-family: {{ t.mono }};font-size: {{ t.px }};font-weight: {{ t.w }};color:#f5f5f7;letter-spacing: {{ t.ls }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ t.sample }}</span>
+            <span style="font-size:12.5px;color:#c9c9ce;width:150px;flex:none">{{ t.name }}</span>
+            <span style="font:11px 'SF Mono',ui-monospace,monospace;color:#8e8e93">{{ t.spec }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:13px;font-weight:600;color:#c9c9ce">Rules</div>
+        <div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;line-height:1.55;color:#98989d">
+          <div style="display:flex;gap:8px"><span style="color:#28c840">✓</span><span>App UI floor is 11px (annotations); body is 13px — standard macOS control size</span></div>
+          <div style="display:flex;gap:8px"><span style="color:#28c840">✓</span><span>Shortcuts render in SF Mono inside a subtle key-cap chip: <span style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;padding:2px 8px;border-radius:5px;background:rgba(255,255,255,.1);color:#f0f0f2">⌥Space</span></span></div>
+          <div style="display:flex;gap:8px"><span style="color:#28c840">✓</span><span>Marketing headlines: 700 weight, -.02em tracking, text-wrap: balance</span></div>
+          <div style="display:flex;gap:8px"><span style="color:#ff453a">✕</span><span>No third fonts, no italics except quoted transcript previews</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font:12px 'SF Mono',ui-monospace,monospace;color:#3f8cff">04</div>
+      <h2 style="margin:0;font-size:24px;font-weight:700;color:#f5f5f7">Layout &amp; spacing</h2>
+      <div style="font-size:13.5px;line-height:1.6;color:#98989d;max-width:680px;text-wrap:pretty">No rigid grid — macOS spacing conventions, consistently applied.</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px">
+      <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:13px;font-weight:600;color:#c9c9ce">Spacing scale</div>
+        <sc-for list="{{ spacing }}" as="sp" hint-placeholder-count="7">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font:11px 'SF Mono',ui-monospace,monospace;color:#8e8e93;width:24px;text-align:right">{{ sp.px }}</span>
+            <span style="height:10px;border-radius:2px;background:#3f8cff;opacity:.75;width: {{ sp.w }}"></span>
+            <span style="font-size:11.5px;color:#8e8e93">{{ sp.use }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:13px;font-weight:600;color:#c9c9ce">Corner radii</div>
+        <sc-for list="{{ radii }}" as="r" hint-placeholder-count="5">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="width:34px;height:26px;flex:none;border:1.5px solid #3f8cff;opacity:.85;border-radius: {{ r.px }}"></span>
+            <span style="font:11px 'SF Mono',ui-monospace,monospace;color:#8e8e93;width:34px">{{ r.px }}</span>
+            <span style="font-size:11.5px;color:#8e8e93">{{ r.use }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:13px;font-weight:600;color:#c9c9ce">Fixed dimensions</div>
+        <div style="display:flex;flex-direction:column;gap:8px;font-size:12.5px;line-height:1.5;color:#98989d">
+          <div style="display:flex;justify-content:space-between;gap:12px"><span>Popover width</span><span style="font-family:'SF Mono',ui-monospace,monospace;font-size:11px;color:#c9c9ce">340px</span></div>
+          <div style="display:flex;justify-content:space-between;gap:12px"><span>HUD width</span><span style="font-family:'SF Mono',ui-monospace,monospace;font-size:11px;color:#c9c9ce">224–300px</span></div>
+          <div style="display:flex;justify-content:space-between;gap:12px"><span>Settings window</span><span style="font-family:'SF Mono',ui-monospace,monospace;font-size:11px;color:#c9c9ce">720px</span></div>
+          <div style="display:flex;justify-content:space-between;gap:12px"><span>Onboarding window</span><span style="font-family:'SF Mono',ui-monospace,monospace;font-size:11px;color:#c9c9ce">640px</span></div>
+          <div style="display:flex;justify-content:space-between;gap:12px"><span>Settings label column</span><span style="font-family:'SF Mono',ui-monospace,monospace;font-size:11px;color:#c9c9ce">180px right-aligned</span></div>
+          <div style="display:flex;justify-content:space-between;gap:12px"><span>Marketing content</span><span style="font-family:'SF Mono',ui-monospace,monospace;font-size:11px;color:#c9c9ce">1060px max</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font:12px 'SF Mono',ui-monospace,monospace;color:#3f8cff">05</div>
+      <h2 style="margin:0;font-size:24px;font-weight:700;color:#f5f5f7">Components</h2>
+      <div style="font-size:13.5px;line-height:1.6;color:#98989d;max-width:680px;text-wrap:pretty">Shown on both schemes. Every component is built from light-dark() pairs — one definition, two appearances.</div>
+    </div>
+    <div style="display:flex;gap:20px">
+      <sc-for list="{{ panels }}" as="panel" hint-placeholder-count="2">
+        <div style="color-scheme: {{ panel.scheme }};flex:1;border-radius:12px;padding:24px;background:light-dark(#d8d9de,#1f2024);display:flex;flex-direction:column;gap:20px">
+          <div style="font:11px 'SF Mono',ui-monospace,monospace;color:light-dark(#5c5c61,#8e8e93)">{{ panel.label }}</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:light-dark(#6e6e73,#98989d)">Buttons</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <button style="height:30px;padding:0 16px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:600;background:light-dark(#007aff,#0a84ff);color:#fff">Start Dictation</button>
+              <button style="height:30px;padding:0 16px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:600;background:#ff3b30;color:#fff">Stop Dictation</button>
+              <button style="font-size:12px;padding:4px 12px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Secondary</button>
+              <button style="height:30px;padding:0 16px;border-radius:6px;border:none;font-size:13px;font-weight:600;background:light-dark(rgba(0,0,0,.08),rgba(255,255,255,.1));color:#8e8e93">Disabled</button>
+              <button style="font-size:12.5px;border:none;background:none;padding:0;cursor:pointer;color:light-dark(#3c3c43,#d1d1d6)">Text button</button>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:light-dark(#6e6e73,#98989d)">Segmented control</div>
+            <span style="display:flex;background:light-dark(rgba(0,0,0,.06),rgba(255,255,255,.09));border-radius:6px;padding:1.5px;align-self:flex-start">
+              <button style="font-size:12px;padding:2.5px 14px;border:none;border-radius:5px;cursor:pointer;background:transparent;color:light-dark(#1d1d1f,#f5f5f7)">Instant</button>
+              <button style="font-size:12px;padding:2.5px 14px;border:none;border-radius:5px;cursor:pointer;background:light-dark(#ffffff,#6a6a70);color:light-dark(#1d1d1f,#f5f5f7);box-shadow:0 1px 2px rgba(0,0,0,.18)">Clean</button>
+            </span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:light-dark(#6e6e73,#98989d)">Inline notice (MacUIInlineNotice)</div>
+            <div style="max-width:360px;padding:10px 12px;border-radius:8px;background:light-dark(rgba(0,0,0,.045),rgba(255,255,255,.06));display:flex;gap:10px;align-items:flex-start">
+              <span style="font-size:13px;line-height:1.35;color:#ff9500;flex:none">⚠</span>
+              <span style="flex:1;display:flex;flex-direction:column;gap:2px">
+                <span style="font-size:12.5px;font-weight:600;color:light-dark(#1d1d1f,#f5f5f7)">Shortcut inactive</span>
+                <span style="font-size:11.5px;line-height:1.4;color:light-dark(#515156,#aeaeb2)">⌥Space failed to register with the system.</span>
+              </span>
+              <button style="flex:none;font-size:11.5px;font-weight:500;padding:3px 10px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#ffffff,#48484c);color:light-dark(#1d1d1f,#f5f5f7);cursor:pointer">Open Settings</button>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:light-dark(#6e6e73,#98989d)">Recording HUD</div>
+            <div style="min-width:224px;max-width:300px;align-self:flex-start;padding:10px 14px;border-radius:12px;background:light-dark(rgba(248,248,250,.97),rgba(46,46,50,.97));box-shadow:0 8px 28px rgba(0,0,0,.3),0 0 0 1px light-dark(rgba(0,0,0,.1),rgba(255,255,255,.1))">
+              <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:light-dark(#1d1d1f,#f0f0f2)">
+                <span style="width:9px;height:9px;border-radius:5px;background:#ff3b30;flex:none;animation:oigo-pulse 1.6s ease-in-out infinite"></span>
+                <span style="font-family:'SF Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums">00:12</span>
+                <span>Recording · Notes</span>
+              </div>
+              <div style="margin-top:4px;font-size:11px;color:light-dark(#6e6e73,#98989d)">Release ⌥Space to finish</div>
+              <div style="margin-top:5px;font-size:12px;font-style:italic;color:light-dark(#48484d,#c0c0c6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:270px">&ldquo;…send the agenda to the platform team&rdquo;</div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:light-dark(#6e6e73,#98989d)">Form row</div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:150px;text-align:right;font-size:13px;color:light-dark(#1d1d1f,#f5f5f7)">Microphone:</span>
+              <select style="font-size:12px;padding:3px 8px;border-radius:5px;border:1px solid light-dark(rgba(0,0,0,.16),rgba(255,255,255,.2));background:light-dark(#fff,#48484c);color:light-dark(#1d1d1f,#f5f5f7)"><option>MacBook Pro Microphone</option></select>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:150px;flex:none"></span>
+              <span style="font-size:11px;color:#ff9500">⚠ Shure MV7 is disconnected. Oigo will not substitute another device.</span>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font:12px 'SF Mono',ui-monospace,monospace;color:#3f8cff">06</div>
+      <h2 style="margin:0;font-size:24px;font-weight:700;color:#f5f5f7">Web — controls &amp; forms</h2>
+      <div style="font-size:13.5px;line-height:1.6;color:#98989d;max-width:680px;text-wrap:pretty">For the landing page, docs, and any web surface. Dark only, on marketing surfaces. In-app forms use native macOS controls — see section 05. Web accent is <span style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px">#3f8cff</span> (Action Blue lifted for dark backgrounds).</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:18px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#98989d">Text inputs</div>
+          <div style="display:flex;flex-direction:column;gap:10px;max-width:380px">
+            <span style="display:flex;flex-direction:column;gap:5px">
+              <label style="font-size:12.5px;font-weight:500;color:#d1d1d6">Email</label>
+              <input placeholder="you@example.com" style="padding:9px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:#0e0e10;color:#f0f0f2;font-size:13.5px;font-family:inherit;outline:none"></input>
+              <span style="font-size:11.5px;color:#8e8e93">For release announcements only. No marketing.</span>
+            </span>
+            <span style="display:flex;flex-direction:column;gap:5px">
+              <label style="font-size:12.5px;font-weight:500;color:#d1d1d6">Focused</label>
+              <input value="oigo.app/releases" style="padding:9px 12px;border-radius:8px;border:1px solid #3f8cff;box-shadow:0 0 0 3px rgba(63,140,255,.22);background:#0e0e10;color:#f0f0f2;font-size:13.5px;font-family:inherit;outline:none"></input>
+            </span>
+            <span style="display:flex;flex-direction:column;gap:5px">
+              <label style="font-size:12.5px;font-weight:500;color:#d1d1d6">Invalid</label>
+              <input value="not-an-email" style="padding:9px 12px;border-radius:8px;border:1px solid #ff453a;background:#0e0e10;color:#f0f0f2;font-size:13.5px;font-family:inherit;outline:none"></input>
+              <span style="font-size:11.5px;color:#ff453a">Enter a valid email address.</span>
+            </span>
+            <span style="display:flex;flex-direction:column;gap:5px">
+              <label style="font-size:12.5px;font-weight:500;color:#d1d1d6">Message</label>
+              <textarea rows="3" placeholder="What went wrong, and in which app?" style="padding:9px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:#0e0e10;color:#f0f0f2;font-size:13.5px;font-family:inherit;resize:vertical;outline:none"></textarea>
+            </span>
+          </div>
+          <div style="font:10.5px 'SF Mono',ui-monospace,monospace;color:#6e6e73">field #0e0e10 · border rgba(255,255,255,.14) · radius 8 · padding 9×12 · label 12.5/500 above · hint 11.5 below</div>
+        </div>
+        <div style="border-top:1px solid rgba(255,255,255,.06)"></div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#98989d">Select · slider</div>
+          <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+            <select style="padding:9px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:#0e0e10;color:#f0f0f2;font-size:13.5px;font-family:inherit;outline:none"><option>macOS 15 Sequoia</option><option>macOS 16</option></select>
+            <span style="display:flex;align-items:center;gap:10px">
+              <input type="range" defaultValue="65" style="accent-color:#3f8cff;width:160px"></input>
+              <span style="font:11.5px 'SF Mono',ui-monospace,monospace;color:#98989d">65%</span>
+            </span>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#98989d">Buttons</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <a href="#" style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:#0a0a0c;background:#f5f5f7;padding:10px 20px;border-radius:9px;text-decoration:none" style-hover="background:#ffffff;text-decoration:none">⇩ Download</a>
+            <a href="#" style="font-size:14px;font-weight:500;color:#d1d1d6;padding:10px 18px;border-radius:9px;border:1px solid rgba(255,255,255,.16);text-decoration:none" style-hover="border-color:rgba(255,255,255,.3);text-decoration:none">View on GitHub</a>
+            <a href="#" style="font-size:13.5px;color:#3f8cff">Text link →</a>
+          </div>
+          <div style="font:10.5px 'SF Mono',ui-monospace,monospace;color:#6e6e73">primary = white fill (one per view) · secondary = 1px border · radius 9 · never blue-filled on web</div>
+        </div>
+        <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#98989d">Checkbox · radio</div>
+          <div style="display:flex;gap:32px;flex-wrap:wrap">
+            <span style="display:flex;flex-direction:column;gap:8px">
+              <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;color:#e8e8ec;cursor:pointer"><input type="checkbox" defaultChecked="{{ true }}" style="accent-color:#3f8cff;width:15px;height:15px"></input>Notify me about releases</label>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;color:#e8e8ec;cursor:pointer"><input type="checkbox" style="accent-color:#3f8cff;width:15px;height:15px"></input>Include beta builds</label>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;color:#6e6e73"><input type="checkbox" disabled="{{ true }}" style="width:15px;height:15px"></input>Disabled option</label>
+            </span>
+            <span style="display:flex;flex-direction:column;gap:8px">
+              <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;color:#e8e8ec;cursor:pointer"><input type="radio" name="dswebarch" defaultChecked="{{ true }}" style="accent-color:#3f8cff;width:15px;height:15px"></input>Apple silicon</label>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;color:#e8e8ec;cursor:pointer"><input type="radio" name="dswebarch" style="accent-color:#3f8cff;width:15px;height:15px"></input>Intel</label>
+            </span>
+          </div>
+        </div>
+        <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:10px">
+          <div style="font-size:13px;font-weight:600;color:#c9c9ce">Web form rules</div>
+          <div style="display:flex;flex-direction:column;gap:8px;font-size:12.5px;line-height:1.55;color:#98989d">
+            <div style="display:flex;gap:8px"><span style="color:#28c840">✓</span><span>Labels above fields (unlike the app's right-aligned columns); hints below at 11.5px</span></div>
+            <div style="display:flex;gap:8px"><span style="color:#28c840">✓</span><span>Focus ring: 1px #3f8cff border + 3px rgba(63,140,255,.22) glow</span></div>
+            <div style="display:flex;gap:8px"><span style="color:#28c840">✓</span><span>Invalid: red border + red 11.5px message replacing the hint</span></div>
+            <div style="display:flex;gap:8px"><span style="color:#ff453a">✕</span><span>No floating labels, no placeholder-as-label, no blue-filled buttons</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font:12px 'SF Mono',ui-monospace,monospace;color:#3f8cff">07</div>
+      <h2 style="margin:0;font-size:24px;font-weight:700;color:#f5f5f7">Web — tables &amp; lists</h2>
+      <div style="font-size:13.5px;line-height:1.6;color:#98989d;max-width:680px;text-wrap:pretty">Web tables are borderless grids on card surfaces: uppercase 11px header on <span style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px">#18181c</span>, rows on <span style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px">#141417</span> separated by hairlines. Numbers, versions, and durations in SF Mono with tabular figures. In-app tables (History, Dictionary) use native macOS list styling — see those prototypes.</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:20px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#98989d">Data table (releases)</div>
+        <div style="border-radius:12px;border:1px solid rgba(255,255,255,.07);overflow:hidden">
+          <div style="display:grid;grid-template-columns:90px 1fr 110px 90px;gap:0;padding:10px 20px;background:#18181c;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#8e8e93">
+            <span>Version</span><span>Highlights</span><span>Date</span><span></span>
+          </div>
+          <sc-for list="{{ webTable }}" as="w" hint-placeholder-count="4">
+            <div style="display:grid;grid-template-columns:90px 1fr 110px 90px;gap:0;align-items:center;padding:12px 20px;background:#141417;border-top:1px solid rgba(255,255,255,.05)" style-hover="background:#17171b">
+              <span style="font:12.5px 'SF Mono',ui-monospace,monospace;color:#f0f0f2">{{ w.v }}</span>
+              <span style="font-size:13px;color:#98989d;padding-right:16px">{{ w.notes }}</span>
+              <span style="font:12px 'SF Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;color:#8e8e93">{{ w.date }}</span>
+              <a href="#" style="font-size:12.5px;color:#3f8cff;justify-self:end">{{ w.link }}</a>
+            </div>
+          </sc-for>
+        </div>
+        <div style="font:10.5px 'SF Mono',ui-monospace,monospace;color:#6e6e73">row padding 12×20 · hover #17171b · one link column max, right-aligned · no zebra stripes, no vertical rules</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#98989d">Definition table (specs)</div>
+          <div style="border-radius:12px;border:1px solid rgba(255,255,255,.07);overflow:hidden;background:#141417">
+            <sc-for list="{{ webSpecs }}" as="sp" hint-placeholder-count="4">
+              <div style="display:flex;align-items:baseline;gap:16px;padding:11px 20px;border-top:1px solid rgba(255,255,255,.05)">
+                <span style="width:130px;flex:none;font-size:12.5px;color:#8e8e93">{{ sp.k }}</span>
+                <span style="font-size:13px;color:#e8e8ec">{{ sp.v }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font:10.5px 'SF Mono',ui-monospace,monospace;color:#6e6e73">two columns, key 130px muted · for specs, requirements, comparisons</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#98989d">Lists</div>
+          <div style="border-radius:12px;border:1px solid rgba(255,255,255,.07);background:#141417;padding:18px 20px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;gap:10px;font-size:13.5px;line-height:1.55;color:#c7c7cc"><span style="color:#3f8cff;flex:none">—</span><span>Unordered: em-dash marker in Action Blue, never bullets or emoji</span></div>
+            <div style="display:flex;gap:10px;font-size:13.5px;line-height:1.55;color:#c7c7cc"><span style="font:12px 'SF Mono',ui-monospace,monospace;color:#3f8cff;flex:none;padding-top:2px">01</span><span>Ordered: two-digit SF Mono numerals, as in “How it works”</span></div>
+            <div style="display:flex;gap:10px;font-size:13.5px;line-height:1.55;color:#c7c7cc"><span style="color:#28c840;flex:none">✓</span><span>Checklist: green check for capabilities, red ✕ for exclusions</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font:12px 'SF Mono',ui-monospace,monospace;color:#3f8cff">08</div>
+      <h2 style="margin:0;font-size:24px;font-weight:700;color:#f5f5f7">States &amp; badges</h2>
+      <div style="font-size:13.5px;line-height:1.6;color:#98989d;max-width:680px;text-wrap:pretty">The dictation lifecycle and how each phase surfaces in the menu bar and HUD. Terminal states auto-dismiss; active states persist.</div>
+    </div>
+    <div style="border-radius:12px;border:1px solid rgba(255,255,255,.07);overflow:hidden">
+      <div style="display:grid;grid-template-columns:170px 130px 1fr 200px;gap:0;padding:10px 20px;background:#18181c;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#8e8e93">
+        <span>Phase</span><span>Menu-bar icon</span><span>HUD</span><span>Duration</span>
+      </div>
+      <sc-for list="{{ lifecycle }}" as="l" hint-placeholder-count="8">
+        <div style="display:grid;grid-template-columns:170px 130px 1fr 200px;gap:0;align-items:center;padding:11px 20px;background:#141417;border-top:1px solid rgba(255,255,255,.05)">
+          <span style="display:flex;align-items:center;gap:8px;font-size:13px;color:#f0f0f2">
+            <span style="width:8px;height:8px;border-radius:4px;flex:none;background: {{ l.dot }}"></span>{{ l.phase }}
+          </span>
+          <span style="position:relative;display:flex;width:30px;justify-content:center">
+            <svg width="13" height="17" viewBox="0 0 24 32"><path d="M9.4 5.2 C10.2 3.7 11 2.8 12.4 2.8 C17.8 2.8 20.2 8.3 20.2 16 C20.2 23.7 17.6 29.2 12 29.2 C7 29.2 4 25.2 3.8 19.4 C3.7 13.6 5.6 9.6 8.8 8.4 C11.2 7.5 13.1 8.8 12.9 10.9 C12.7 12.9 10.6 13.4 10 15.1 C9.4 16.8 10.6 18.2 12.3 18.1" fill="none" stroke-width="2.6" stroke-linecap="round" style="stroke: {{ l.stroke }}"></path></svg>
+            <sc-if value="{{ l.badge }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;top:-1px;right:2px;width:5px;height:5px;border-radius:3px;background: {{ l.badge }}"></span></sc-if>
+          </span>
+          <span style="font-size:12.5px;color:#98989d">{{ l.hud }}</span>
+          <span style="font:11px 'SF Mono',ui-monospace,monospace;color:#8e8e93">{{ l.dur }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font:12px 'SF Mono',ui-monospace,monospace;color:#3f8cff">09</div>
+      <h2 style="margin:0;font-size:24px;font-weight:700;color:#f5f5f7">Motion &amp; timing</h2>
+      <div style="font-size:13.5px;line-height:1.6;color:#98989d;max-width:680px;text-wrap:pretty">Motion is informational, never decorative. Two animations exist in the entire app.</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:14px">
+        <div style="font-size:13px;font-weight:600;color:#c9c9ce">Animations</div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:center;gap:14px">
+            <span style="width:9px;height:9px;border-radius:5px;background:#ff3b30;animation:oigo-pulse 1.6s ease-in-out infinite;flex:none"></span>
+            <span style="font-size:12.5px;color:#f0f0f2;width:130px">Recording pulse</span>
+            <span style="font:11px 'SF Mono',ui-monospace,monospace;color:#8e8e93">opacity 1→.45 · 1.6s ease-in-out ∞</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px">
+            <span style="width:11px;height:11px;flex:none;border-radius:6px;border:2px solid rgba(255,255,255,.22);border-top-color:#ddd;animation:oigo-pulse .9s linear infinite"></span>
+            <span style="font-size:12.5px;color:#f0f0f2;width:130px">Activity spinner</span>
+            <span style="font:11px 'SF Mono',ui-monospace,monospace;color:#8e8e93">system spinner · .9s linear ∞</span>
+          </div>
+        </div>
+        <div style="border-top:1px solid rgba(255,255,255,.06)"></div>
+        <div style="font-size:12.5px;line-height:1.6;color:#98989d">HUD enters/exits with a 150ms fade + 4px rise. No springs, no bounces. Respect Reduce Motion: pulse becomes static, fades become instant.</div>
+      </div>
+      <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:13px;font-weight:600;color:#c9c9ce">Timing constants</div>
+        <sc-for list="{{ timing }}" as="tm" hint-placeholder-count="7">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font:11px 'SF Mono',ui-monospace,monospace;color:#3f8cff;width:60px;text-align:right;flex:none">{{ tm.v }}</span>
+            <span style="font-size:12.5px;color:#98989d">{{ tm.what }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font:12px 'SF Mono',ui-monospace,monospace;color:#3f8cff">10</div>
+      <h2 style="margin:0;font-size:24px;font-weight:700;color:#f5f5f7">Voice &amp; copy</h2>
+      <div style="font-size:13.5px;line-height:1.6;color:#98989d;max-width:680px;text-wrap:pretty">Oigo speaks like a careful engineer: precise about what happened, honest about what it can't verify, never alarmed. It says “Paste attempted,” not “Pasted” — it can't know. Failures lead with what was preserved.</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:14px">
+        <div style="font-size:13px;font-weight:600;color:#c9c9ce">Principles</div>
+        <div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;line-height:1.55;color:#98989d">
+          <div style="display:flex;gap:8px"><span style="color:#3f8cff;flex:none">1.</span><span><b style="color:#d1d1d6">Claim only what you know.</b> “Paste attempted”, “Copied to Clipboard” — never assert success inside another app.</span></div>
+          <div style="display:flex;gap:8px"><span style="color:#3f8cff;flex:none">2.</span><span><b style="color:#d1d1d6">Lead with preservation.</b> Every failure message starts from what survived: “Recording preserved.”</span></div>
+          <div style="display:flex;gap:8px"><span style="color:#3f8cff;flex:none">3.</span><span><b style="color:#d1d1d6">Name the fix.</b> Every notice pairs a problem with exactly one action button.</span></div>
+          <div style="display:flex;gap:8px"><span style="color:#3f8cff;flex:none">4.</span><span><b style="color:#d1d1d6">Sentence case, no exclamation marks, no blame.</b> “Microphone unavailable”, not “Oops! Mic error!”</span></div>
+        </div>
+      </div>
+      <div style="border-radius:12px;padding:24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:13px;font-weight:600;color:#c9c9ce">Do / don't</div>
+        <sc-for list="{{ copyPairs }}" as="cp" hint-placeholder-count="4">
+          <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,.05)">
+            <div style="display:flex;gap:8px;font-size:12.5px"><span style="color:#28c840;flex:none">✓</span><span style="color:#e8e8ec">{{ cp.do }}</span></div>
+            <div style="display:flex;gap:8px;font-size:12.5px"><span style="color:#ff453a;flex:none">✕</span><span style="color:#6e6e73;text-decoration:line-through">{{ cp.dont }}</span></div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:24px;padding-bottom:24px">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font:12px 'SF Mono',ui-monospace,monospace;color:#3f8cff">11</div>
+      <h2 style="margin:0;font-size:24px;font-weight:700;color:#f5f5f7">Do / don't — patterns</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:20px">
+      <sc-for list="{{ patterns }}" as="pt" hint-placeholder-count="6">
+        <div style="border-radius:12px;padding:20px 24px;background:#141417;border:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;gap:8px;align-items:baseline">
+            <span style="font-size:12px;color: {{ pt.color }}">{{ pt.mark }}</span>
+            <span style="font-size:13.5px;font-weight:600;color:#f0f0f2">{{ pt.title }}</span>
+          </div>
+          <div style="font-size:12.5px;line-height:1.6;color:#98989d;text-wrap:pretty">{{ pt.body }}</div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="font:11px 'SF Mono',ui-monospace,monospace;color:#6e6e73;border-top:1px solid rgba(255,255,255,.07);padding-top:20px">Reference implementations: <a href="uploads/Popover + HUD Prototype.dc.html" style="color:#3f8cff">Popover + HUD</a> · <a href="uploads/State Boards.dc.html" style="color:#3f8cff">State Boards</a> · <a href="uploads/Settings.dc.html" style="color:#3f8cff">Settings</a> · <a href="uploads/Onboarding.dc.html" style="color:#3f8cff">Onboarding</a> · <a href="uploads/History.dc.html" style="color:#3f8cff">History</a> · <a href="uploads/Oigo Icon.dc.html" style="color:#3f8cff">Icon</a> · <a href="Landing Page.dc.html" style="color:#3f8cff">Landing Page</a></div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;1400px&quot;,&quot;height&quot;:&quot;900px&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      toc: ['01 Logo', '02 Color', '03 Typography', '04 Layout', '05 Components', '06 Controls & forms', '07 Tables & lists', '08 States', '09 Motion', '10 Voice', '11 Do/Don\u2019t'],
+      accents: [
+        { name: 'Recording Red', hex: '#ff3b30', dark: '#ff453a dark', use: 'Recording only: HUD dot, mark stroke, Stop button. Never decorative.' },
+        { name: 'Attention Orange', hex: '#ff9500', dark: '#ff9f0a dark', use: 'Needs-attention badge, degraded warnings, unavailable devices.' },
+        { name: 'Action Blue', hex: '#007aff', dark: '#0a84ff dark', use: 'Primary buttons, links, info notices, focus rings, text caret.' },
+        { name: 'Confirmed Green', hex: '#28c840', dark: '#30d158 dark', use: 'Checkmarks: assets ready, permission granted, success rows.' }
+      ],
+      surfaces: [
+        { name: 'Desktop backdrop', l: '#d8d9de', d: '#1f2024' },
+        { name: 'Window chrome', l: '#ececee', d: '#2a2a2e' },
+        { name: 'Content pane', l: '#f0f0f2', d: '#28282c' },
+        { name: 'Popover', l: '#f4f4f6', d: '#2c2c30' },
+        { name: 'HUD (97% opaque)', l: '#f8f8fa', d: '#2e2e32' },
+        { name: 'Editor / document', l: '#ffffff', d: '#1e1e20' }
+      ],
+      mktSurfaces: [
+        { name: 'Page background', hex: '#0a0a0c' },
+        { name: 'Alternate band', hex: '#0e0e11' },
+        { name: 'Card', hex: '#141417' },
+        { name: 'Code / transcript well', hex: '#0e0e10' },
+        { name: 'Hairline', hex: 'rgba(255,255,255,.07)' }
+      ],
+      type: [
+        { sample: 'Hold a key. Speak.', name: 'Marketing display', spec: 'SF Pro 56/1.08 · 700 · -.02em', px: '30px', w: '700', ls: '-.02em', mono: 'inherit' },
+        { sample: 'Your voice never leaves', name: 'Marketing H2', spec: 'SF Pro 34 · 700 · -.01em', px: '24px', w: '700', ls: '-.01em', mono: 'inherit' },
+        { sample: 'Set Up Oigo', name: 'Window title / stage', spec: 'SF Pro 20 · 600', px: '20px', w: '600', ls: '0', mono: 'inherit' },
+        { sample: 'Design review notes', name: 'Section header', spec: 'SF Pro 17 · 700', px: '17px', w: '700', ls: '0', mono: 'inherit' },
+        { sample: 'Start Dictation', name: 'Control / body', spec: 'SF Pro 13 · 400–600', px: '13px', w: '600', ls: '0', mono: 'inherit' },
+        { sample: 'Applies to the next dictation', name: 'Caption / hint', spec: 'SF Pro 11–11.5 · 400', px: '11.5px', w: '400', ls: '0', mono: 'inherit' },
+        { sample: 'LAST DICTATION', name: 'Overline', spec: 'SF Pro 11 · 600 · .04em · caps', px: '11px', w: '600', ls: '.04em', mono: 'inherit' },
+        { sample: '00:12 · ⌥Space', name: 'Mono: timers, keys', spec: 'SF Mono 11–13 · tabular-nums', px: '13px', w: '400', ls: '0', mono: "'SF Mono',ui-monospace,monospace" }
+      ],
+      spacing: [
+        { px: '4', w: '4px', use: 'icon↔badge, tight stacks' },
+        { px: '8', w: '8px', use: 'within a control row' },
+        { px: '12', w: '12px', use: 'HUD padding, list rows' },
+        { px: '16', w: '16px', use: 'popover sides, card gaps' },
+        { px: '24', w: '24px', use: 'card padding' },
+        { px: '40', w: '40px', use: 'settings pane sides, page gutter' },
+        { px: '96', w: '96px', use: 'marketing section rhythm' }
+      ],
+      radii: [
+        { px: '5px', use: 'small buttons, selects, key chips' },
+        { px: '6px', use: 'standard buttons, segmented' },
+        { px: '8px', use: 'inline notices, wells' },
+        { px: '10px', use: 'windows' },
+        { px: '12px', use: 'HUD, cards, marketing panels' }
+      ],
+      panels: [
+        { scheme: 'light', label: 'LIGHT' },
+        { scheme: 'dark', label: 'DARK' }
+      ],
+      webTable: [
+        { v: 'v0.9.2', notes: 'Live preview throttling, Shure MV7 channel picker', date: '2026-08-14', link: 'Notes →' },
+        { v: 'v0.9.1', notes: 'Retry transcription from History, HUD Reduce Motion support', date: '2026-07-30', link: 'Notes →' },
+        { v: 'v0.9.0', notes: 'First public beta — Instant & Clean modes, on-device only', date: '2026-07-08', link: 'Notes →' },
+        { v: 'v0.8.4', notes: 'Internal: durable recording pipeline rewrite', date: '2026-06-19', link: 'Notes →' }
+      ],
+      webSpecs: [
+        { k: 'Requires', v: 'macOS 15 Sequoia or later' },
+        { k: 'Architecture', v: 'Apple silicon & Intel, universal binary' },
+        { k: 'Download size', v: '4.8 MB' },
+        { k: 'License', v: 'MIT — free forever' },
+        { k: 'Network use', v: 'None' }
+      ],
+      lifecycle: [
+        { phase: 'Idle', dot: '#8e8e93', stroke: '#f5f5f7', badge: null, hud: 'Hidden', dur: 'resting state' },
+        { phase: 'Preparing', dot: '#c9c9ce', stroke: '#f5f5f7', badge: null, hud: 'Spinner + \u201cPreparing\u2026\u201d', dur: 'until session ready' },
+        { phase: 'Recording', dot: '#ff3b30', stroke: '#ff453a', badge: '#ff453a', hud: 'Red dot + timer + target app + optional live preview', dur: 'while key held' },
+        { phase: 'Finalizing / Cleaning / Pasting', dot: '#c9c9ce', stroke: '#f5f5f7', badge: null, hud: 'Spinner + phase label', dur: 'persists while active' },
+        { phase: 'Paste attempted', dot: '#28c840', stroke: '#f5f5f7', badge: null, hud: '\u2713 terminal toast', dur: '~1.8s auto-dismiss' },
+        { phase: 'Copied to Clipboard', dot: '#28c840', stroke: '#f5f5f7', badge: null, hud: '\u2713 calm fallback, not an error', dur: '~1.8s auto-dismiss' },
+        { phase: 'Failed \u2014 preserved', dot: '#ff9500', stroke: '#f5f5f7', badge: '#ff9500', hud: '\u26a0 \u201cRecording Saved \u2014 Retry Needed\u201d', dur: '~3s · recovery in popover' },
+        { phase: 'Cancelled', dot: '#6e6e73', stroke: '#f5f5f7', badge: null, hud: '\u201cCancelled\u201d', dur: '~1.5s auto-dismiss' },
+        { phase: 'Needs attention', dot: '#ff9500', stroke: '#f5f5f7', badge: '#ff9500', hud: 'None \u2014 notice lives in popover', dur: 'until resolved' }
+      ],
+      timing: [
+        { v: '1 Hz', what: 'HUD timer tick, monospaced digits' },
+        { v: '\u22645/s', what: 'live preview updates, one line max' },
+        { v: '150ms', what: 'HUD fade in/out + 4px rise' },
+        { v: '~1.8s', what: 'success toast dwell' },
+        { v: '~3s', what: 'warning toast dwell' },
+        { v: '~1.5s', what: 'cancelled toast dwell' },
+        { v: '1.6s', what: 'recording pulse period' }
+      ],
+      copyPairs: [
+        { do: 'Paste attempted', dont: 'Pasted successfully!' },
+        { do: 'Recording preserved. Live transcription degraded.', dont: 'Transcription failed.' },
+        { do: 'Shure MV7 is disconnected. Oigo will not substitute another device.', dont: 'Switched to built-in mic for you!' },
+        { do: 'Hold \u2325Space to dictate', dont: 'Press your hotkey to begin your journey' }
+      ],
+      patterns: [
+        { mark: '✓', color: '#28c840', title: 'One primary action per surface', body: 'The popover has exactly one filled button; its label and color track state (Start / Stop / Retry). Everything else is bordered or plain text.' },
+        { mark: '✓', color: '#28c840', title: 'Errors point somewhere', body: 'Transient toasts announce; persistent recovery lives in the popover notice and History. A toast is never the only record of a failure.' },
+        { mark: '✓', color: '#28c840', title: 'Respect the user\u2019s hardware choice', body: 'A missing device is reported as unavailable, never silently swapped. State the consequence and offer the switch as a button.' },
+        { mark: '✓', color: '#28c840', title: 'Both appearances, one definition', body: 'Every surface, border, and text color ships as a light-dark() pair. Semantic accents use the darker variant on dark backgrounds.' },
+        { mark: '✕', color: '#ff453a', title: 'No modal interruptions', body: 'Oigo never steals focus mid-dictation. All states surface through HUD, badge, or popover \u2014 the user\u2019s target app keeps focus.' },
+        { mark: '✕', color: '#ff453a', title: 'No decorative motion or color', body: 'Red is recording, orange is attention, green is confirmed, blue acts. If an element animates, it is reporting live activity \u2014 nothing else moves.' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
