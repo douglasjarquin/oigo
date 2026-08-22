@@ -112,6 +112,26 @@ else
     fail "NSMicrophoneUsageDescription is missing"
 fi
 
+icon_name="$(plist_string CFBundleIconName)"
+if [[ "$icon_name" == "AppIcon" ]]; then
+    pass "CFBundleIconName is AppIcon"
+else
+    fail "CFBundleIconName must be AppIcon, found ${icon_name:-<missing>}"
+fi
+
+assets_car="$app/Contents/Resources/Assets.car"
+app_icon="$app/Contents/Resources/AppIcon.icns"
+if [[ -s "$assets_car" ]]; then
+    pass "production asset catalog is present"
+else
+    fail "production Assets.car is missing or empty"
+fi
+if [[ -s "$app_icon" ]]; then
+    pass "production AppIcon.icns is present"
+else
+    fail "production AppIcon.icns is missing or empty"
+fi
+
 executable="$app/Contents/MacOS/$required_executable_name"
 if [[ -x "$executable" ]]; then
     pass "executable exists at Contents/MacOS/$required_executable_name"
@@ -131,7 +151,7 @@ fi
 forbidden=()
 while IFS= read -r path; do
     case "$path" in
-        *.xctest|*/xctest|*/XCTest*|*/Tests/*|*.swift|*.dSYM|*/dSYM/*|*Test.bundle)
+        *.xctest|*/xctest|*/XCTest*|*/Tests/*|*.swift|*.dSYM|*/dSYM/*|*Test.bundle|*Gallery*|*gallery*|*Prototype*|*prototype*|*Fixture*|*fixture*)
             forbidden+="$path"
             ;;
     esac
@@ -143,7 +163,7 @@ while IFS= read -r path; do
 done < <(/usr/bin/find "$app" \( -name '*debug*' -o -name '*Debug*' -o -name '*.xctest' -o -name 'XCTest*' \) 2>/dev/null)
 
 if (( ${#forbidden[@]} == 0 && ${#debug_artifacts[@]} == 0 )); then
-    pass "bundle contains no test or debug artifacts"
+    pass "bundle contains no gallery, prototype, fixture, test, or debug artifacts"
 else
     fail "bundle contains test or debug artifacts: ${forbidden[*]} ${debug_artifacts[*]}"
 fi

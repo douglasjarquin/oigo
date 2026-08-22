@@ -1,0 +1,37 @@
+{
+  "name": "bounded-summary-and-rollback",
+  "latestLimit": 1,
+  "latestLoadTrigger": "session-event",
+  "transcriptReadsOnOpen": 0,
+  "transcriptReadsAfterCopy": 1,
+  "staleRequestGeneration": 40,
+  "currentGeneration": 41,
+  "persistedMode": "instant",
+  "failedModeCandidate": "clean",
+  "committedModeAfterFailure": "instant",
+  "actions": [
+    "copy",
+    "paste-again",
+    "retry-transcription",
+    "open-history",
+    "open-settings",
+    "quit",
+    "escape",
+    "tab",
+    "return",
+    "space"
+  ],
+  "keyboardOrder": [
+    "primary",
+    "mode",
+    "microphone",
+    "latest",
+    "history",
+    "settings",
+    "quit"
+  ],
+  "popoverTasksAfterDismissal": 0,
+  "popoverObserversAfterDismissal": 0,
+  "retainedLatestSessionsAfterDismissal": 0,
+  "activeDictationCancelledOnDismissal": false
+}

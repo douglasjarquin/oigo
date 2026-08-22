@@ -1,0 +1,9 @@
+{
+  "name": "stale-generation",
+  "rows": [],
+  "expectedSections": [],
+  "popoverWidth": 340,
+  "healthyNoScroll": true,
+  "staleGeneration": 42,
+  "currentGeneration": 42
+}

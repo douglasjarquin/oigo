@@ -1,0 +1,9 @@
+MATRIX rows=23 unique=23 sections=7 width=340 scroll=false
+PRIORITY notice=storage-critical count=1 start=disabled
+SHORTCUT start=enabled
+ACCESSIBILITY posture=ready
+PINNED microphone=pinned-input-unavailable
+RECOVERY microphone=system-settings accessibility=system-settings
+BUSY reason=busy-retry
+SHUTDOWN reason=shutting-down
+PASS popover-state-matrix resources=0 reads=metadata-only

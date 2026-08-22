@@ -1,0 +1,14 @@
+SCENARIO authoritative mapper uniqueness
+2:    public static func project(_ inputs: OigoPresentationInputs) -> OigoPresentationState {
+PASS presentation_state_mapper_count=1 gallery_duplicate_mapper=false
+SCENARIO bounded open dependencies
+PASS open_reads=metadata-only global_monitor=false duplicate_operation_gate=false
+SCENARIO typed routing and teardown
+Sources/Oigo/StatusSurfaceController.swift:128:        utilityMenu.cancelTracking()
+Sources/Oigo/StatusSurfaceController.swift:129:        popover.close()
+Sources/Oigo/StatusSurfaceController.swift:153:        utilityMenu.cancelTracking()
+Sources/Oigo/StatusSurfaceController.swift:158:            popover.close()
+Sources/Oigo/StatusSurfaceController.swift:165:        popover.close()
+Sources/Oigo/OigoAppDelegate.swift:2109:        case .openSystemSettings(let url):
+Sources/Oigo/OigoAppDelegate.swift:2110:            openSystemSettings(url)
+PASS system_settings=typed close_resources=0
