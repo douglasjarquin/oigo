@@ -159,6 +159,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var hudGeneration: UInt64?
     private var presentationPublicationGeneration: UInt64 = 0
     private var presentationPublicationFence = OigoPresentationGenerationFence()
+    private let statusIdentityRenderer = OigoStatusIdentityRenderer()
     private var maintenanceHandle: AppOperationHandle?
     nonisolated(unsafe) private var maintenanceStore: SessionStore?
     nonisolated(unsafe) private var maintenancePolicy = SessionRetentionPolicy.default
@@ -262,6 +263,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         hudGeometrySession.shutdown()
         hudGeometrySnapshot = nil
         hudGeneration = nil
+        statusIdentityRenderer.shutdown()
         statusSurface.shutdownHUD()
         statusSurface.teardown()
         if let statusItem {
@@ -634,7 +636,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func configureStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "Oigo"
         statusItem = item
         statusSurface.install(statusItem: item)
     }
@@ -2121,6 +2122,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func publishPresentation(_ snapshot: OigoAppDelegatePresentationSnapshot) {
         presentationPublicationFence.publish(snapshot.publication) { publication in
             let adapter = publication.adapters
+            statusIdentityRenderer.render(
+                publication.state,
+                on: statusItem?.button,
+                isVisible: statusItem?.button?.window?.isVisible ?? false
+            )
             statusSurface.publish(publication.state, generation: publication.generation)
             statusSurface.publish(
                 publication.state,
@@ -2131,7 +2137,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             settingsWindow?.setAppliesToNextDictation(adapter.settingsApplyToNextDictation)
             historyWindow?.setCommandAvailability(snapshot.availability)
             onboardingWindow?.setCommandAvailability(snapshot.availability)
-            statusItem?.button?.title = "Oigo"
             statusItem?.button?.toolTip = snapshot.shortcutToolTip
             switch snapshot.hud {
             case .visible(let state, let generation, let geometry, let startedAt, let preview):

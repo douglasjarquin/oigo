@@ -180,10 +180,29 @@ final class IdentityScenario: NativeUIContractScenario {
 
         let driver = root.appendingPathComponent("main.swift")
         let executable = root.appendingPathComponent("identity-contract")
+        let moduleRoot = root.appendingPathComponent("Modules", isDirectory: true)
+        let modulePath = moduleRoot.appendingPathComponent("OigoPresentation.swiftmodule")
+        let libraryPath = moduleRoot.appendingPathComponent("libOigoPresentation.dylib")
+        try FileManager.default.createDirectory(at: moduleRoot, withIntermediateDirectories: true)
         try contractDriver.write(to: driver, atomically: true, encoding: .utf8)
         try runProcess(
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
-            arguments: ["swiftc"] + sources.map(\.path) + [driver.path, "-o", executable.path]
+            arguments: [
+                "swiftc", "-enable-testing", "-parse-as-library", "-emit-library", "-emit-module",
+                "-module-name", "OigoPresentation",
+                sources[0].path, sources[1].path,
+                "-emit-module-path", modulePath.path, "-o", libraryPath.path
+            ]
+        )
+        try runProcess(
+            executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
+            arguments: ["swiftc", "-enable-testing", "-I", moduleRoot.path]
+                + sources.dropFirst(2).map(\.path)
+                + [
+                    driver.path, "-L", moduleRoot.path, "-lOigoPresentation",
+                    "-Xlinker", "-rpath", "-Xlinker", moduleRoot.path,
+                    "-o", executable.path
+                ]
         )
         let data = try runProcess(
             executable: executable,
@@ -222,6 +241,7 @@ final class IdentityScenario: NativeUIContractScenario {
     private static let contractDriver = #"""
     import AppKit
     import Foundation
+    @testable import OigoPresentation
 
     struct Fixture: Decodable {
         let mode: String
