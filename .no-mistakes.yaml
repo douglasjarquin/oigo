@@ -12,9 +12,9 @@ ignore_patterns:
   - "**/*.xcuserstate"
   - "dist/**"
   - ".DS_Store"
-  - ".no-mistakes/evidence/**"
 
 test:
   evidence:
     store_in_repo: true
     dir: .no-mistakes/evidence
+    branch: no-mistakes/evidence
