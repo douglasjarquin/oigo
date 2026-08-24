@@ -1,0 +1,20 @@
+commands:
+  format: './Scripts/no-mistakes.sh format'
+  lint: './Scripts/no-mistakes.sh lint'
+  test: './Scripts/no-mistakes.sh test'
+
+# Ignore these paths during review and documentation checks.
+ignore_patterns:
+  - ".build/**"
+  - ".swiftpm/**"
+  - "**/DerivedData/**"
+  - "**/xcuserdata/**"
+  - "**/*.xcuserstate"
+  - "dist/**"
+  - ".DS_Store"
+
+test:
+  evidence:
+    store_in_repo: true
+    dir: .no-mistakes/evidence
+    branch: no-mistakes/evidence
