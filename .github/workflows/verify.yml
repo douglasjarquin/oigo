@@ -1,4 +1,4 @@
-name: verify
+name: Verify changes
 
 on:
   pull_request:
@@ -21,8 +21,17 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: macos-26
+    timeout-minutes: 5
+    steps:
+      - name: Lane gating
+        run: echo "No path filters; all verify lanes run."
+
   swift-build-and-contracts:
     name: Swift build and contract harness
+    needs: changes
     runs-on: macos-26
     timeout-minutes: 15
     steps:
@@ -100,6 +109,7 @@ jobs:
 
   xcode-app-bundle:
     name: Xcode app bundle
+    needs: changes
     runs-on: macos-26
     timeout-minutes: 20
     steps:
@@ -191,3 +201,20 @@ jobs:
         env:
           DERIVED_DATA: ${{ runner.temp }}/oigo-derived-data
         run: zsh ./Scripts/bounded-oigo-launch.sh "$DERIVED_DATA/Build/Products/Release/Oigo.app"
+
+  gate:
+    name: gate
+    needs:
+      - changes
+      - swift-build-and-contracts
+      - xcode-app-bundle
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: macos-26
+    timeout-minutes: 5
+    steps:
+      - name: Require all checks to pass
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.swift-build-and-contracts.result != 'success' ||
+          needs.xcode-app-bundle.result != 'success'
+        run: exit 1
