@@ -2,7 +2,12 @@ import AppKit
 import OigoCore
 
 @MainActor
-final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate {
+final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate, NSToolbarDelegate {
+    private static let toolbarIdentifier = NSToolbar.Identifier("com.oigo.history.toolbar")
+    private static let copyToolbarItem = NSToolbarItem.Identifier("com.oigo.history.copy")
+    private static let pasteToolbarItem = NSToolbarItem.Identifier("com.oigo.history.paste-again")
+    private static let playbackToolbarItem = NSToolbarItem.Identifier("com.oigo.history.playback")
+    private static let moreToolbarItem = NSToolbarItem.Identifier("com.oigo.history.more")
     private let loadTranscript: (SessionHistoryEntry, SessionTextSource, @escaping @Sendable (Result<String, Error>) -> Void) -> Void
     private let copyRawTranscript: (SessionHistoryEntry) -> Void
     private let copyCleanTranscript: (SessionHistoryEntry) -> Void
@@ -26,6 +31,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private var hasMore = false
     private var isLoading = false
     private var transcriptLoadGeneration: UInt64 = 0
+    private var cleanAgainOverride = true
+    private var toolbarItemsByIdentifier: [NSToolbarItem.Identifier: NSToolbarItem] = [:]
+    private let moreMenu = NSMenu(title: "More")
     private let loadMoreButton = NSButton(title: "Load More", target: nil, action: nil)
     private let loadingLabel = NSTextField(labelWithString: "")
     private let tableView = NSTableView()
@@ -35,16 +43,6 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private let failureLabel = NSTextField(labelWithString: "")
     private let messageLabel = NSTextField(labelWithString: "")
     private let transcriptVersionPopup = NSPopUpButton()
-    private let copyButton = NSButton(title: "Copy Raw Transcript", target: nil, action: nil)
-    private let copyCleanButton = NSButton(title: "Copy Clean Transcript", target: nil, action: nil)
-    private let pasteAgainButton = NSButton(title: "Paste Again", target: nil, action: nil)
-    private let pasteCleanAgainButton = NSButton(title: "Paste Clean Again", target: nil, action: nil)
-    private let cleanAgainButton = NSButton(title: "Clean Again", target: nil, action: nil)
-    private let reapplyDictionaryButton = NSButton(title: "Reapply Dictionary", target: nil, action: nil)
-    private let playButton = NSButton(title: "Play Recording", target: nil, action: nil)
-    private let retryButton = NSButton(title: "Retry Transcription", target: nil, action: nil)
-    private let revealButton = NSButton(title: "Reveal Recording", target: nil, action: nil)
-    private let deleteButton = NSButton(title: "Delete Session", target: nil, action: nil)
 
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -91,16 +89,21 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         self.onClose = onClose
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1_400, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 1_000, height: 640),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Oigo History"
-        window.minSize = NSSize(width: 900, height: 480)
+        window.minSize = NSSize(width: 880, height: 520)
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        let toolbar = NSToolbar(identifier: Self.toolbarIdentifier)
+        toolbar.delegate = self
+        toolbar.allowsUserCustomization = false
+        toolbar.displayMode = .iconAndLabel
+        window.toolbar = toolbar
         configureWindow()
     }
 
@@ -184,9 +187,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     func setCleanAgainEnabled(_ enabled: Bool) {
-        cleanAgainButton.isEnabled = enabled
-            && selectedEntry != nil
-            && commandAvailability?.canCleanAgain ?? true
+        cleanAgainOverride = enabled
+        updateToolbarState(for: selectedEntry)
     }
 
     func setCommandAvailability(_ availability: AppCommandAvailability) {
@@ -212,6 +214,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     func windowWillClose(_ notification: Notification) {
         _ = notification
+        transcriptLoadGeneration &+= 1
+        transcriptView.string = ""
         onClose()
     }
 
@@ -231,59 +235,23 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         row: Int
     ) -> NSView? {
         _ = tableView
-        guard let tableColumn, entries.indices.contains(row) else {
+        _ = tableColumn
+        guard entries.indices.contains(row) else {
             return nil
         }
-        let entry = entries[row]
-        let identifier = tableColumn.identifier.rawValue
-        let text: String
-        switch identifier {
-        case "date":
-            text = listDateFormatter.string(from: entry.session.metadata.createdAt)
-        case "duration":
-            text = Self.durationText(entry.session.metadata.duration)
-        case "transcript":
-            text = entry.firstTranscriptLine ?? "No transcript"
-        case "source":
-            text = switch entry.session.metadata.insertionTextSource {
-            case .raw:
-                "Raw"
-            case .normalized:
-                "Normalized"
-            case .clean:
-                "Clean"
-            case nil:
-                switch entry.textSource {
-                case .processed:
-                    "Clean available"
-                case .normalized:
-                    "Normalized available"
-                case .raw:
-                    "Raw"
-                }
-            }
-        case "status":
-            text = Self.statusText(entry.session.metadata.state)
-                + " · "
-                + entry.session.metadata.configurationIdentity.historyLabel
-        case "paste":
-            text = Self.pasteText(entry.session.metadata.insertionOutcome)
-        default:
-            text = ""
-        }
-
-        let cell = NSTableCellView()
-        let label = NSTextField(labelWithString: text)
+        let projection = OigoHistoryRowProjection(entry: entries[row])
+        let label = NSTextField(
+            wrappingLabelWithString: listDateFormatter.string(from: projection.date)
+                + "  ·  " + (projection.duration.map(Self.durationText) ?? "")
+                + "  ·  " + projection.statusLabel
+                + "\n" + projection.summary
+        )
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .labelColor
         label.lineBreakMode = .byTruncatingTail
-        label.maximumNumberOfLines = 1
-        label.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
-            label.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
-        ])
-        return cell
+        label.maximumNumberOfLines = 2
+        label.setAccessibilityLabel(projection.accessibilityLabel)
+        return label
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -393,34 +361,32 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
         let listTitle = NSTextField(labelWithString: "Sessions")
         listTitle.font = .boldSystemFont(ofSize: 15)
+        listTitle.alignment = .left
         let listScrollView = NSScrollView()
         listScrollView.hasVerticalScroller = true
+        listScrollView.hasHorizontalScroller = false
         listScrollView.autohidesScrollers = true
+        tableView.frame = NSRect(x: 0, y: 0, width: 276, height: 400)
+        tableView.autoresizingMask = [.width]
         listScrollView.documentView = tableView
 
         configureTable()
         let listStack = NSStackView(views: [listTitle, listScrollView])
         listStack.orientation = .vertical
         listStack.spacing = 8
-        listStack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 12)
+        listStack.edgeInsets = NSEdgeInsets(top: 20, left: 12, bottom: 20, right: 12)
 
         let detailView = makeDetailView()
         splitView.addArrangedSubview(listStack)
         splitView.addArrangedSubview(detailView)
         splitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
-        splitView.setPosition(760, ofDividerAt: 0)
+        splitView.setPosition(300, ofDividerAt: 0)
 
-        let maintenanceButton = NSButton(
-            title: "Run Idle Maintenance",
-            target: self,
-            action: #selector(runIdleMaintenanceAction)
-        )
-        maintenanceButton.bezelStyle = .rounded
         loadMoreButton.target = self
         loadMoreButton.action = #selector(loadMoreAction)
         loadMoreButton.bezelStyle = .rounded
         loadingLabel.textColor = .secondaryLabelColor
-        let footer = NSStackView(views: [maintenanceButton, loadMoreButton, loadingLabel])
+        let footer = NSStackView(views: [loadMoreButton, loadingLabel])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.edgeInsets = NSEdgeInsets(top: 8, left: 20, bottom: 12, right: 20)
@@ -436,7 +402,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             root.topAnchor.constraint(equalTo: contentView.topAnchor),
             root.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             splitView.heightAnchor.constraint(greaterThanOrEqualToConstant: 400),
-            listStack.widthAnchor.constraint(greaterThanOrEqualToConstant: 720)
+            listStack.widthAnchor.constraint(equalToConstant: 300)
         ])
         showMessage("")
         updateLoadingChrome()
@@ -453,18 +419,14 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func configureTable() {
-        tableView.addTableColumn(column(identifier: "date", title: "Date / Time", width: 145))
-        tableView.addTableColumn(column(identifier: "duration", title: "Duration", width: 55))
-        tableView.addTableColumn(column(identifier: "transcript", title: "Transcript", width: 130))
-        tableView.addTableColumn(column(identifier: "source", title: "Inserted", width: 100))
-        tableView.addTableColumn(column(identifier: "status", title: "Status", width: 170))
-        tableView.addTableColumn(column(identifier: "paste", title: "Paste", width: 92))
+        tableView.addTableColumn(column(identifier: "session", title: "", width: 280))
         tableView.delegate = self
         tableView.dataSource = self
-        tableView.usesAlternatingRowBackgroundColors = true
-        tableView.rowHeight = 38
+        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.rowHeight = 68
         tableView.headerView = NSTableHeaderView()
         tableView.selectionHighlightStyle = .regular
+        tableView.allowsMultipleSelection = false
     }
 
     private func makeDetailView() -> NSView {
@@ -490,47 +452,21 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         transcriptScroll.borderType = .bezelBorder
         transcriptScroll.documentView = transcriptView
 
-        configureButton(copyButton, action: #selector(copyRawTranscriptAction))
-        configureButton(copyCleanButton, action: #selector(copyCleanTranscriptAction))
-        configureButton(pasteAgainButton, action: #selector(pasteAgainAction))
-        configureButton(pasteCleanAgainButton, action: #selector(pasteCleanAgainAction))
-        configureButton(cleanAgainButton, action: #selector(cleanAgainAction))
-        configureButton(reapplyDictionaryButton, action: #selector(reapplyDictionaryAction))
-        configureButton(playButton, action: #selector(playRecordingAction))
-        configureButton(retryButton, action: #selector(retryTranscriptionAction))
-        configureButton(revealButton, action: #selector(revealRecordingAction))
-        configureButton(deleteButton, action: #selector(deleteSessionAction))
-
         transcriptVersionPopup.addItems(withTitles: ["Raw transcript", "Normalized transcript", "Clean transcript"])
         transcriptVersionPopup.target = self
         transcriptVersionPopup.action = #selector(transcriptVersionAction)
         transcriptVersionPopup.controlSize = .small
         transcriptVersionPopup.toolTip = "Choose which durable transcript version to display"
 
-        let firstRow = NSStackView(views: [transcriptVersionPopup, copyButton, copyCleanButton])
-        let secondRow = NSStackView(views: [cleanAgainButton, reapplyDictionaryButton, pasteAgainButton, pasteCleanAgainButton])
-        let thirdRow = NSStackView(views: [playButton, retryButton, revealButton, deleteButton])
-        for row in [firstRow, secondRow, thirdRow] {
-            row.orientation = .horizontal
-            row.distribution = .fillEqually
-            row.spacing = 8
-        }
-
         let stack = NSStackView(
-            views: [detailTitle, detailStatus, failureLabel, transcriptScroll, firstRow, secondRow, thirdRow, messageLabel]
+            views: [detailTitle, detailStatus, failureLabel, transcriptVersionPopup, transcriptScroll, messageLabel]
         )
         stack.orientation = .vertical
         stack.spacing = 10
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 16, bottom: 20, right: 20)
         stack.alignment = .leading
         stack.translatesAutoresizingMaskIntoConstraints = false
-        for row in [firstRow, secondRow, thirdRow] {
-            row.translatesAutoresizingMaskIntoConstraints = false
-            row.widthAnchor.constraint(
-                equalTo: stack.widthAnchor,
-                constant: -(stack.edgeInsets.left + stack.edgeInsets.right)
-            ).isActive = true
-        }
+        transcriptVersionPopup.translatesAutoresizingMaskIntoConstraints = false
         transcriptScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
         return stack
     }
@@ -614,46 +550,161 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
         let canUseTranscript = enabled && capabilities?.copyAvailable == true
         let sessionCommandsEnabled = commandAvailability?.canPasteAgain ?? true
-        copyButton.isEnabled = canUseTranscript
-        pasteAgainButton.isEnabled = enabled
-            && capabilities?.pasteAgainAvailable == true
-            && sessionCommandsEnabled
         let hasNormalized = entry.map { FileManager.default.fileExists(atPath: $0.session.normalizedTextURL.path) } == true
         let canUseCleanTranscript = canUseTranscript
             && entry.map { FileManager.default.fileExists(atPath: $0.session.cleanTextURL.path) } == true
         transcriptVersionPopup.item(at: 1)?.isEnabled = hasNormalized
         transcriptVersionPopup.item(at: 2)?.isEnabled = canUseCleanTranscript
         transcriptVersionPopup.isEnabled = enabled && entry != nil
-        copyCleanButton.isEnabled = canUseCleanTranscript
-        pasteCleanAgainButton.isEnabled = canUseCleanTranscript && sessionCommandsEnabled
-        cleanAgainButton.isEnabled = canUseTranscript && (commandAvailability?.canCleanAgain ?? true)
-        reapplyDictionaryButton.isEnabled = canUseTranscript && (commandAvailability?.canReapplyDictionary ?? true)
         let isPlayingSelection = entry.map { $0.id == playingSessionID } == true
-        playButton.title = isPlayingSelection ? "Stop Playback" : "Play Recording"
-        playButton.isEnabled = enabled && (
-            isPlayingSelection
-                || entry.map { FileManager.default.fileExists(atPath: $0.session.audioURL.path) } == true
-        )
-        retryButton.isEnabled = enabled
-            && capabilities?.savedAudioRetryAvailable == true
-            && (commandAvailability?.canRetry ?? true)
-        revealButton.isEnabled = enabled && entry != nil
-        deleteButton.isEnabled = enabled && entry.map { !$0.session.metadata.state.isUnfinished } == true
-    }
-
-    private func configureButton(_ button: NSButton, action: Selector) {
-        button.target = self
-        button.action = action
-        button.bezelStyle = .rounded
-        button.controlSize = .small
+        _ = sessionCommandsEnabled
+        _ = isPlayingSelection
+        updateToolbarState(for: entry, capabilities: capabilities, canUseTranscript: canUseTranscript)
     }
 
     private func column(identifier: String, title: String, width: CGFloat) -> NSTableColumn {
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(identifier))
         column.title = title
         column.width = width
-        column.minWidth = width
+        column.minWidth = 0
         return column
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        _ = toolbar
+        return [Self.copyToolbarItem, Self.pasteToolbarItem, Self.playbackToolbarItem, Self.moreToolbarItem]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarDefaultItemIdentifiers(toolbar)
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        _ = toolbar
+        _ = flag
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        switch itemIdentifier {
+        case Self.copyToolbarItem:
+            item.label = "Copy"
+            item.paletteLabel = "Copy"
+            item.toolTip = "Copy the selected transcript"
+            item.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy")
+            item.target = self
+            item.action = #selector(copyRawTranscriptAction)
+        case Self.pasteToolbarItem:
+            item.label = "Paste Again"
+            item.paletteLabel = "Paste Again"
+            item.image = NSImage(systemSymbolName: "arrow.right.doc.on.clipboard", accessibilityDescription: "Paste Again")
+            item.target = self
+            item.action = #selector(pasteAgainAction)
+        case Self.playbackToolbarItem:
+            item.label = "Play"
+            item.paletteLabel = "Play or Stop"
+            item.image = NSImage(systemSymbolName: "play", accessibilityDescription: "Play")
+            item.target = self
+            item.action = #selector(playRecordingAction)
+        case Self.moreToolbarItem:
+            item.label = "More"
+            item.paletteLabel = "More"
+            item.toolTip = "More recovery actions"
+            item.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "More")
+            item.target = self
+            item.action = #selector(showMoreMenuAction)
+            configureMoreMenu()
+        default:
+            return nil
+        }
+        toolbarItemsByIdentifier[itemIdentifier] = item
+        return item
+    }
+
+    @objc private func showMoreMenuAction() {
+        guard let contentView = window?.contentView else {
+            return
+        }
+        moreMenu.popUp(
+            positioning: nil,
+            at: NSPoint(x: contentView.bounds.midX, y: contentView.bounds.maxY - 8),
+            in: contentView
+        )
+    }
+
+    private func configureMoreMenu() {
+        guard moreMenu.items.isEmpty else {
+            return
+        }
+        let items: [(String, Selector?)] = [
+            ("Copy Raw Transcript", #selector(copyRawTranscriptAction)),
+            ("Copy Clean Transcript", #selector(copyCleanTranscriptAction)),
+            (NSMenuItem.separator().title, nil),
+            ("Clean Again", #selector(cleanAgainAction)),
+            ("Reapply Dictionary", #selector(reapplyDictionaryAction)),
+            ("Retry Transcription", #selector(retryTranscriptionAction)),
+            ("Reveal Recording", #selector(revealRecordingAction)),
+            ("Delete Session", #selector(deleteSessionAction)),
+            ("Run Idle Maintenance", #selector(runIdleMaintenanceAction))
+        ]
+        for (title, action) in items {
+            if action == nil {
+                moreMenu.addItem(.separator())
+            } else {
+                let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                item.target = self
+                moreMenu.addItem(item)
+            }
+        }
+    }
+
+    private func updateToolbarState(
+        for entry: SessionHistoryEntry?,
+        capabilities: DictationHistoryCapabilities? = nil,
+        canUseTranscript: Bool? = nil
+    ) {
+        let resolvedCapabilities = capabilities ?? entry.map { item in
+            DictationHistoryActions.capabilities(
+                sessionState: item.session.metadata.state,
+                hasValidRaw: FileManager.default.fileExists(atPath: item.session.rawTextURL.path),
+                hasAudio: FileManager.default.fileExists(atPath: item.session.audioURL.path)
+            )
+        }
+        let transcriptAvailable = canUseTranscript ?? (entry != nil && resolvedCapabilities?.copyAvailable == true)
+        let cleanAvailable = transcriptAvailable
+            && entry.map { FileManager.default.fileExists(atPath: $0.session.cleanTextURL.path) } == true
+        let commandsAvailable = commandAvailability?.canPasteAgain ?? true
+        toolbarItemsByIdentifier[Self.copyToolbarItem]?.isEnabled = transcriptAvailable
+        toolbarItemsByIdentifier[Self.pasteToolbarItem]?.isEnabled = entry != nil
+            && resolvedCapabilities?.pasteAgainAvailable == true
+            && commandsAvailable
+        if let playbackItem = toolbarItemsByIdentifier[Self.playbackToolbarItem] {
+            let isPlaying = entry.map { $0.id == playingSessionID } == true
+            playbackItem.label = isPlaying ? "Stop" : "Play"
+            playbackItem.toolTip = isPlaying ? "Stop playback" : "Play the selected recording"
+            playbackItem.image = NSImage(
+                systemSymbolName: isPlaying ? "stop.circle" : "play",
+                accessibilityDescription: isPlaying ? "Stop" : "Play"
+            )
+            playbackItem.isEnabled = entry != nil && (
+                isPlaying
+                    || entry.map { FileManager.default.fileExists(atPath: $0.session.audioURL.path) } == true
+            )
+        }
+        moreMenu.item(withTitle: "Copy Raw Transcript")?.isEnabled = transcriptAvailable
+        moreMenu.item(withTitle: "Copy Clean Transcript")?.isEnabled = cleanAvailable
+        moreMenu.item(withTitle: "Clean Again")?.isEnabled = transcriptAvailable
+            && cleanAgainOverride
+            && (commandAvailability?.canCleanAgain ?? true)
+        moreMenu.item(withTitle: "Reapply Dictionary")?.isEnabled = transcriptAvailable
+            && (commandAvailability?.canReapplyDictionary ?? true)
+        moreMenu.item(withTitle: "Retry Transcription")?.isEnabled = entry != nil
+            && resolvedCapabilities?.savedAudioRetryAvailable == true
+            && (commandAvailability?.canRetry ?? true)
+        moreMenu.item(withTitle: "Reveal Recording")?.isEnabled = entry != nil
+        moreMenu.item(withTitle: "Delete Session")?.isEnabled = entry?.session.metadata.state.isUnfinished == false
+        moreMenu.item(withTitle: "Run Idle Maintenance")?.isEnabled = commandAvailability?.canRunMaintenance ?? true
     }
 
     private static func durationText(_ duration: TimeInterval?) -> String {
@@ -697,5 +748,37 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         case .failed:
             "Paste failed"
         }
+    }
+}
+
+@MainActor
+private final class HistorySessionRowView: NSTableCellView {
+    func configure(projection: OigoHistoryRowProjection, dateFormatter: DateFormatter) {
+        subviews.forEach { $0.removeFromSuperview() }
+        let label = NSTextField(
+            wrappingLabelWithString: dateFormatter.string(from: projection.date)
+                + "  ·  " + (projection.duration.map(Self.durationText) ?? "")
+                + "  ·  " + projection.statusLabel
+                + "\n" + projection.summary
+        )
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .labelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 2
+        label.translatesAutoresizingMaskIntoConstraints = false
+        textField = label
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8)
+        ])
+        setAccessibilityLabel(projection.accessibilityLabel)
+    }
+
+    private static func durationText(_ duration: TimeInterval) -> String {
+        let seconds = max(0, Int(duration.rounded()))
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }

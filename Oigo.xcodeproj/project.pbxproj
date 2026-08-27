@@ -17,6 +17,7 @@
         A00000010000000000000065 /* libOigoPresentation.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000055 /* libOigoPresentation.a */; };
         A00000010000000000000066 /* libOigoCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000B /* libOigoCore.a */; };
         A00000010000000000000067 /* libMacUtilityUI.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000051 /* libMacUtilityUI.a */; };
+        A00000010000000000000068 /* HistoryPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000056 /* HistoryPresentation.swift */; };
         A00000010000000000000004 /* GlobalHotKeyRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000004 /* GlobalHotKeyRegistrar.swift */; };
         A00000010000000000000005 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000005 /* SettingsWindowController.swift */; };
         A00000010000000000000006 /* DictationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000006 /* DictationCoordinator.swift */; };
@@ -248,6 +249,7 @@
         B00000010000000000000052 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Oigo/Assets.xcassets; sourceTree = "<group>"; };
         B00000010000000000000053 /* OigoNativeUIContractTests */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = OigoNativeUIContractTests; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000029 /* GlobalShortcutRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutRegistration.swift; sourceTree = "<group>"; };
+        B00000010000000000000056 /* HistoryPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryPresentation.swift; sourceTree = "<group>"; };
         B00000010000000000000030 /* GlobalShortcutIntentController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutIntentController.swift; sourceTree = "<group>"; };
         B00000010000000000000031 /* ShortcutPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutPresentation.swift; sourceTree = "<group>"; };
         B00000010000000000000032 /* ShortcutFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutFormatter.swift; sourceTree = "<group>"; };
@@ -462,6 +464,7 @@
                 B00000010000000000000047 /* SessionMaintenanceCoordinator.swift */,
                 B00000010000000000000048 /* DictionaryContracts.swift */,
                 B00000010000000000000049 /* DictionaryStore.swift */,
+                B00000010000000000000056 /* HistoryPresentation.swift */,
                 B0000001000000000000004A /* TerminologyNormalizer.swift */,
                 B0000001000000000000004B /* OigoDiagnosticsExport.swift */,
             );
@@ -894,6 +897,7 @@
                 A0000001000000000000000F /* SessionStore.swift in Sources */,
                 A00000010000000000000016 /* TranscriptionContracts.swift in Sources */,
                 A00000010000000000000029 /* ProductContracts.swift in Sources */,
+                A00000010000000000000068 /* HistoryPresentation.swift in Sources */,
                 A00000010000000000000030 /* PerformanceContracts.swift in Sources */,
                 A00000010000000000000036 /* GlobalShortcutIntentController.swift in Sources */,
                 A00000010000000000000037 /* ShortcutPresentation.swift in Sources */,
