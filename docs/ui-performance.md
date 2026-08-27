@@ -1,6 +1,6 @@
 # Oigo integrated UI performance and lifecycle evidence
 
-Reviewed implementation SHA: `7989042ad6a046078abb193fcf9170b794543a42`.
+Reviewed implementation SHA: `088074bb2b4b7dd6e3fd496b42442b6f2f9e774a`.
 The native Debug artifact was built with Xcode 17F113 on macOS 26.6.2 build 25G83.
 The host model is Mac15,11 with 14 logical CPUs and 36 GB of memory.
 The tested application is the unsigned local Debug `Oigo.app` built from `Oigo.xcodeproj` and scheme `Oigo`.
