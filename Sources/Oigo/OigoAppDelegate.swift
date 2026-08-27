@@ -233,6 +233,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
         NSApp.setActivationPolicy(.accessory)
+        installApplicationMenu()
         startInputDeviceInventoryMonitor()
         let support = OigoSystemSupportEvaluator.current()
         guard support.isSupported else {
@@ -410,9 +411,27 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         settingsSessionID = sessionID
         settingsWindow = window
         window.setDictionaryStatus(dictionaryLoadError)
-        window.showWindow(nil)
-        window.window?.center()
-        window.window?.makeKeyAndOrderFront(nil)
+        window.showAndFocus()
+    }
+
+    private func installApplicationMenu() {
+        let mainMenu = NSMenu()
+        let applicationMenu = NSMenu(title: "Oigo")
+        applicationMenu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
+        applicationMenu.addItem(NSMenuItem(title: "History", action: #selector(openHistory), keyEquivalent: ""))
+        applicationMenu.addItem(.separator())
+        applicationMenu.addItem(NSMenuItem(title: "Quit Oigo", action: #selector(quit), keyEquivalent: "q"))
+        let applicationMenuItem = NSMenuItem()
+        applicationMenuItem.submenu = applicationMenu
+        mainMenu.addItem(applicationMenuItem)
+
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+        let editMenuItem = NSMenuItem()
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+        NSApp.mainMenu = mainMenu
     }
 
     private func showOnboarding(_ support: OigoSystemSupportResult) {

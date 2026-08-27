@@ -161,3 +161,93 @@ public enum OigoHistoryWorkspacePolicy {
     public static let initialPageSize = 50
     public static let toolbarItems = ["copy", "paste-again", "playback", "more"]
 }
+
+public enum OigoApplicationCommand: String, CaseIterable, Sendable {
+    case settings
+    case history
+    case quit
+    case copy
+    case selectAll
+}
+
+public enum OigoEscapeAction: Int, CaseIterable, Sendable {
+    case cancelEditor
+    case dismissConfirmation
+    case dismissPopover
+    case closeUtilityWindow
+    case stopOnboardingProbe
+    case cancelBoundedHandoff
+}
+
+public enum OigoUIIntegrationPolicy {
+    public static let commandKeyEquivalents: [OigoApplicationCommand: String] = [
+        .settings: ",",
+        .quit: "q"
+    ]
+    public static let escapePriority: [OigoEscapeAction] = [
+        .cancelEditor,
+        .dismissConfirmation,
+        .dismissPopover,
+        .closeUtilityWindow,
+        .stopOnboardingProbe,
+        .cancelBoundedHandoff
+    ]
+    public static let restorationIdentifiers = [
+        "com.oigo.settings.window",
+        "com.oigo.history.window",
+        "com.oigo.history.split"
+    ]
+    public static let forbiddenIdleBehaviors = [
+        "recurring-timer",
+        "global-monitor",
+        "permission-polling",
+        "history-polling",
+        "transcript-preload",
+        "model-prewarm"
+    ]
+}
+
+public struct OigoVisibleFrame: Equatable, Sendable {
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
+
+    public init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x
+        self.y = y
+        self.width = max(0, width)
+        self.height = max(0, height)
+    }
+}
+
+public struct OigoRestoredWindowGeometry: Equatable, Sendable {
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
+
+    public init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x
+        self.y = y
+        self.width = max(0, width)
+        self.height = max(0, height)
+    }
+
+    public func clamped(
+        to visibleFrame: OigoVisibleFrame,
+        minimumWidth: Double,
+        minimumHeight: Double
+    ) -> OigoRestoredWindowGeometry {
+        let clampedWidth = max(minimumWidth, width)
+        let clampedHeight = max(minimumHeight, height)
+        let maxX = max(visibleFrame.x, visibleFrame.x + visibleFrame.width - clampedWidth)
+        let maxY = max(visibleFrame.y, visibleFrame.y + visibleFrame.height - clampedHeight)
+        return OigoRestoredWindowGeometry(
+            x: min(max(x, visibleFrame.x), maxX),
+            y: min(max(y, visibleFrame.y), maxY),
+            width: clampedWidth,
+            height: clampedHeight
+        )
+    }
+}

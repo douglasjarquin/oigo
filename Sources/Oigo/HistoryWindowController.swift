@@ -88,7 +88,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         self.loadMore = loadMore
         self.onClose = onClose
 
-        let window = NSWindow(
+        let window = OigoUtilityWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1_000, height: 640),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
@@ -96,9 +96,15 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         )
         window.title = "Oigo History"
         window.minSize = NSSize(width: 880, height: 520)
+        window.identifier = NSUserInterfaceItemIdentifier("com.oigo.history.window")
+        window.setFrameAutosaveName("Oigo.HistoryWindow")
+        window.isRestorable = true
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        window.onEscape = { [weak self] in
+            self?.window?.performClose(nil)
+        }
         let toolbar = NSToolbar(identifier: Self.toolbarIdentifier)
         toolbar.delegate = self
         toolbar.allowsUserCustomization = false
@@ -207,9 +213,19 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     func showAndFocus() {
         showWindow(nil)
-        window?.center()
+        clampWindowToVisibleFrame()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        _ = notification
+        clampWindowToVisibleFrame()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        _ = notification
+        clampWindowToVisibleFrame()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -358,6 +374,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         let splitView = NSSplitView()
         splitView.isVertical = true
         splitView.dividerStyle = .thin
+        splitView.autosaveName = "Oigo.HistorySplit"
 
         let listTitle = NSTextField(labelWithString: "Sessions")
         listTitle.font = .boldSystemFont(ofSize: 15)
@@ -416,6 +433,26 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         loadingLabel.stringValue = isLoading ? "Loading sessions…" : ""
         loadMoreButton.isEnabled = hasMore && !isLoading
         loadMoreButton.isHidden = !hasMore && !isLoading
+    }
+
+    private func clampWindowToVisibleFrame() {
+        guard let window else {
+            return
+        }
+        let screen = window.screen ?? NSScreen.screens.first(where: { $0.visibleFrame.intersects(window.frame) }) ?? NSScreen.main
+        guard let screen else {
+            return
+        }
+        let visible = screen.visibleFrame
+        var frame = window.frame
+        frame.size.width = min(max(frame.width, window.minSize.width), visible.width)
+        frame.size.height = min(max(frame.height, window.minSize.height), visible.height)
+        frame.origin.x = min(max(frame.origin.x, visible.minX), visible.maxX - frame.width)
+        frame.origin.y = min(max(frame.origin.y, visible.minY), visible.maxY - frame.height)
+        guard frame != window.frame else {
+            return
+        }
+        window.setFrame(frame, display: false)
     }
 
     private func configureTable() {
@@ -747,6 +784,20 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             "Secure field"
         case .failed:
             "Paste failed"
+        }
+    }
+}
+
+@MainActor
+final class OigoUtilityWindow: NSWindow {
+    var onEscape: (() -> Void)?
+
+    override func cancelOperation(_ sender: Any?) {
+        _ = sender
+        if let onEscape {
+            onEscape()
+        } else {
+            super.cancelOperation(sender)
         }
     }
 }

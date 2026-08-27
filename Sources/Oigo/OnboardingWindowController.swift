@@ -157,7 +157,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         committedShortcut = globalShortcut
         shortcutRecorder = ShortcutRecorderControl(shortcut: globalShortcut)
 
-        let window = NSWindow(
+        let window = OigoUtilityWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 640),
             styleMask: [.titled, .closable],
             backing: .buffered,
@@ -167,6 +167,18 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        window.onEscape = { [weak self] in
+            guard let self else { return }
+            if shortcutRecorder.isRecording {
+                shortcutRecorder.cancelRecording()
+            } else if evidence.probeActive {
+                stopSourceProbe()
+            } else if evidence.testRunning {
+                cancelTest()
+            } else {
+                self.window?.performClose(nil)
+            }
+        }
         evidence.setStorageHealth(storageHealth)
         evidence.setSelectedSource(input: selectedInput, channel: selectedInputChannel)
         configureInputMenu(devices: inputDevices, selected: selectedInput)

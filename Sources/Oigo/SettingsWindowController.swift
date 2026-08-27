@@ -143,7 +143,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         committedShortcut = settings.globalShortcut
         shortcutRecorder = ShortcutRecorderControl(shortcut: settings.globalShortcut)
 
-        let window = NSWindow(
+        let window = OigoUtilityWindow(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 640),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
@@ -151,11 +151,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         )
         window.title = "Oigo Settings"
         window.minSize = NSSize(width: 640, height: 520)
-        window.identifier = NSUserInterfaceItemIdentifier("oigo.settings.window")
+        window.identifier = NSUserInterfaceItemIdentifier("com.oigo.settings.window")
+        window.setFrameAutosaveName("Oigo.SettingsWindow")
         window.isRestorable = true
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        window.onEscape = { [weak self] in
+            guard let self else { return }
+            if shortcutRecorder.isRecording {
+                shortcutRecorder.cancelRecording()
+            } else if isCheckingLocale {
+                cancelLocaleWork()
+            } else {
+                self.window?.performClose(nil)
+            }
+        }
         configureToolbar()
         configureInputMenu(devices: inputDevices, selected: selectedInput)
         configureChannelMenu()
@@ -300,6 +311,27 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         setLaunchAtLoginStatus(launchAtLoginStatusProvider())
     }
 
+    func showAndFocus() {
+        let wasVisible = window?.isVisible == true
+        showWindow(nil)
+        if !wasVisible, window?.frame.origin == .zero {
+            window?.center()
+        }
+        clampWindowToVisibleFrame()
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        _ = notification
+        clampWindowToVisibleFrame()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        _ = notification
+        clampWindowToVisibleFrame()
+    }
+
     func windowWillClose(_ notification: Notification) {
         _ = notification
         saveTask?.cancel()
@@ -318,6 +350,26 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         inputDevices = devices
         configureInputMenu(devices: devices, selected: selectedInput)
         configureChannelMenu()
+    }
+
+    private func clampWindowToVisibleFrame() {
+        guard let window else {
+            return
+        }
+        let screen = window.screen ?? NSScreen.screens.first(where: { $0.visibleFrame.intersects(window.frame) }) ?? NSScreen.main
+        guard let screen else {
+            return
+        }
+        let visible = screen.visibleFrame
+        var frame = window.frame
+        frame.size.width = min(max(frame.width, window.minSize.width), visible.width)
+        frame.size.height = min(max(frame.height, window.minSize.height), visible.height)
+        frame.origin.x = min(max(frame.origin.x, visible.minX), visible.maxX - frame.width)
+        frame.origin.y = min(max(frame.origin.y, visible.minY), visible.maxY - frame.height)
+        guard frame != window.frame else {
+            return
+        }
+        window.setFrame(frame, display: false)
     }
 
     private func configureWindow() {
