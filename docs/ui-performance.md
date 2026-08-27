@@ -19,11 +19,12 @@ It reports counts and geometry only and does not load transcript, audio, clipboa
 | History chrome | Native Xcode Debug app reached the 1000×640 History split workspace and toolbar after launch. | PASS |
 | History list | The initial page remained bounded and rows rendered metadata-only summaries with truncation. | PASS |
 | Idle behavior | No new recurring timer, global monitor, permission poll, History poll, transcript preload, or model prewarm was added by this phase. | PASS by source and contract |
-| Window restoration | Settings and History have stable identifiers and autosave names; restored frames clamp to the current visible screen. | PASS by source and contract |
-| Keyboard and Escape | The app menu supplies `⌘,`, `⌘Q`, Copy, and Select All; utility windows route Escape to safe editor/probe/test cancellation before close. | PASS by source and contract |
+| Window restoration | Settings and History have stable identifiers and autosave names; restored frames clamp to the current visible screen. | PASS by source and contract; native relaunch/display-change run INCONCLUSIVE |
+| Keyboard and Escape | The app menu supplies `⌘,`, `⌘Q`, Copy, and Select All; utility windows route Escape to safe editor/probe/test cancellation before close. | PASS by source and contract; native keyboard run INCONCLUSIVE |
 | Release artifact | Developer ID signing, notarization, Gatekeeper, TCC, VoiceOver, multi-application, multi-display, full-screen Space, and 100-cycle host matrices require release credentials or operator access. | INCONCLUSIVE |
 
 The fresh native capture is `.omo/evidence/issue139/native/history-integrated-fixed.jpg`.
+The capture was taken from the source-equivalent Debug build because the temporary QA launch hook is intentionally excluded from production; the unsigned Release hash is recorded separately below.
 The final source-equivalent Release application binary is `sha256:257ad66d5b2b1fe2cc4e309b467a9c9d5380bf92178527d3232220d8569f47d0`.
 
 ## Privacy boundary
