@@ -356,6 +356,55 @@ public struct OigoSettings: Codable, Equatable, Sendable {
     }
 }
 
+public enum OigoSettingsPane: String, CaseIterable, Codable, Hashable, Sendable {
+    case general
+    case dictation
+    case dictionary
+    case dataPrivacy = "data-privacy"
+
+    public var title: String {
+        switch self {
+        case .general:
+            "General"
+        case .dictation:
+            "Dictation"
+        case .dictionary:
+            "Dictionary"
+        case .dataPrivacy:
+            "Data & Privacy"
+        }
+    }
+}
+
+public enum OigoSettingsField: String, CaseIterable, Hashable, Sendable {
+    case defaultMode
+    case showVolatilePreview
+    case audioRetention
+    case keepSuccessfulAudioIndefinitely
+    case globalShortcut
+    case selectedInput
+    case selectedInputChannel
+    case localeIdentifier
+    case launchAtLogin
+}
+
+public enum OigoSettingsCommitPolicy {
+    public static let immediate: Set<OigoSettingsField> = [
+        .defaultMode,
+        .showVolatilePreview,
+        .audioRetention,
+        .keepSuccessfulAudioIndefinitely
+    ]
+
+    public static let transactional: Set<OigoSettingsField> = [
+        .globalShortcut,
+        .selectedInput,
+        .selectedInputChannel,
+        .localeIdentifier,
+        .launchAtLogin
+    ]
+}
+
 public enum OigoSettingsStoreError: Error, Equatable, LocalizedError, Sendable {
     case encodingFailed(String)
     case writeFailed(String)
