@@ -1,6 +1,6 @@
 # Oigo integrated UI performance and lifecycle evidence
 
-Reviewed implementation SHA: `70c2da7cb4f601ba6fa67994276d93fd49ab9912`.
+Reviewed implementation SHA: `c5a6143df0ab7b08f91745d03d046d1190d253c4`.
 The native unsigned Release artifact was built with Xcode 17F113 on macOS 26.6.2 build 25G83.
 The host model is Mac15,11 with 14 logical CPUs and 36 GB of memory.
 The tested application is the unsigned local Release `Oigo.app` built from `Oigo.xcodeproj` and scheme `Oigo`.
@@ -25,7 +25,7 @@ It reports counts and geometry only and does not load transcript, audio, clipboa
 
 The fresh native capture is `.omo/evidence/issue139/native/history-integrated-fixed.jpg`.
 The capture was taken from the source-equivalent Debug build because the temporary QA launch hook is intentionally excluded from production; the unsigned Release hash is recorded separately below.
-The final source-equivalent Release application binary is `sha256:257ad66d5b2b1fe2cc4e309b467a9c9d5380bf92178527d3232220d8569f47d0`.
+The final source-equivalent Release application binary is `sha256:8bb9df44bcca3ad5424b99ddfc528df1caffd6981632bd01c2fb5923b0163abe`.
 
 ## UI-specific budget record
 
