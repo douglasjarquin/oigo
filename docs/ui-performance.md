@@ -27,6 +27,22 @@ The fresh native capture is `.omo/evidence/issue139/native/history-integrated-fi
 The capture was taken from the source-equivalent Debug build because the temporary QA launch hook is intentionally excluded from production; the unsigned Release hash is recorded separately below.
 The final source-equivalent Release application binary is `sha256:257ad66d5b2b1fe2cc4e309b467a9c9d5380bf92178527d3232220d8569f47d0`.
 
+## UI-specific budget record
+
+The following measurements are required by issue #139 and are recorded explicitly rather than inferred from deterministic contracts.
+
+| Measurement | p50 | p95 | Resource high-water | Result |
+| --- | ---: | ---: | --- | --- |
+| Healthy popover first open | INCONCLUSIVE | INCONCLUSIVE | visible task count not instrumented | No native click trace was captured on this host. |
+| Subsequent popover open | INCONCLUSIVE | INCONCLUSIVE | visible task count not instrumented | No native click trace was captured on this host. |
+| Settings cached General open | INCONCLUSIVE | INCONCLUSIVE | active task count not instrumented | No repeated native timing run was captured. |
+| Settings loaded pane switch | INCONCLUSIVE | INCONCLUSIVE | active task count not instrumented | No repeated native timing run was captured. |
+| History chrome to loading state | INCONCLUSIVE | INCONCLUSIVE | enumeration task high-water not instrumented | The bounded contract and source path pass, but no timing signpost was captured. |
+| History 100-cycle open/select/close | INCONCLUSIVE | INCONCLUSIVE | controller and transcript high-water not instrumented | No native lifecycle matrix was run. |
+
+Existing issue #11 deterministic performance scenarios pass separately and remain the authoritative CPU, footprint, memory, latency, and no-network gate.
+The missing native timings, counters, VoiceOver, appearance, TCC, multi-display, application matrix, and signed-release checks are release-operator limitations and remain `INCONCLUSIVE`.
+
 ## Privacy boundary
 
 This report contains no transcript text, audio data, dictionary terms, clipboard content, focused-element text, target coordinates, credentials, or user-content paths.

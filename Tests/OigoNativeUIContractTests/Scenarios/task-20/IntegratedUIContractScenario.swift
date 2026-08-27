@@ -14,9 +14,9 @@ final class IntegratedUIContractScenario: NativeUIContractScenario {
                   .cancelEditor,
                   .dismissConfirmation,
                   .dismissPopover,
-                  .closeUtilityWindow,
                   .stopOnboardingProbe,
-                  .cancelBoundedHandoff
+                  .cancelBoundedHandoff,
+                  .closeUtilityWindow
               ],
               OigoUIIntegrationPolicy.restorationIdentifiers == [
                   "com.oigo.settings.window",

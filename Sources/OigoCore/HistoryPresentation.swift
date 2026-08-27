@@ -192,9 +192,9 @@ public enum OigoUIIntegrationPolicy {
         .cancelEditor,
         .dismissConfirmation,
         .dismissPopover,
-        .closeUtilityWindow,
         .stopOnboardingProbe,
-        .cancelBoundedHandoff
+        .cancelBoundedHandoff,
+        .closeUtilityWindow
     ]
     public static let restorationIdentifiers = [
         "com.oigo.settings.window",
