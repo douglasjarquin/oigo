@@ -11,6 +11,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private var selectedPane: OigoSettingsPane
     private var committedSettings: OigoSettings
     private let shortcutRecorder: ShortcutRecorderControl
+    private let loadSupportedLocales: () async -> [String]
     private let inputPopup = NSPopUpButton()
     private let channelPopup = NSPopUpButton()
     private let localePopup = NSPopUpButton()
@@ -27,6 +28,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private var retryStorageButton: NSButton?
     private let shortcutStatus = NSTextField(wrappingLabelWithString: "")
     private let messageLabel = NSTextField(labelWithString: "")
+    private let dictationMessage = NSTextField(wrappingLabelWithString: "")
     private let registrationStatus: () -> GlobalShortcutRegistrationStatus
     private let registrationError: () -> String?
     private let save: (OigoSettings) -> String?
@@ -63,6 +65,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private var isCheckingLocale = false
     private var isDismissed = false
     private var saveTask: Task<Void, Never>?
+    private var localeLoadTask: Task<Void, Never>?
+    private var hasLoadedSupportedLocales = false
     private let nextDictationNotice = NSTextField(
         wrappingLabelWithString: NextDictationSettingsPolicy.nextDictationCopy
     )
@@ -73,6 +77,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         settings: OigoSettings,
         inputDevices: [OigoInputDevice],
         supportedLocales: [String],
+        loadSupportedLocales: @escaping () async -> [String],
         microphoneState: OigoPermissionState,
         accessibilityState: OigoPermissionState,
         storageHealth: DurableSessionHealth,
@@ -102,6 +107,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         self.registrationStatus = registrationStatus
         self.registrationError = registrationError
         committedSettings = settings
+        self.loadSupportedLocales = loadSupportedLocales
         selectedPane = OigoSettingsPane(
             rawValue: UserDefaults.standard.string(forKey: Self.selectedPaneKey) ?? ""
         ) ?? .general
@@ -242,7 +248,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         selectPane(pane)
     }
 
-    private func selectPane(_ pane: OigoSettingsPane) {
+    private func selectPane(_ pane: OigoSettingsPane, loadLocales: Bool = true) {
+        if pane != .dictation {
+            cancelLocaleWork()
+        }
         selectedPane = pane
         UserDefaults.standard.set(pane.rawValue, forKey: Self.selectedPaneKey)
         for (candidate, view) in paneViews {
@@ -250,6 +259,37 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         }
         window?.toolbar?.selectedItemIdentifier = NSToolbarItem.Identifier(pane.rawValue)
         window?.windowController?.window?.makeFirstResponder(paneViews[pane])
+        if loadLocales, pane == .dictation {
+            loadSupportedLocalesIfNeeded()
+        }
+    }
+
+    private func loadSupportedLocalesIfNeeded() {
+        guard !hasLoadedSupportedLocales, localeLoadTask == nil else {
+            return
+        }
+        let loadLocales = loadSupportedLocales
+        localeLoadTask = Task { @MainActor [weak self] in
+            let locales = await loadLocales()
+            guard let self, !Task.isCancelled, !isDismissed, selectedPane == .dictation else {
+                return
+            }
+            localeSelection.loadSupported(locales)
+            syncLocalePopup()
+            hasLoadedSupportedLocales = true
+            localeLoadTask = nil
+        }
+    }
+
+    private func cancelLocaleWork() {
+        localeLoadTask?.cancel()
+        localeLoadTask = nil
+        hasLoadedSupportedLocales = false
+        saveTask?.cancel()
+        saveTask = nil
+        isCheckingLocale = false
+        localeSelection.abandonUncommitted()
+        syncLocalePopup()
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
@@ -345,6 +385,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         messageLabel.font = .systemFont(ofSize: 12)
         messageLabel.textColor = .secondaryLabelColor
         messageLabel.maximumNumberOfLines = 2
+        dictationMessage.font = .systemFont(ofSize: 12)
+        dictationMessage.textColor = .systemOrange
+        dictationMessage.maximumNumberOfLines = 3
 
         let shortcutRow = NSStackView(views: [shortcutTitle, shortcutRecorder])
         shortcutRow.orientation = .horizontal
@@ -428,7 +471,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             channelRow,
             localeRow,
             retentionRow,
-            keepAudioCheckbox
+            keepAudioCheckbox,
+            dictationMessage
         ])
         let dictionaryStack = NSStackView(views: [
             dictionaryPaneTitle,
@@ -476,6 +520,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             ])
         }
         NSLayoutConstraint.activate([
+            generalTitle.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            dictationTitle.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            dictionaryPaneTitle.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             shortcutHelp.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             description.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             nextDictationNotice.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
@@ -494,7 +541,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             inputPopup.widthAnchor.constraint(equalTo: localePopup.widthAnchor),
             channelPopup.widthAnchor.constraint(equalTo: localePopup.widthAnchor)
         ])
-        selectPane(selectedPane)
+        selectPane(selectedPane, loadLocales: false)
         updateShortcutStatus()
     }
 
@@ -566,7 +613,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             return
         }
         localeSelection.select(identifier)
-        messageLabel.stringValue = localeSelection.statusMessage
+        dictationMessage.stringValue = localeSelection.statusMessage
         commitChangedSettings()
     }
 
@@ -743,12 +790,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             return
         }
         guard let request = localeSelection.beginAssetRequest(status: .installing) else {
-            messageLabel.stringValue = localeSelection.statusMessage
+            dictationMessage.stringValue = localeSelection.statusMessage
             NSSound.beep()
             return
         }
         isCheckingLocale = true
-        messageLabel.stringValue = localeSelection.statusMessage
+        dictationMessage.stringValue = localeSelection.statusMessage
         let inspectAssets = checkSpeechAssets
         saveTask = Task { @MainActor [weak self] in
             let status = await inspectAssets(request.localeIdentifier)
@@ -807,7 +854,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         lastRequestedLaunchAtLogin = settings.launchAtLogin
         committedShortcut = settings.globalShortcut
         if let languageUnappliedMessage {
-            messageLabel.stringValue = languageUnappliedMessage
+            dictationMessage.stringValue = languageUnappliedMessage
             NSSound.beep()
             return true
         }

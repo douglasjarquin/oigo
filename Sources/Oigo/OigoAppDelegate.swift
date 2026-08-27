@@ -317,13 +317,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             settingsWindow.window?.makeKeyAndOrderFront(nil)
             return
         }
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let supportedLocales = self.storageCapability.health.isReady
-                ? await self.transcriptionService().supportedLocaleIdentifiers()
-                : []
-            self.presentSettings(supportedLocales: supportedLocales)
-        }
+        presentSettings(supportedLocales: [])
     }
 
     private func presentSettings(supportedLocales: [String]) {
@@ -332,6 +326,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             settings: settings,
             inputDevices: currentInputDevices(),
             supportedLocales: supportedLocales,
+            loadSupportedLocales: { [weak self] in
+                guard let self, self.storageCapability.health.isReady else { return [] }
+                return await self.transcriptionService().supportedLocaleIdentifiers()
+            },
             microphoneState: microphonePermissionState(),
             accessibilityState: accessibilityPermissionState(),
             storageHealth: displayedStorageHealth,
@@ -3319,6 +3317,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func deleteAllHistory() {
+        guard !coordinator.hasActiveWork, !playback.hasActivePlayback else {
+            let alert = NSAlert()
+            alert.messageText = "Finish active work before deleting history"
+            alert.informativeText = "Stop dictation and wait for audio playback to finish, then try again."
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
         guard let store = sessionStore else {
             return
         }
