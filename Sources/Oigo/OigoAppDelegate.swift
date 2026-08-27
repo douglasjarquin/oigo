@@ -3140,7 +3140,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         let cafExists = session.map { FileManager.default.fileExists(atPath: $0.audioURL.path) } ?? false
         let captureStarted = session?.metadata.startedAt != nil
         let recordingFinalized = session?.metadata.endedAt != nil && cafExists
-        let rawTranscriptPersisted = session?.metadata.rawTextByteCount.map { $0 > 0 } ?? false
+        let rawTranscriptPersisted = session.map { ($0.metadata.rawTextByteCount ?? 0) > 0 } ?? false
         let speechFinalized = session.map { ($0.metadata.rawTextByteCount ?? 0) > 0 } ?? false
         let report = OigoOnboardingProductionReport(
             usedInput: bound.input,
@@ -3180,7 +3180,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         let cafExists = session.map { FileManager.default.fileExists(atPath: $0.audioURL.path) } ?? false
         let captureStarted = session?.metadata.startedAt != nil
         let recordingFinalized = session?.metadata.endedAt != nil && cafExists
-        let rawTranscriptPersisted = session?.metadata.rawTextByteCount.map { $0 > 0 } ?? false
+        let rawTranscriptPersisted = session.map { ($0.metadata.rawTextByteCount ?? 0) > 0 } ?? false
         let speechFinalized = session.map { ($0.metadata.rawTextByteCount ?? 0) > 0 } ?? false
         let report = OigoOnboardingProductionReport(
             usedInput: bound.input,
