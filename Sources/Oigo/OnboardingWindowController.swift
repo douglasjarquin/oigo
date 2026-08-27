@@ -169,13 +169,18 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         window.onEscape = { [weak self] in
             guard let self else { return }
-            if shortcutRecorder.isRecording {
+            var available: Set<OigoEscapeAction> = [.closeUtilityWindow]
+            if shortcutRecorder.isRecording { available.insert(.cancelEditor) }
+            if evidence.probeActive { available.insert(.stopOnboardingProbe) }
+            if evidence.testRunning { available.insert(.cancelBoundedHandoff) }
+            switch OigoUIIntegrationPolicy.resolveEscapeAction(from: available) {
+            case .cancelEditor:
                 shortcutRecorder.cancelRecording()
-            } else if evidence.probeActive {
+            case .stopOnboardingProbe:
                 stopSourceProbe()
-            } else if evidence.testRunning {
+            case .cancelBoundedHandoff:
                 cancelTest()
-            } else {
+            default:
                 self.window?.performClose(nil)
             }
         }

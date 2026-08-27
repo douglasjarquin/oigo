@@ -103,7 +103,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         super.init(window: window)
         window.delegate = self
         window.onEscape = { [weak self] in
-            self?.window?.performClose(nil)
+            guard let self else { return }
+            switch OigoUIIntegrationPolicy.resolveEscapeAction(from: [.closeUtilityWindow]) {
+            default:
+                self.window?.performClose(nil)
+            }
         }
         let toolbar = NSToolbar(identifier: Self.toolbarIdentifier)
         toolbar.delegate = self

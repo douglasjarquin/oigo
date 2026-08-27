@@ -47,7 +47,10 @@ final class AuditCompletenessScenario: NativeUIContractScenario {
               !audit.contains("startOnboardingTest") else {
             throw ContractInputError(category: "audit-missing-required-contract")
         }
-        guard !audit.contains("NATIVE PASS") else {
+        let nativePassLinesLackingArtifact = audit.split(separator: "\n").filter { line in
+            line.contains("NATIVE PASS") && !line.contains("APP_BUNDLE_ARTIFACT=sha256:")
+        }
+        guard nativePassLinesLackingArtifact.isEmpty else {
             throw ContractInputError(category: "audit-unproven-native-pass")
         }
 

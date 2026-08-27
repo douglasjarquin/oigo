@@ -1,0 +1,40 @@
+{
+  "": {
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/primary.swiftdeps"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoHotKey/GlobalHotKeyRegistrar.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/GlobalHotKeyRegistrar.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/GlobalHotKeyRegistrar.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/GlobalHotKeyRegistrar~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/GlobalHotKeyRegistrar.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/GlobalHotKeyRegistrar.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoHotKey/GlobalShortcutRegistration.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/GlobalShortcutRegistration.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/GlobalShortcutRegistration.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/GlobalShortcutRegistration~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/GlobalShortcutRegistration.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/GlobalShortcutRegistration.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoHotKey/ShortcutConfigurationTransaction.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutConfigurationTransaction.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutConfigurationTransaction.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutConfigurationTransaction~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutConfigurationTransaction.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutConfigurationTransaction.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoHotKey/ShortcutFormatter.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutFormatter.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutFormatter.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutFormatter~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutFormatter.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutFormatter.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoHotKey/ShortcutRecorderControl.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutRecorderControl.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutRecorderControl.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutRecorderControl~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutRecorderControl.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoHotKey.build/ShortcutRecorderControl.dia"
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "": {
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/primary.swiftdeps"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoUIGallery/GalleryConfiguration.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/GalleryConfiguration.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/GalleryConfiguration.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/GalleryConfiguration~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/GalleryConfiguration.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/GalleryConfiguration.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoUIGallery/GalleryScenario.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/GalleryScenario.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/GalleryScenario.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/GalleryScenario~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/GalleryScenario.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/GalleryScenario.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoUIGallery/Scenarios/Task01SmokeGalleryScenario.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/Task01SmokeGalleryScenario.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/Task01SmokeGalleryScenario.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/Task01SmokeGalleryScenario~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/Task01SmokeGalleryScenario.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/Task01SmokeGalleryScenario.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoUIGallery/Scenarios/task-07/ComponentsGalleryScenario.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/ComponentsGalleryScenario.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/ComponentsGalleryScenario.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/ComponentsGalleryScenario~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/ComponentsGalleryScenario.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/ComponentsGalleryScenario.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoUIGallery/Scenarios/task-07/MacUtilityUIFallback.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/MacUtilityUIFallback.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/MacUtilityUIFallback.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/MacUtilityUIFallback~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/MacUtilityUIFallback.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/MacUtilityUIFallback.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoUIGallery/Scenarios/task-11/PopoverRoutingGalleryScenario.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PopoverRoutingGalleryScenario.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PopoverRoutingGalleryScenario.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PopoverRoutingGalleryScenario~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PopoverRoutingGalleryScenario.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PopoverRoutingGalleryScenario.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoUIGallery/Scenarios/task-12/PopoverStatesGalleryScenario.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PopoverStatesGalleryScenario.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PopoverStatesGalleryScenario.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PopoverStatesGalleryScenario~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PopoverStatesGalleryScenario.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PopoverStatesGalleryScenario.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoUIGallery/Scenarios/task-12/Task12PopoverFixture.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/Task12PopoverFixture.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/Task12PopoverFixture.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/Task12PopoverFixture~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/Task12PopoverFixture.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/Task12PopoverFixture.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoUIGallery/Scenarios/task-14/HUDPlacementGalleryScenario.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/HUDPlacementGalleryScenario.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/HUDPlacementGalleryScenario.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/HUDPlacementGalleryScenario~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/HUDPlacementGalleryScenario.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/HUDPlacementGalleryScenario.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoUIGallery/Scenarios/task-15/HUDStatesGalleryScenario.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/HUDStatesGalleryScenario.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/HUDStatesGalleryScenario.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/HUDStatesGalleryScenario~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/HUDStatesGalleryScenario.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/HUDStatesGalleryScenario.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoUIGallery/Scenarios/task-16/PasteAgainHandoffGalleryScenario.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PasteAgainHandoffGalleryScenario.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PasteAgainHandoffGalleryScenario.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PasteAgainHandoffGalleryScenario~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PasteAgainHandoffGalleryScenario.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/PasteAgainHandoffGalleryScenario.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoUIGallery/main.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/main.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/main.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/main.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoUIGallery.build/main.dia"
+  }
+}

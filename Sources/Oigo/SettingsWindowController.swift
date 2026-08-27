@@ -159,11 +159,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         window.delegate = self
         window.onEscape = { [weak self] in
             guard let self else { return }
-            if shortcutRecorder.isRecording {
+            var available: Set<OigoEscapeAction> = [.closeUtilityWindow]
+            if shortcutRecorder.isRecording { available.insert(.cancelEditor) }
+            if isCheckingLocale { available.insert(.cancelBoundedHandoff) }
+            switch OigoUIIntegrationPolicy.resolveEscapeAction(from: available) {
+            case .cancelEditor:
                 shortcutRecorder.cancelRecording()
-            } else if isCheckingLocale {
+            case .cancelBoundedHandoff:
                 cancelLocaleWork()
-            } else {
+            default:
                 self.window?.performClose(nil)
             }
         }

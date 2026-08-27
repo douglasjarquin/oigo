@@ -1,0 +1,26 @@
+{
+  "": {
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/primary.swiftdeps"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoInsertion/InsertionContracts.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionContracts.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionContracts.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionContracts~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionContracts.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionContracts.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoInsertion/InsertionService.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionService.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionService.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionService~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionService.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionService.dia"
+  },
+  "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/Sources/OigoInsertion/InsertionTargetHandoff.swift": {
+    "dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionTargetHandoff.d",
+    "object": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionTargetHandoff.swift.o",
+    "swiftmodule": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionTargetHandoff~partial.swiftmodule",
+    "swift-dependencies": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionTargetHandoff.swiftdeps",
+    "diagnostics": "/Users/douglasjarquin/.no-mistakes/worktrees/33274b421df9/01M112VT0D8KQT1TKZB1JFMPH6/.build/index-build/arm64-apple-macosx/debug/OigoInsertion.build/InsertionTargetHandoff.dia"
+  }
+}

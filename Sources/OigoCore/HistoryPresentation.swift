@@ -196,6 +196,9 @@ public enum OigoUIIntegrationPolicy {
         .cancelBoundedHandoff,
         .closeUtilityWindow
     ]
+    public static func resolveEscapeAction(from available: Set<OigoEscapeAction>) -> OigoEscapeAction? {
+        escapePriority.first(where: available.contains)
+    }
     public static let restorationIdentifiers = [
         "com.oigo.settings.window",
         "com.oigo.history.window",
