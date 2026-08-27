@@ -1,0 +1,10 @@
+SCENARIO related settings history insertion retry routing and popover contracts
+COMMAND swift run oigo-issue3-contract-tests | RESULT exit=0 observable=GREEN-all-issue-3-contract-scenarios
+COMMAND swift run oigo-issue7-contract-tests | RESULT exit=0 observable=GREEN-all-issue-7-contract-scenarios
+COMMAND swift run oigo-issue9-contract-tests | RESULT exit=0 observable=GREEN-all-issue-9-contract-suites
+COMMAND swift run oigo-issue10-contract-tests | RESULT exit=0 observable=GREEN-all-issue-10-contract-scenarios
+COMMAND swift run oigo-issue78-contract-tests | RESULT exit=0 observable=GREEN-all-issue-78-contract-scenarios
+COMMAND swift run oigo-issue102-contract-tests | RESULT exit=0 observable=GREEN-all-issue-102-106-contract-scenarios
+COMMAND swift run oigo-native-ui-contract-tests --scenario popover-routing [sanitized-task-fixture] | RESULT exit=0 observable=PASS
+COMMAND swift run oigo-native-ui-contract-tests --scenario popover-state-matrix --fixture exhaustive | RESULT exit=0 observable=PASS
+COMMAND swift run oigo-native-ui-contract-tests --scenario popover-actions --fixture bounded-summary-and-rollback | RESULT exit=0 observable=PASS

@@ -8,6 +8,8 @@ let package = Package(
         .macOS("26.0")
     ],
     products: [
+        .library(name: "MacUtilityUI", targets: ["MacUtilityUI"]),
+        .library(name: "OigoPresentation", targets: ["OigoPresentation"]),
         .library(name: "OigoCore", targets: ["OigoCore"]),
         .library(name: "OigoCapture", targets: ["OigoCapture"]),
         .library(name: "OigoTranscription", targets: ["OigoTranscription"]),
@@ -96,12 +98,36 @@ let package = Package(
         .executable(
             name: "oigo-issue14-contract-tests",
             targets: ["OigoIssue14ContractTests"]
+        ),
+        .executable(
+            name: "oigo-native-ui-contract-tests",
+            targets: ["OigoNativeUIContractTests"]
+        ),
+        .executable(
+            name: "OigoUIGallery",
+            targets: ["OigoUIGallery"]
         )
     ],
     targets: [
         .target(
+            name: "MacUtilityUI",
+            path: "Sources/MacUtilityUI",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("Foundation")
+            ]
+        ),
+        .target(
             name: "OigoCore",
             path: "Sources/OigoCore"
+        ),
+        .target(
+            name: "OigoPresentation",
+            dependencies: ["MacUtilityUI", "OigoCore"],
+            path: "Sources/Oigo/UI/Presentation",
+            linkerSettings: [
+                .linkedFramework("AppKit")
+            ]
         ),
         .target(
             name: "OigoCapture",
@@ -160,8 +186,12 @@ let package = Package(
         ),
         .executableTarget(
             name: "Oigo",
-            dependencies: ["OigoCore", "OigoCapture", "OigoTranscription", "OigoInsertion", "OigoHotKey"],
+            dependencies: [
+                "MacUtilityUI", "OigoPresentation", "OigoCore", "OigoCapture",
+                "OigoTranscription", "OigoInsertion", "OigoHotKey"
+            ],
             path: "Sources/Oigo",
+            exclude: ["UI/Presentation"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("ServiceManagement")
@@ -266,6 +296,19 @@ let package = Package(
             name: "OigoIssue14ContractTests",
             dependencies: ["OigoCore"],
             path: "Tests/OigoIssue14ContractTests"
+        ),
+        .executableTarget(
+            name: "OigoNativeUIContractTests",
+            dependencies: ["OigoCore", "OigoInsertion"],
+            path: "Tests/OigoNativeUIContractTests"
+        ),
+        .executableTarget(
+            name: "OigoUIGallery",
+            dependencies: ["MacUtilityUI", "OigoCore", "OigoPresentation"],
+            path: "Sources/OigoUIGallery",
+            linkerSettings: [
+                .linkedFramework("AppKit")
+            ]
         )
     ]
 )

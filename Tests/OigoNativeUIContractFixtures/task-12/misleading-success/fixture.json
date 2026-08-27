@@ -1,0 +1,9 @@
+{
+  "name": "misleading-success",
+  "rows": [],
+  "expectedSections": [],
+  "popoverWidth": 340,
+  "healthyNoScroll": true,
+  "reportedSuccess": true,
+  "processExitStatus": 1
+}

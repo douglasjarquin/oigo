@@ -6,10 +6,11 @@ import OigoHotKey
 @MainActor
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let support: OigoSystemSupportResult
+    private let processingMode: OigoProcessingMode
     private let loadSupportedLanguages: () async -> [String]
     private let checkSpeechAssets: (String) async -> OigoLocaleAssetStatus
     private let saveLanguage: (String) -> Void
-    private let saveStep: (OigoOnboardingStep) -> Void
+    private let saveStep: (OigoOnboardingStep, Bool) -> Void
     private let saveInputSelection: (OigoInputSelection, Int) -> Void
     private let requestMicrophone: () async -> OigoPermissionState
     private let openMicrophoneSettings: () -> Void
@@ -41,6 +42,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var activeTestGeneration: UInt64?
     private var commandAvailability: AppCommandAvailability?
     private var completed = false
+    private var copyOnlySetupAccepted = false
     private var storageHealth: DurableSessionHealth
     private var committedShortcut: ToggleShortcut
     private var inputMenuSelections: [OigoInputSelection] = []
@@ -53,6 +55,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let bodyLabel = NSTextField(wrappingLabelWithString: "")
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let storageStatusLabel = NSTextField(wrappingLabelWithString: "")
+    private let checklistTitleLabel = NSTextField(labelWithString: "Try It checklist")
+    private let checklistStack = NSStackView()
     private let inputPopup = NSPopUpButton()
     private let inputLabel = NSTextField(labelWithString: "Microphone input")
     private let inputRow = NSStackView()
@@ -63,6 +67,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let quietOverrideButton = NSButton(title: "Continue with quiet environment", target: nil, action: nil)
     private let copyOnlyButton = NSButton(title: "Continue with copy-only", target: nil, action: nil)
     private let languagePopup = NSPopUpButton()
+    private let languageLabel = NSTextField(labelWithString: "Dictation language")
+    private let languageRow = NSStackView()
     private let shortcutRecorder: ShortcutRecorderControl
     private let testField = NSTextField(string: "")
     private let actionButton = NSButton(title: "", target: nil, action: nil)
@@ -76,7 +82,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     init(
         support: OigoSystemSupportResult,
         initialStep: OigoOnboardingStep = .system,
+        processingMode: OigoProcessingMode,
         globalShortcut: ToggleShortcut,
+        copyOnlyAccepted: Bool = false,
         inputDevices: [OigoInputDevice],
         selectedInput: OigoInputSelection,
         selectedInputChannel: Int,
@@ -87,7 +95,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         loadSupportedLanguages: @escaping () async -> [String],
         checkSpeechAssets: @escaping (String) async -> OigoLocaleAssetStatus,
         saveLanguage: @escaping (String) -> Void,
-        saveStep: @escaping (OigoOnboardingStep) -> Void,
+        saveStep: @escaping (OigoOnboardingStep, Bool) -> Void,
         saveInputSelection: @escaping (OigoInputSelection, Int) -> Void,
         requestMicrophone: @escaping () async -> OigoPermissionState,
         openMicrophoneSettings: @escaping () -> Void,
@@ -109,7 +117,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         onClose: @escaping () -> Void
     ) {
         self.support = support
-        self.currentStep = initialStep
+        self.processingMode = processingMode
+        self.currentStep = initialStep.migratedForFourStageFlow
+        self.copyOnlySetupAccepted = copyOnlyAccepted
         self.selectedInput = selectedInput
         self.selectedInputChannel = OigoInputChannelPolicy.sanitized(selectedInputChannel)
         self.inputDevices = inputDevices
@@ -147,8 +157,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         committedShortcut = globalShortcut
         shortcutRecorder = ShortcutRecorderControl(shortcut: globalShortcut)
 
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 560),
+        let window = OigoUtilityWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 640),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -157,6 +167,23 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        window.onEscape = { [weak self] in
+            guard let self else { return }
+            var available: Set<OigoEscapeAction> = [.closeUtilityWindow]
+            if shortcutRecorder.isRecording { available.insert(.cancelEditor) }
+            if evidence.probeActive { available.insert(.stopOnboardingProbe) }
+            if evidence.testRunning { available.insert(.cancelBoundedHandoff) }
+            switch OigoUIIntegrationPolicy.resolveEscapeAction(from: available) {
+            case .cancelEditor:
+                shortcutRecorder.cancelRecording()
+            case .stopOnboardingProbe:
+                stopSourceProbe()
+            case .cancelBoundedHandoff:
+                cancelTest()
+            default:
+                self.window?.performClose(nil)
+            }
+        }
         evidence.setStorageHealth(storageHealth)
         evidence.setSelectedSource(input: selectedInput, channel: selectedInputChannel)
         configureInputMenu(devices: inputDevices, selected: selectedInput)
@@ -184,7 +211,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         releaseOnboardingResources(cancelActiveTest: true)
         if support.isSupported, !completed {
             saveInputSelection(selectedInputFromMenu(), selectedChannelFromMenu())
-            saveStep(currentStep)
+            saveStep(currentStep, copyOnlySetupAccepted)
         }
         onClose()
     }
@@ -200,7 +227,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        if currentStep == .microphone, microphoneState == .granted, !evidence.probeActive {
+        if currentStep == .language, microphoneState == .granted, !evidence.probeActive {
             restartSourceProbe()
         }
     }
@@ -212,8 +239,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         configureInputMenu(devices: devices, selected: selectedInput)
         configureChannelMenu()
         applyCurrentSourceSelection()
-        if currentStep == .microphone {
+        if currentStep == .language, microphoneState == .granted, !evidence.sourceUnavailable {
             restartSourceProbe()
+        } else if currentStep == .language {
+            releaseOnboardingResources(cancelActiveTest: false)
         }
         renderButtons()
     }
@@ -224,7 +253,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         }
         meter.doubleValue = Double(update.meterLevel)
         renderButtons()
-        if currentStep == .microphone {
+        if currentStep == .language {
             statusLabel.stringValue = microphoneStatusMessage()
         }
     }
@@ -279,6 +308,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         bodyLabel.maximumNumberOfLines = 8
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.maximumNumberOfLines = 4
+        checklistTitleLabel.font = .boldSystemFont(ofSize: 13)
+        checklistStack.orientation = .vertical
+        checklistStack.alignment = .leading
+        checklistStack.spacing = 5
+        checklistStack.translatesAutoresizingMaskIntoConstraints = false
         testField.placeholderString = "Speak after Start. This field must receive the paste."
         testField.isEditable = true
         testField.isSelectable = true
@@ -328,6 +362,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         channelRow.alignment = .centerY
         channelRow.spacing = 8
         channelLabel.setContentHuggingPriority(.required, for: .horizontal)
+        languageRow.addArrangedSubview(languageLabel)
+        languageRow.addArrangedSubview(languagePopup)
+        languageRow.orientation = .horizontal
+        languageRow.alignment = .centerY
+        languageRow.spacing = 8
+        languageLabel.setContentHuggingPriority(.required, for: .horizontal)
         let stack = NSStackView(views: [
             progressLabel,
             titleLabel,
@@ -336,9 +376,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             channelRow,
             meter,
             quietOverrideButton,
-            languagePopup,
+            languageRow,
             shortcutRecorder,
             testField,
+            checklistTitleLabel,
+            checklistStack,
             statusLabel,
             storageStatusLabel,
             retryStorageButton,
@@ -365,9 +407,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -24),
             bodyLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            checklistStack.widthAnchor.constraint(equalTo: stack.widthAnchor),
             storageStatusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             inputRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             channelRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            languageRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             meter.widthAnchor.constraint(equalTo: stack.widthAnchor),
             languagePopup.widthAnchor.constraint(equalToConstant: 280),
             shortcutRecorder.widthAnchor.constraint(equalToConstant: 280),
@@ -382,31 +426,37 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     private func render() {
         let isSupported = support.isSupported
+        let stage = OigoOnboardingStage.from(legacyStep: currentStep)
         progressLabel.stringValue = isSupported
-            ? "Step " + String(min(currentStep.ordinal, 7)) + " of 7"
+            ? stage == .done ? "Setup complete" : "Stage " + String(stage.ordinal) + " of 4"
             : "Setup unavailable"
-        titleLabel.stringValue = isSupported ? currentStep.title : "This Mac cannot run Oigo"
-        bodyLabel.stringValue = isSupported ? body(for: currentStep) : support.reason
-        languagePopup.isHidden = currentStep != .language
+        titleLabel.stringValue = isSupported ? stage.title : "This Mac cannot run Oigo"
+        bodyLabel.stringValue = isSupported ? body(for: stage) : support.reason
+        languageRow.isHidden = currentStep != .language
         shortcutRecorder.isHidden = currentStep != .shortcut
-        inputRow.isHidden = currentStep != .microphone
-        channelRow.isHidden = currentStep != .microphone
-        meter.isHidden = currentStep != .microphone
-        quietOverrideButton.isHidden = currentStep != .microphone
+        inputRow.isHidden = currentStep != .language
+        channelRow.isHidden = currentStep != .language
+        meter.isHidden = currentStep != .language
+        quietOverrideButton.isHidden = currentStep != .language
             || evidence.signalHealth != .silent
             || !evidence.acceptedCanonicalBuffer
         testField.isHidden = !isSupported || currentStep != .testDictation
-        historyButton.isHidden = currentStep != .recovery
-            && !(currentStep == .testDictation && evidence.recoveryActions.contains(.openHistory))
-        storageStatusLabel.isHidden = storageHealth.isReady
+        checklistTitleLabel.isHidden = !isSupported || currentStep != .testDictation
+        checklistStack.isHidden = !isSupported || currentStep != .testDictation
+        historyButton.isHidden = currentStep != .testDictation
+            || !evidence.recoveryActions.contains(.openHistory)
+        storageStatusLabel.isHidden = currentStep != .system && storageHealth.isReady
         retryStorageButton.isHidden = storageHealth.isReady
         openDataLocationButton.isHidden = storageHealth.isReady
         skipButton.isHidden = currentStep != .testDictation
-        copyOnlyButton.isHidden = currentStep != .testDictation || !evidence.canAcceptCopyOnly
-        statusLabel.stringValue = status(for: currentStep)
+        copyOnlyButton.isHidden = currentStep == .shortcut
+            ? accessibilityState == .granted || copyOnlySetupAccepted
+            : currentStep != .testDictation || !evidence.canAcceptCopyOnly
+        statusLabel.stringValue = status(for: stage)
+        renderChecklist()
         storageStatusLabel.stringValue = storageHealth.statusMessage
         storageStatusLabel.textColor = storageHealth.isReady ? .secondaryLabelColor : .systemOrange
-        actionButton.isHidden = !isSupported || ![.language, .microphone, .insertion, .testDictation].contains(currentStep)
+        actionButton.isHidden = !isSupported || ![.language, .shortcut, .testDictation].contains(currentStep)
         backButton.isHidden = !isSupported || currentStep == .system
         nextButton.isHidden = !isSupported
         if !isSupported {
@@ -417,10 +467,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         }
         if currentStep == .language {
             loadLanguagesIfNeeded()
-            actionButton.title = "Check speech assets"
-        } else if currentStep == .microphone {
-            actionButton.title = microphoneState == .denied ? "Open Microphone Settings" : "Allow Microphone Access"
-        } else if currentStep == .insertion {
+            actionButton.title = microphoneState == .granted
+                ? "Check speech assets"
+                : microphoneState == .denied ? "Open Microphone Settings" : "Allow Microphone Access"
+        } else if currentStep == .shortcut {
             actionButton.title = accessibilityRequestAttempted && accessibilityState == .denied
                 ? "Open Accessibility Settings"
                 : "Allow Accessibility (optional)"
@@ -434,13 +484,16 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         guard support.isSupported else {
             return
         }
-        nextButton.title = currentStep == .recovery ? "Finish setup" : "Continue"
-        nextButton.isEnabled = currentStep != .microphone || microphoneState == .granted
+        actionButton.isEnabled = true
+        nextButton.title = currentStep == .complete ? "Finish setup" : "Continue"
+        nextButton.isEnabled = true
         if currentStep == .language {
-            nextButton.isEnabled = localeSelection.canConfirm
+            nextButton.isEnabled = microphoneState == .granted
+                && evidence.microphoneCanAdvance
+                && localeSelection.canConfirm
         }
-        if currentStep == .microphone {
-            nextButton.isEnabled = microphoneState == .granted && evidence.microphoneCanAdvance
+        if currentStep == .shortcut {
+            nextButton.isEnabled = accessibilityState == .granted || copyOnlySetupAccepted
         }
         if currentStep == .testDictation {
             nextButton.isEnabled = evidence.canFinishReady
@@ -449,9 +502,36 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
                 && onboardingTestAvailability.canUseOnboardingTestAction
             skipButton.isEnabled = true
         }
-        if currentStep == .recovery {
-            nextButton.isEnabled = evidence.canFinishReady && registrationStatus().isActive
+    }
+
+    private func renderChecklist() {
+        checklistStack.arrangedSubviews.forEach {
+            checklistStack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
         }
+        for row in evidence.checklist {
+            let label = NSTextField(labelWithString: checklistText(row))
+            label.maximumNumberOfLines = 2
+            label.identifier = NSUserInterfaceItemIdentifier(
+                "oigo.onboarding.checklist." + row.item.rawValue
+            )
+            checklistStack.addArrangedSubview(label)
+        }
+    }
+
+    private func checklistText(_ row: OigoOnboardingChecklistRow) -> String {
+        let marker: String
+        switch row.status {
+        case .pending:
+            marker = "○"
+        case .active:
+            marker = "…"
+        case .succeeded:
+            marker = "✓"
+        case .failed:
+            marker = "!"
+        }
+        return marker + " " + row.item.title
     }
 
     func setStorageHealth(_ health: DurableSessionHealth) {
@@ -477,34 +557,70 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         )
     }
 
-    private func body(for step: OigoOnboardingStep) -> String {
-        switch step {
-        case .system:
+    private func body(for stage: OigoOnboardingStage) -> String {
+        switch stage {
+        case .macAndStorage:
             "Oigo needs macOS 26 or later on Apple silicon. This check runs before setup so unsupported systems fail clearly."
-        case .language:
-            "Choose a language supported by Oigo's on-device speech module. Oigo picks the closest supported system locale and checks speech assets before your first valuable dictation."
-        case .microphone:
-            "Choose the microphone and channel Oigo will record. A local meter confirms the selected source produces a usable buffer. We ask for microphone access only after this explanation."
-        case .shortcut:
-            "Choose a readable global shortcut. The shipped default is \(ToggleShortcut.default.displayName), and Oigo keeps the previous working choice when registration fails."
-        case .insertion:
-            "Accessibility lets Oigo paste one completed transcript into the field you were using. If you decline, Copy and History still work."
-        case .testDictation:
-            "Focus the editable field below, then start and stop a real dictation. Setup passes only when that field receives the inserted transcript."
-        case .recovery:
-            "History is available from the Oigo menu bar item. It keeps saved recordings and lets you retry a failed transcription."
-        case .complete:
-            "Oigo is ready."
+        case .microphoneAndLanguage:
+            "Choose the microphone, channel, and language Oigo will use. A local meter confirms the selected source produces a usable buffer, and speech assets are checked before your first valuable dictation."
+        case .shortcutAndInsertion:
+            "Choose a readable global shortcut. Accessibility enables automatic paste into the field you were using; if you decline, Oigo keeps Copy and History available."
+        case .tryIt:
+            "Focus the editable field below, then start and stop a real dictation. Setup records each production-path checkpoint and reports only what the owned test field proves."
+        case .done:
+            completionSummary()
         }
     }
 
-    private func status(for step: OigoOnboardingStep) -> String {
-        switch step {
-        case .microphone:
-            return microphoneStatusMessage()
-        case .insertion:
-            return "Current Accessibility state: " + accessibilityState.rawValue.capitalized
-        case .shortcut:
+    private func completionSummary() -> String {
+        let input = switch selectedInput {
+        case .systemDefault:
+            "System Default"
+        case .pinned(let uid):
+            inputDevices.first(where: { $0.uid == uid })?.displayName ?? "Pinned microphone"
+        }
+        let pastePosture = accessibilityState == .granted
+            ? "Automatic paste available"
+            : "Copy-only fallback accepted"
+        let assetPosture: String
+        switch localeSelection.readiness.status {
+        case .ready:
+            assetPosture = "Ready"
+        case .failed(let reason), .unavailable(let reason):
+            assetPosture = reason
+        case .idle, .checking, .installing, .unsupported:
+            assetPosture = "Not verified"
+        }
+        let testResult: String
+        switch evidence.outcome {
+        case .passed:
+            testResult = "Automatic paste verified"
+        case .copyOnlyAccepted:
+            testResult = "Copy-only accepted"
+        case .skipped:
+            testResult = "Test skipped"
+        case .failed:
+            testResult = "Test failed with recovery available"
+        case .pending:
+            testResult = "Test not completed"
+        }
+        return "Shortcut: \(committedShortcut.displayName)\n"
+            + "Mode: \(processingMode.displayName)\n"
+            + "Microphone: \(input), channel \(selectedInputChannel + 1)\n"
+            + "Language: \(localeSelection.committedIdentifier) (assets: \(assetPosture))\n"
+            + "Insertion: \(pastePosture)\n"
+            + "Try It: \(testResult)\n"
+            + "Storage: On this Mac; recovery: Open Data Location"
+    }
+
+    private func status(for stage: OigoOnboardingStage) -> String {
+        switch stage {
+        case .microphoneAndLanguage:
+            if microphoneState != .granted || !evidence.microphoneCanAdvance {
+                return microphoneStatusMessage()
+            }
+            return localeSelection.statusMessage
+        case .shortcutAndInsertion:
             switch registrationStatus() {
             case .active(let shortcut, _):
                 let suffix = registrationError().map { ". Last error: " + $0 } ?? ""
@@ -512,11 +628,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             case .inactive(let message):
                 return "Global shortcut inactive: " + (registrationError() ?? message)
             }
-        case .testDictation:
+        case .tryIt:
             return evidence.statusMessage
-        case .language:
-            return localeSelection.statusMessage
-        default:
+        case .macAndStorage, .done:
             return ""
         }
     }
@@ -532,19 +646,25 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         currentStep = next
-        saveStep(next)
+        saveStep(next, copyOnlySetupAccepted)
         render()
     }
 
     @objc private func acceptCopyOnlyAction() {
-        guard currentStep == .testDictation, evidence.acceptCopyOnly() else {
+        if currentStep == .shortcut, accessibilityState != .granted {
+            copyOnlySetupAccepted = true
+            saveStep(.shortcut, true)
+            statusLabel.stringValue = "Copy-only setup accepted. Automatic paste remains optional."
+            renderButtons()
             return
         }
-        render()
+        if currentStep == .testDictation, evidence.acceptCopyOnly() {
+            render()
+        }
     }
 
     @objc private func acceptQuietOverrideAction() {
-        guard currentStep == .microphone, evidence.acceptQuietOverride() else {
+        guard currentStep == .language, evidence.acceptQuietOverride() else {
             return
         }
         render()
@@ -644,7 +764,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         configureChannelMenu()
         applyCurrentSourceSelection()
         saveInputSelection(selectedInput, selectedInputChannel)
-        if currentStep == .microphone, microphoneState == .granted {
+        if currentStep == .language, microphoneState == .granted {
             restartSourceProbe()
         }
         render()
@@ -653,6 +773,21 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     @objc private func performAction() {
         switch currentStep {
         case .language:
+            if microphoneState != .granted {
+                if microphoneState == .denied {
+                    openMicrophoneSettings()
+                } else {
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        microphoneState = await requestMicrophone()
+                        if microphoneState == .granted {
+                            restartSourceProbe()
+                        }
+                        render()
+                    }
+                }
+                return
+            }
             guard let request = localeSelection.beginAssetRequest(status: .installing) else {
                 statusLabel.stringValue = localeSelection.statusMessage
                 renderButtons()
@@ -664,32 +799,15 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let status = await checkSpeechAssets(request.localeIdentifier)
-                let applied = localeSelection.applyAssetResult(
+                _ = localeSelection.applyAssetResult(
                     localeIdentifier: request.localeIdentifier,
                     generation: request.generation,
                     status: status
                 )
-                if applied {
-                    statusLabel.stringValue = localeSelection.statusMessage
-                }
                 actionButton.isEnabled = true
-                renderButtons()
+                render()
             }
-        case .microphone:
-            if microphoneState == .denied {
-                openMicrophoneSettings()
-            } else {
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    microphoneState = await requestMicrophone()
-                    if microphoneState == .granted {
-                        restartSourceProbe()
-                    }
-                    statusLabel.stringValue = microphoneStatusMessage()
-                    render()
-                }
-            }
-        case .insertion:
+        case .shortcut:
             if accessibilityRequestAttempted && accessibilityState == .denied {
                 openAccessibilitySettings()
             } else {
@@ -698,11 +816,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
                 statusLabel.stringValue = accessibilityState == .granted
                     ? "Automatic paste is ready."
                     : "Copy-only mode remains available. Open System Settings if you want automatic paste."
-                if accessibilityState == .denied {
-                    actionButton.title = "Open Accessibility Settings"
-                }
-                renderButtons()
+                render()
             }
+        case .complete, .system, .microphone, .insertion, .recovery:
+            return
         case .testDictation:
             let availability = onboardingTestAvailability
             if evidence.testRunning || availability.isOnboardingTestActive {
@@ -740,8 +857,6 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             window?.makeFirstResponder(testField)
             startTest(generation)
             render()
-        default:
-            break
         }
     }
 
@@ -749,6 +864,20 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         guard support.isSupported else {
             window?.close()
             return
+        }
+        if currentStep == .system, !storageHealth.isReady {
+            statusLabel.stringValue = OigoOnboardingEvidenceMachine.statusMessage(for: .storage)
+            renderButtons()
+            return
+        }
+        if currentStep == .language {
+            guard microphoneState == .granted,
+                  evidence.microphoneCanAdvance,
+                  localeSelection.canConfirm else {
+                statusLabel.stringValue = microphoneStatusMessage()
+                renderButtons()
+                return
+            }
         }
         if currentStep == .shortcut {
             let candidate = shortcutRecorder.shortcut
@@ -778,27 +907,19 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
                 return
             }
             saveLanguage(locale)
-        }
-        if currentStep == .recovery, !evidence.canFinishReady {
-            statusLabel.stringValue = storageHealth.isReady
-                ? evidence.statusMessage
-                : OigoOnboardingEvidenceMachine.statusMessage(for: .storage)
-            return
+            selectedInput = selectedInputFromMenu()
+            selectedInputChannel = selectedChannelFromMenu()
+            saveInputSelection(selectedInput, selectedInputChannel)
         }
         if currentStep == .testDictation, !evidence.canFinishReady {
             statusLabel.stringValue = evidence.statusMessage
             renderButtons()
             return
         }
-        if currentStep == .microphone {
-            guard microphoneState == .granted, evidence.microphoneCanAdvance else {
-                statusLabel.stringValue = microphoneStatusMessage()
-                renderButtons()
-                return
-            }
-            selectedInput = selectedInputFromMenu()
-            selectedInputChannel = selectedChannelFromMenu()
-            saveInputSelection(selectedInput, selectedInputChannel)
+        if currentStep == .shortcut, accessibilityState != .granted, !copyOnlySetupAccepted {
+            statusLabel.stringValue = "Allow Accessibility or choose Continue with copy-only."
+            renderButtons()
+            return
         }
         guard let next = nextStep(after: currentStep) else {
             completed = true
@@ -831,24 +952,20 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private func nextStep(after step: OigoOnboardingStep) -> OigoOnboardingStep? {
         switch step {
         case .system: .language
-        case .language: .microphone
-        case .microphone: .shortcut
-        case .shortcut: .insertion
-        case .insertion: .testDictation
-        case .testDictation: .recovery
-        case .recovery, .complete: nil
+        case .language, .microphone: .shortcut
+        case .shortcut, .insertion: .testDictation
+        case .testDictation, .recovery: .complete
+        case .complete: nil
         }
     }
 
     private func previousStep(before step: OigoOnboardingStep) -> OigoOnboardingStep? {
         switch step {
-        case .system, .complete: nil
-        case .language: .system
-        case .microphone: .language
-        case .shortcut: .microphone
-        case .insertion: .shortcut
-        case .testDictation: .insertion
-        case .recovery: .testDictation
+        case .system: nil
+        case .language, .microphone: .system
+        case .shortcut, .insertion: .language
+        case .testDictation, .recovery: .shortcut
+        case .complete: .testDictation
         }
     }
 
@@ -858,7 +975,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func moveToStep(_ step: OigoOnboardingStep) {
-        let leavingMicrophone = currentStep == .microphone && step != .microphone
+        let leavingMicrophone = currentStep == .language && step != .language
         let leavingTest = currentStep == .testDictation && step != .testDictation
         if leavingMicrophone || leavingTest {
             releaseOnboardingResources(cancelActiveTest: leavingTest)
@@ -867,13 +984,13 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         if currentStep == .language {
             localeSelection.revalidate()
         }
-        if currentStep == .microphone, microphoneState == .granted {
+        if currentStep == .language, microphoneState == .granted {
             restartSourceProbe()
         }
         if currentStep == .testDictation {
             testField.stringValue = ""
         }
-        saveStep(step)
+        saveStep(step, copyOnlySetupAccepted)
         render()
     }
 

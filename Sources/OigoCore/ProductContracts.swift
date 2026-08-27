@@ -356,6 +356,55 @@ public struct OigoSettings: Codable, Equatable, Sendable {
     }
 }
 
+public enum OigoSettingsPane: String, CaseIterable, Codable, Hashable, Sendable {
+    case general
+    case dictation
+    case dictionary
+    case dataPrivacy = "data-privacy"
+
+    public var title: String {
+        switch self {
+        case .general:
+            "General"
+        case .dictation:
+            "Dictation"
+        case .dictionary:
+            "Dictionary"
+        case .dataPrivacy:
+            "Data & Privacy"
+        }
+    }
+}
+
+public enum OigoSettingsField: String, CaseIterable, Hashable, Sendable {
+    case defaultMode
+    case showVolatilePreview
+    case audioRetention
+    case keepSuccessfulAudioIndefinitely
+    case globalShortcut
+    case selectedInput
+    case selectedInputChannel
+    case localeIdentifier
+    case launchAtLogin
+}
+
+public enum OigoSettingsCommitPolicy {
+    public static let immediate: Set<OigoSettingsField> = [
+        .defaultMode,
+        .showVolatilePreview,
+        .audioRetention,
+        .keepSuccessfulAudioIndefinitely
+    ]
+
+    public static let transactional: Set<OigoSettingsField> = [
+        .globalShortcut,
+        .selectedInput,
+        .selectedInputChannel,
+        .localeIdentifier,
+        .launchAtLogin
+    ]
+}
+
 public enum OigoSettingsStoreError: Error, Equatable, LocalizedError, Sendable {
     case encodingFailed(String)
     case writeFailed(String)
@@ -526,6 +575,110 @@ public enum OigoOnboardingStep: String, Codable, CaseIterable, Sendable {
     }
 }
 
+public enum OigoOnboardingStage: String, CaseIterable, Codable, Sendable {
+    case macAndStorage
+    case microphoneAndLanguage
+    case shortcutAndInsertion
+    case tryIt
+    case done
+
+    public var ordinal: Int {
+        switch self {
+        case .macAndStorage:
+            1
+        case .microphoneAndLanguage:
+            2
+        case .shortcutAndInsertion:
+            3
+        case .tryIt:
+            4
+        case .done:
+            5
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .macAndStorage:
+            "Mac & Storage"
+        case .microphoneAndLanguage:
+            "Microphone & Language"
+        case .shortcutAndInsertion:
+            "Shortcut & Insertion"
+        case .tryIt:
+            "Try It"
+        case .done:
+            "Done"
+        }
+    }
+
+    public var next: OigoOnboardingStage? {
+        switch self {
+        case .macAndStorage:
+            .microphoneAndLanguage
+        case .microphoneAndLanguage:
+            .shortcutAndInsertion
+        case .shortcutAndInsertion:
+            .tryIt
+        case .tryIt:
+            .done
+        case .done:
+            nil
+        }
+    }
+
+    public var previous: OigoOnboardingStage? {
+        switch self {
+        case .macAndStorage:
+            nil
+        case .microphoneAndLanguage:
+            .macAndStorage
+        case .shortcutAndInsertion:
+            .microphoneAndLanguage
+        case .tryIt:
+            .shortcutAndInsertion
+        case .done:
+            .tryIt
+        }
+    }
+
+    public var entryStep: OigoOnboardingStep {
+        switch self {
+        case .macAndStorage:
+            .system
+        case .microphoneAndLanguage:
+            .language
+        case .shortcutAndInsertion:
+            .shortcut
+        case .tryIt:
+            .testDictation
+        case .done:
+            .complete
+        }
+    }
+
+    public static func from(legacyStep: OigoOnboardingStep) -> Self {
+        switch legacyStep {
+        case .system:
+            .macAndStorage
+        case .language, .microphone:
+            .microphoneAndLanguage
+        case .shortcut, .insertion:
+            .shortcutAndInsertion
+        case .testDictation, .recovery:
+            .tryIt
+        case .complete:
+            .done
+        }
+    }
+}
+
+public extension OigoOnboardingStep {
+    var migratedForFourStageFlow: Self {
+        OigoOnboardingStage.from(legacyStep: self).entryStep
+    }
+}
+
 public enum OigoOnboardingTestOutcome: String, Equatable, Sendable {
     case pending
     case passed
@@ -549,9 +702,22 @@ public enum OigoOnboardingTestOutcome: String, Equatable, Sendable {
 
 public struct OigoOnboardingState: Codable, Equatable, Sendable {
     public var step: OigoOnboardingStep
+    public var copyOnlyAccepted: Bool
 
-    public init(step: OigoOnboardingStep = .system) {
+    public init(step: OigoOnboardingStep = .system, copyOnlyAccepted: Bool = false) {
         self.step = step
+        self.copyOnlyAccepted = copyOnlyAccepted
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case step
+        case copyOnlyAccepted
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        step = try container.decode(OigoOnboardingStep.self, forKey: .step)
+        copyOnlyAccepted = try container.decodeIfPresent(Bool.self, forKey: .copyOnlyAccepted) ?? false
     }
 
     public var isComplete: Bool {
@@ -583,7 +749,12 @@ public final class OigoOnboardingStore {
     }
 
     public func markCompleted() {
-        save(OigoOnboardingState(step: .complete))
+        save(
+            OigoOnboardingState(
+                step: .complete,
+                copyOnlyAccepted: load().copyOnlyAccepted
+            )
+        )
     }
 
     public func rerun() {

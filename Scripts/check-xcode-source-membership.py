@@ -1,18 +1,30 @@
 #!/usr/bin/env python3
-"""Fail unless each production Swift file is compiled into the matching Xcode target."""
-
 import json
 import os
 import subprocess
 import sys
 
-PRODUCTION_ROOTS = {
+REQUIRED_PRODUCTION_ROOTS = {
     "Sources/Oigo": "Oigo",
     "Sources/OigoCore": "OigoCore",
     "Sources/OigoCapture": "OigoCapture",
     "Sources/OigoTranscription": "OigoTranscription",
     "Sources/OigoInsertion": "OigoInsertion",
     "Sources/OigoHotKey": "OigoHotKey",
+}
+
+OPTIONAL_DECLARED_ROOTS = {
+    "Sources/MacUtilityUI": "MacUtilityUI",
+    "Sources/Oigo/UI/Presentation": "OigoPresentation",
+    "Sources/OigoUIGallery": "OigoUIGallery",
+    "Tests/OigoNativeUIContractTests": "OigoNativeUIContractTests",
+}
+
+DECLARED_ROOTS = REQUIRED_PRODUCTION_ROOTS | OPTIONAL_DECLARED_ROOTS
+
+EXPECTED_RESOURCES = {
+    "Oigo": {"Oigo/Assets.xcassets"},
+    "OigoUIGallery": set(),
 }
 
 
@@ -68,7 +80,7 @@ def file_repo_path(objects, file_ref_id, parents, cache):
     return os.path.normpath(joined)
 
 
-def compiled_paths_by_target(objects):
+def compiled_paths_by_target(objects, repo_root):
     parents = group_parents(objects)
     cache = {}
     phase_to_target = {}
@@ -95,18 +107,83 @@ def compiled_paths_by_target(objects):
                     % (target_name, path)
                 )
             compiled[target_name].add(path)
+
+    for obj in objects.values():
+        if obj.get("isa") != "PBXNativeTarget":
+            continue
+        target_name = obj.get("name")
+        compiled.setdefault(target_name, set())
+        for group_id in obj.get("fileSystemSynchronizedGroups", []):
+            group = objects.get(group_id, {})
+            if group.get("isa") != "PBXFileSystemSynchronizedRootGroup":
+                raise SystemExit(
+                    "Xcode target %s has an invalid synchronized source group"
+                    % target_name
+                )
+            relative_root = os.path.normpath(group.get("path", ""))
+            if not relative_root or relative_root.startswith(".."):
+                raise SystemExit(
+                    "Xcode target %s has an unsafe synchronized source root"
+                    % target_name
+                )
+            directory = os.path.join(repo_root, relative_root)
+            for walk_root, _, filenames in os.walk(directory):
+                for name in filenames:
+                    if name.endswith(".swift"):
+                        full = os.path.join(walk_root, name)
+                        compiled[target_name].add(
+                            os.path.normpath(os.path.relpath(full, repo_root))
+                        )
     if not compiled:
         raise SystemExit("Oigo.xcodeproj has no Swift sources phases")
     return compiled
 
 
+def resource_paths_by_target(objects):
+    parents = group_parents(objects)
+    cache = {}
+    resources = {}
+    for obj in objects.values():
+        if obj.get("isa") != "PBXNativeTarget":
+            continue
+        target_name = obj.get("name")
+        for phase_id in obj.get("buildPhases", []):
+            phase = objects.get(phase_id, {})
+            if phase.get("isa") != "PBXResourcesBuildPhase":
+                continue
+            resources.setdefault(target_name, set())
+            for build_file_id in phase.get("files", []):
+                build_file = objects.get(build_file_id, {})
+                file_ref_id = build_file.get("fileRef")
+                path = file_repo_path(objects, file_ref_id, parents, cache)
+                if not path:
+                    raise SystemExit(
+                        "Xcode target %s has an unresolved resource" % target_name
+                    )
+                resources[target_name].add(path)
+    return resources
+
+
 def disk_paths_by_target(repo_root):
     expected = {}
-    for relative_root, target in PRODUCTION_ROOTS.items():
+    for relative_root, target in DECLARED_ROOTS.items():
         directory = os.path.join(repo_root, relative_root)
+        if not os.path.isdir(directory):
+            if relative_root in REQUIRED_PRODUCTION_ROOTS:
+                raise SystemExit("%s is missing" % relative_root)
+            continue
         expected.setdefault(target, set())
         found = False
         for walk_root, _, filenames in os.walk(directory):
+            relative_walk_root = os.path.normpath(os.path.relpath(walk_root, repo_root))
+            if any(
+                relative_walk_root == nested_root
+                or relative_walk_root.startswith(nested_root + os.sep)
+                for nested_root, nested_target in DECLARED_ROOTS.items()
+                if nested_target != target
+                and nested_root.startswith(relative_root + os.sep)
+            ):
+                continue
             for name in filenames:
                 if not name.endswith(".swift"):
                     continue
@@ -114,7 +191,7 @@ def disk_paths_by_target(repo_root):
                 full = os.path.join(walk_root, name)
                 rel = os.path.relpath(full, repo_root)
                 expected[target].add(os.path.normpath(rel))
-        if not found:
+        if not found and relative_root in REQUIRED_PRODUCTION_ROOTS:
             raise SystemExit("%s has no Swift sources" % relative_root)
     return expected
 
@@ -125,11 +202,12 @@ def main():
     repo_root = os.path.abspath(sys.argv[1])
     pbxproj = os.path.join(repo_root, "Oigo.xcodeproj/project.pbxproj")
     objects = load_objects(pbxproj)
-    compiled = compiled_paths_by_target(objects)
+    compiled = compiled_paths_by_target(objects, repo_root)
+    resources = resource_paths_by_target(objects)
     expected = disk_paths_by_target(repo_root)
     problems = []
     for target in sorted(set(compiled) | set(expected)):
-        if target not in PRODUCTION_ROOTS.values() and compiled.get(target):
+        if target not in DECLARED_ROOTS.values() and compiled.get(target):
             problems.append(
                 "unexpected Xcode native target compiles Swift: %s (%s)"
                 % (target, ", ".join(sorted(compiled[target])))
@@ -148,9 +226,22 @@ def main():
                 "%s compiles paths not in its production root: %s"
                 % (target, ", ".join(extra))
             )
+    for target, want in EXPECTED_RESOURCES.items():
+        have = resources.get(target, set())
+        missing = sorted(want - have)
+        extra = sorted(have - want)
+        if missing:
+            problems.append(
+                "%s missing Xcode resources: %s" % (target, ", ".join(missing))
+            )
+        if extra:
+            problems.append(
+                "%s contains undeclared Xcode resources: %s"
+                % (target, ", ".join(extra))
+            )
     if problems:
         raise SystemExit("; ".join(problems))
-    print("GREEN: every production source is compiled into the correct Xcode target")
+    print("GREEN: declared sources and production resources match Xcode targets")
 
 
 if __name__ == "__main__":

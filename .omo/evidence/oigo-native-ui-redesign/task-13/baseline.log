@@ -1,0 +1,17 @@
+SCENARIO baseline unchanged Task 12 behavior
+SOURCE_SHA 670f57e81652cd8d5d6c081810634580d1d74d70
+COMMAND swift run oigo-issue9-contract-tests
+RESULT exit=0 observable=PASS
+COMMAND swift run oigo-issue7-contract-tests
+RESULT exit=0 observable=PASS
+COMMAND swift run oigo-issue10-contract-tests
+RESULT exit=0 observable=PASS
+COMMAND swift run oigo-native-ui-contract-tests --scenario popover-state-matrix --fixture exhaustive
+RESULT exit=0 observable=PASS
+CHARACTERIZATION mode_persistence=save-before-local-commit
+CHARACTERIZATION input_persistence=existing-settings-transaction
+CHARACTERIZATION latest_summary=listHistoryReport-limit-1-event-driven
+CHARACTERIZATION copy=body-read-on-invocation-only
+CHARACTERIZATION paste_again=existing-InsertionPasteAgainFlow
+CHARACTERIZATION retry=existing-operation-gate
+CHARACTERIZATION dismissal=popover-close-does-not-cancel-dictation

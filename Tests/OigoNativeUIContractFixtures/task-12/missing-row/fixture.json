@@ -1,0 +1,24 @@
+{
+  "name": "missing-row",
+  "rows": [
+    "storage-checking", "storage-ready-idle", "storage-unavailable",
+    "shortcut-inactive-conflict", "mic-permission-unavailable", "selected-input-unavailable",
+    "language-assets-checking-installing", "language-assets-unavailable",
+    "accessibility-unavailable", "preparing", "recording", "finalizing-cleaning-inserting",
+    "paste-event-attempted", "paste-owned-field-verified", "copied-only", "cleanup-fallback",
+    "insertion-failure", "retry-required", "cancelled-before-durable-raw",
+    "cancelled-after-durable-raw", "interrupted", "shutting-down"
+  ],
+  "expectedSections": [
+    "header", "primary-action", "shortcut", "mode", "microphone",
+    "latest-dictation", "footer"
+  ],
+  "popoverWidth": 340,
+  "healthyNoScroll": true,
+  "failures": {
+    "storage": true,
+    "microphone": true,
+    "shortcut": true,
+    "accessibility": true
+  }
+}

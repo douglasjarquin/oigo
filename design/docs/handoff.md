@@ -35,3 +35,9 @@ Design deliverables in this project (open in a browser; all clickable, Light/Dar
 - These are HTML design prototypes, not AppKit measurements: idle CPU, footprint, launch-to-menu, HUD latency, History first-page latency, main-thread stalls are INCONCLUSIVE until measured on a native host.
 - `docs/ui-audit.md` and `docs/ui-performance.md` require the actual repository/build host and are left to implementation.
 - HUD positioning fallback order and Paste Again handoff are specified in screen-map.md but need Accessibility-API validation on device.
+
+## Phase 5 implementation appendix
+
+The integrated application command menu, safe Escape routing, window restoration identifiers, and visible-frame clamping are implemented in the native controllers and app delegate.
+History and Settings remain single-controller instances owned by the app delegate, and transient operation state is not serialized into restoration.
+Native VoiceOver, TCC, signed-release, notarization, and multi-application display validation remain explicitly environment-dependent in `docs/ui-performance.md`.

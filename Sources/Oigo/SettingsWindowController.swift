@@ -4,8 +4,14 @@ import OigoCore
 import OigoHotKey
 
 @MainActor
-final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate {
+final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSTableViewDataSource, NSTableViewDelegate {
+    private static let selectedPaneKey = "oigo.settings.selected-pane"
+    private let paneContainer = NSView()
+    private var paneViews: [OigoSettingsPane: NSView] = [:]
+    private var selectedPane: OigoSettingsPane
+    private var committedSettings: OigoSettings
     private let shortcutRecorder: ShortcutRecorderControl
+    private let loadSupportedLocales: () async -> [String]
     private let inputPopup = NSPopUpButton()
     private let channelPopup = NSPopUpButton()
     private let localePopup = NSPopUpButton()
@@ -22,6 +28,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
     private var retryStorageButton: NSButton?
     private let shortcutStatus = NSTextField(wrappingLabelWithString: "")
     private let messageLabel = NSTextField(labelWithString: "")
+    private let dictationMessage = NSTextField(wrappingLabelWithString: "")
     private let registrationStatus: () -> GlobalShortcutRegistrationStatus
     private let registrationError: () -> String?
     private let save: (OigoSettings) -> String?
@@ -39,6 +46,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
     private let previewDictionary: (String) -> String
     private let addStarterTerms: () -> (DictionaryDocument, String?)
     private var dictionaryEntries: [DictionaryEntry]
+    private var committedDictionaryEntries: [DictionaryEntry]
     private let dictionaryTable = NSTableView()
     private let dictionaryMessage = NSTextField(wrappingLabelWithString: "")
     private let sampleField = NSTextField()
@@ -54,9 +62,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
     private var inputDevices: [OigoInputDevice]
     private var localeSelection: OigoLocaleSelectionState
     private var localeMenuIdentifiers: [String] = []
-    private var isSaving = false
+    private var isCheckingLocale = false
     private var isDismissed = false
     private var saveTask: Task<Void, Never>?
+    private var localeLoadTask: Task<Void, Never>?
+    private var hasLoadedSupportedLocales = false
     private let nextDictationNotice = NSTextField(
         wrappingLabelWithString: NextDictationSettingsPolicy.nextDictationCopy
     )
@@ -67,6 +77,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         settings: OigoSettings,
         inputDevices: [OigoInputDevice],
         supportedLocales: [String],
+        loadSupportedLocales: @escaping () async -> [String],
         microphoneState: OigoPermissionState,
         accessibilityState: OigoPermissionState,
         storageHealth: DurableSessionHealth,
@@ -95,6 +106,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
     ) {
         self.registrationStatus = registrationStatus
         self.registrationError = registrationError
+        committedSettings = settings
+        self.loadSupportedLocales = loadSupportedLocales
+        selectedPane = OigoSettingsPane(
+            rawValue: UserDefaults.standard.string(forKey: Self.selectedPaneKey) ?? ""
+        ) ?? .general
         selectedInput = settings.selectedInput
         selectedInputChannel = settings.selectedInputChannel
         self.inputDevices = inputDevices
@@ -117,6 +133,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         self.previewDictionary = previewDictionary
         self.addStarterTerms = addStarterTerms
         dictionaryEntries = dictionaryDocument.entries
+        committedDictionaryEntries = dictionaryDocument.entries
         self.launchAtLoginStatusProvider = launchAtLoginStatusProvider
         self.openLoginItemsSettings = openLoginItemsSettings
         self.isPresented = isPresented
@@ -126,17 +143,35 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         committedShortcut = settings.globalShortcut
         shortcutRecorder = ShortcutRecorderControl(shortcut: settings.globalShortcut)
 
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 880),
+        let window = OigoUtilityWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 640),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Oigo Settings"
-        window.minSize = NSSize(width: 520, height: 720)
+        window.minSize = NSSize(width: 640, height: 520)
+        window.identifier = NSUserInterfaceItemIdentifier("com.oigo.settings.window")
+        window.setFrameAutosaveName("Oigo.SettingsWindow")
+        window.isRestorable = true
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        window.onEscape = { [weak self] in
+            guard let self else { return }
+            var available: Set<OigoEscapeAction> = [.closeUtilityWindow]
+            if shortcutRecorder.isRecording { available.insert(.cancelEditor) }
+            if isCheckingLocale { available.insert(.cancelBoundedHandoff) }
+            switch OigoUIIntegrationPolicy.resolveEscapeAction(from: available) {
+            case .cancelEditor:
+                shortcutRecorder.cancelRecording()
+            case .cancelBoundedHandoff:
+                cancelLocaleWork()
+            default:
+                self.window?.performClose(nil)
+            }
+        }
+        configureToolbar()
         configureInputMenu(devices: inputDevices, selected: selectedInput)
         configureChannelMenu()
         localePopup.autoenablesItems = false
@@ -150,6 +185,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         retentionPopup.selectItem(withTitle: settings.audioRetention.displayName)
         previewCheckbox.state = settings.showVolatilePreview ? .on : .off
         keepAudioCheckbox.state = settings.keepSuccessfulAudioIndefinitely ? .on : .off
+        modePopup.target = self
+        modePopup.action = #selector(commitChangedSettings)
+        retentionPopup.target = self
+        retentionPopup.action = #selector(commitChangedSettings)
+        previewCheckbox.target = self
+        previewCheckbox.action = #selector(commitChangedSettings)
+        keepAudioCheckbox.target = self
+        keepAudioCheckbox.action = #selector(commitChangedSettings)
+        launchAtLoginCheckbox.target = self
+        launchAtLoginCheckbox.action = #selector(commitChangedSettings)
+        shortcutRecorder.onCandidateChange = { [weak self] _ in
+            self?.commitChangedSettings()
+        }
         updatePermissionLabels(microphone: microphoneState, accessibility: accessibilityState)
         configureWindow()
         setStorageHealth(storageHealth)
@@ -161,6 +209,104 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         fatalError("init(coder:) has not been implemented")
     }
 
+    private func configureToolbar() {
+        let toolbar = NSToolbar(identifier: "oigo.settings.toolbar")
+        toolbar.delegate = self
+        toolbar.allowsUserCustomization = false
+        toolbar.autosavesConfiguration = false
+        toolbar.displayMode = .iconAndLabel
+        toolbar.selectedItemIdentifier = NSToolbarItem.Identifier(selectedPane.rawValue)
+        window?.toolbar = toolbar
+        window?.toolbarStyle = .preference
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        _ = toolbar
+        return OigoSettingsPane.allCases.map { NSToolbarItem.Identifier($0.rawValue) }
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarAllowedItemIdentifiers(toolbar)
+    }
+
+    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarAllowedItemIdentifiers(toolbar)
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        _ = toolbar
+        _ = flag
+        guard let pane = OigoSettingsPane(rawValue: itemIdentifier.rawValue) else {
+            return nil
+        }
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.label = pane.title
+        item.paletteLabel = pane.title
+        item.toolTip = pane.title + " settings"
+        item.image = NSImage(
+            systemSymbolName: pane == .general ? "gearshape" : pane == .dictation ? "waveform" : pane == .dictionary ? "text.book.closed" : "lock.shield",
+            accessibilityDescription: pane.title
+        )
+        item.target = self
+        item.action = #selector(selectToolbarPane(_:))
+        return item
+    }
+
+    @objc private func selectToolbarPane(_ sender: NSToolbarItem) {
+        guard let pane = OigoSettingsPane(rawValue: sender.itemIdentifier.rawValue) else {
+            return
+        }
+        selectPane(pane)
+    }
+
+    private func selectPane(_ pane: OigoSettingsPane, loadLocales: Bool = true) {
+        if pane != .dictation {
+            cancelLocaleWork()
+        }
+        selectedPane = pane
+        UserDefaults.standard.set(pane.rawValue, forKey: Self.selectedPaneKey)
+        for (candidate, view) in paneViews {
+            view.isHidden = candidate != pane
+        }
+        window?.toolbar?.selectedItemIdentifier = NSToolbarItem.Identifier(pane.rawValue)
+        window?.windowController?.window?.makeFirstResponder(paneViews[pane])
+        if loadLocales, pane == .dictation {
+            loadSupportedLocalesIfNeeded()
+        }
+    }
+
+    private func loadSupportedLocalesIfNeeded() {
+        guard !hasLoadedSupportedLocales, localeLoadTask == nil else {
+            return
+        }
+        let loadLocales = loadSupportedLocales
+        localeLoadTask = Task { @MainActor [weak self] in
+            let locales = await loadLocales()
+            guard let self, !Task.isCancelled, !isDismissed, selectedPane == .dictation else {
+                return
+            }
+            localeSelection.loadSupported(locales)
+            syncLocalePopup()
+            hasLoadedSupportedLocales = true
+            localeLoadTask = nil
+        }
+    }
+
+    private func cancelLocaleWork() {
+        localeLoadTask?.cancel()
+        localeLoadTask = nil
+        hasLoadedSupportedLocales = false
+        saveTask?.cancel()
+        saveTask = nil
+        isCheckingLocale = false
+        localeSelection.abandonUncommitted()
+        syncLocalePopup()
+    }
+
     func windowDidBecomeKey(_ notification: Notification) {
         _ = notification
         let states = refreshPermissions()
@@ -169,11 +315,32 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         setLaunchAtLoginStatus(launchAtLoginStatusProvider())
     }
 
+    func showAndFocus() {
+        let wasVisible = window?.isVisible == true
+        showWindow(nil)
+        if !wasVisible, window?.frame.origin == .zero {
+            window?.center()
+        }
+        clampWindowToVisibleFrame()
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        _ = notification
+        clampWindowToVisibleFrame()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        _ = notification
+        clampWindowToVisibleFrame()
+    }
+
     func windowWillClose(_ notification: Notification) {
         _ = notification
         saveTask?.cancel()
         saveTask = nil
-        isSaving = false
+        isCheckingLocale = false
         isDismissed = true
         localeSelection.abandonUncommitted()
         shortcutRecorder.cancelRecording()
@@ -189,6 +356,26 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         configureChannelMenu()
     }
 
+    private func clampWindowToVisibleFrame() {
+        guard let window else {
+            return
+        }
+        let screen = window.screen ?? NSScreen.screens.first(where: { $0.visibleFrame.intersects(window.frame) }) ?? NSScreen.main
+        guard let screen else {
+            return
+        }
+        let visible = screen.visibleFrame
+        var frame = window.frame
+        frame.size.width = min(max(frame.width, window.minSize.width), visible.width)
+        frame.size.height = min(max(frame.height, window.minSize.height), visible.height)
+        frame.origin.x = min(max(frame.origin.x, visible.minX), visible.maxX - frame.width)
+        frame.origin.y = min(max(frame.origin.y, visible.minY), visible.maxY - frame.height)
+        guard frame != window.frame else {
+            return
+        }
+        window.setFrame(frame, display: false)
+    }
+
     private func configureWindow() {
         guard let contentView = window?.contentView else {
             return
@@ -197,10 +384,18 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
             self?.messageLabel.stringValue = message
         }
 
-        let title = NSTextField(labelWithString: "Minimal settings")
-        title.font = .boldSystemFont(ofSize: 18)
+        func heading(_ text: String) -> NSTextField {
+            let label = NSTextField(labelWithString: text)
+            label.font = .boldSystemFont(ofSize: 20)
+            return label
+        }
+
+        let generalTitle = heading("General")
+        let dictationTitle = heading("Dictation")
+        let dictionaryPaneTitle = heading("Dictionary")
+        let privacyPaneTitle = heading("Data & Privacy")
         let description = NSTextField(
-            wrappingLabelWithString: "Changes apply immediately after Save. Oigo only checks permissions when this window becomes active or when you refresh them."
+            wrappingLabelWithString: "Changes apply immediately. Oigo checks permissions when this window becomes active or when you refresh them."
         )
         description.textColor = .secondaryLabelColor
         nextDictationNotice.textColor = .secondaryLabelColor
@@ -234,9 +429,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
             wrappingLabelWithString: "Oigo is a menu-bar dictation app for macOS 26 or later on Apple silicon. Microphone and Accessibility permissions are required. Instant inserts the recognized transcript; Clean optionally rewrites it on this Mac. Recordings, transcripts, and the custom dictionary live in Application Support/Oigo. The README and privacy statement ship with the download."
         )
         helpBody.textColor = .secondaryLabelColor
-        let saveButton = NSButton(title: "Save", target: self, action: #selector(saveSettings))
-        saveButton.keyEquivalent = "\r"
-
         microphoneStatus.font = .systemFont(ofSize: 12)
         accessibilityStatus.font = .systemFont(ofSize: 12)
         storageStatus.font = .systemFont(ofSize: 12)
@@ -249,6 +441,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         messageLabel.font = .systemFont(ofSize: 12)
         messageLabel.textColor = .secondaryLabelColor
         messageLabel.maximumNumberOfLines = 2
+        dictationMessage.font = .systemFont(ofSize: 12)
+        dictationMessage.textColor = .systemOrange
+        dictationMessage.maximumNumberOfLines = 3
 
         let shortcutRow = NSStackView(views: [shortcutTitle, shortcutRecorder])
         shortcutRow.orientation = .horizontal
@@ -264,8 +459,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         let channelRow = row(label: channelLabel, control: channelPopup)
         inputPopup.target = self
         inputPopup.action = #selector(inputSelectionChanged)
-        let dictionaryTitle = NSTextField(labelWithString: "Dictionary")
-        dictionaryTitle.font = .boldSystemFont(ofSize: 13)
         let dictionaryHelp = NSTextField(
             wrappingLabelWithString: "Canonical spellings are supplied to Speech and used for deterministic normalization. Editing the dictionary never rewrites historical transcripts."
         )
@@ -277,7 +470,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         dictionaryScroll.borderType = .bezelBorder
         dictionaryScroll.documentView = dictionaryTable
         dictionaryScroll.translatesAutoresizingMaskIntoConstraints = false
-        dictionaryScroll.heightAnchor.constraint(equalToConstant: 110).isActive = true
+        dictionaryScroll.heightAnchor.constraint(equalToConstant: 240).isActive = true
         let addTermButton = NSButton(title: "Add", target: self, action: #selector(addDictionaryEntry))
         let editTermButton = NSButton(title: "Edit", target: self, action: #selector(editDictionaryEntry))
         let toggleTermButton = NSButton(title: "Enable/Disable", target: self, action: #selector(toggleDictionaryEntry))
@@ -308,72 +501,103 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         storageStack.alignment = .leading
         storageStack.spacing = 6
 
-        let actionStack = NSStackView(views: [rerunButton, historyButton, storageStack, deleteButton, exportButton])
-        actionStack.orientation = .vertical
-        actionStack.alignment = .leading
-        actionStack.spacing = 8
+        let privacyActionStack = NSStackView(views: [historyButton, storageStack, deleteButton, exportButton])
+        privacyActionStack.orientation = .vertical
+        privacyActionStack.alignment = .leading
+        privacyActionStack.spacing = 8
 
-        let stack = NSStackView(views: [
-            title,
+        let generalStack = NSStackView(views: [
+            generalTitle,
             description,
-            nextDictationNotice,
             shortcutRow,
             shortcutHelp,
             shortcutStatus,
-            inputRow,
-            channelRow,
-            modeRow,
-            localeRow,
-            retentionRow,
-            previewCheckbox,
-            keepAudioCheckbox,
             launchAtLoginCheckbox,
             launchAtLoginStatusLabel,
             openLoginItemsButton,
-            dictionaryTitle,
+            previewCheckbox,
+            rerunButton,
+            messageLabel
+        ])
+        let dictationStack = NSStackView(views: [
+            dictationTitle,
+            nextDictationNotice,
+            modeRow,
+            inputRow,
+            channelRow,
+            localeRow,
+            retentionRow,
+            keepAudioCheckbox,
+            dictationMessage
+        ])
+        let dictionaryStack = NSStackView(views: [
+            dictionaryPaneTitle,
             dictionaryHelp,
             dictionaryScroll,
             dictionaryButtons,
             sampleRow,
             previewLabel,
-            dictionaryMessage,
+            dictionaryMessage
+        ])
+        let privacyStack = NSStackView(views: [
+            privacyPaneTitle,
             permissionsTitle,
             permissionStack,
-            actionStack,
+            privacyActionStack,
             helpTitle,
-            helpBody,
-            messageLabel,
-            saveButton
+            helpBody
         ])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(stack)
+        let paneStacks: [(OigoSettingsPane, NSStackView)] = [
+            (.general, generalStack),
+            (.dictation, dictationStack),
+            (.dictionary, dictionaryStack),
+            (.dataPrivacy, privacyStack)
+        ]
+        paneContainer.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(paneContainer)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -24),
-            description.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            nextDictationNotice.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            shortcutHelp.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            modeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            localeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            retentionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            inputRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            channelRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            dictionaryHelp.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            dictionaryScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            sampleRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            previewLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            dictionaryMessage.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            helpBody.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            saveButton.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
+            paneContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 32),
+            paneContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -32),
+            paneContainer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
+            paneContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -24)
+        ])
+        paneViews = Dictionary(uniqueKeysWithValues: paneStacks.map { ($0.0, $0.1) })
+        for stack in paneViews.values.compactMap({ $0 as? NSStackView }) {
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = 14
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            paneContainer.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: paneContainer.leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: paneContainer.trailingAnchor),
+                stack.topAnchor.constraint(equalTo: paneContainer.topAnchor),
+                stack.bottomAnchor.constraint(lessThanOrEqualTo: paneContainer.bottomAnchor)
+            ])
+        }
+        NSLayoutConstraint.activate([
+            generalTitle.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            dictationTitle.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            dictionaryPaneTitle.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            shortcutHelp.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            description.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            nextDictationNotice.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            modeRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            localeRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            retentionRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            inputRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            channelRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            dictionaryHelp.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            dictionaryScroll.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            sampleRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            previewLabel.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            dictionaryMessage.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            helpBody.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             localePopup.widthAnchor.constraint(equalToConstant: 260),
             inputPopup.widthAnchor.constraint(equalTo: localePopup.widthAnchor),
             channelPopup.widthAnchor.constraint(equalTo: localePopup.widthAnchor)
         ])
+        selectPane(selectedPane, loadLocales: false)
         updateShortcutStatus()
     }
 
@@ -423,6 +647,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         selectedInput = selectedInputFromMenu()
         selectedInputChannel = selectedChannelFromMenu()
         configureChannelMenu()
+        commitChangedSettings()
     }
 
     private func syncLocalePopup() {
@@ -444,7 +669,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
             return
         }
         localeSelection.select(identifier)
-        messageLabel.stringValue = localeSelection.statusMessage
+        dictationMessage.stringValue = localeSelection.statusMessage
+        commitChangedSettings()
     }
 
     private func selectedLocaleFromMenu() -> String? {
@@ -584,10 +810,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         }
     }
 
-    @objc private func saveSettings() {
-        guard !isSaving else {
-            return
-        }
+    @objc private func commitChangedSettings() {
         guard let modeTitle = modePopup.selectedItem?.title,
               let mode = OigoProcessingMode.allCases.first(where: { $0.displayName == modeTitle }),
               let retentionTitle = retentionPopup.selectedItem?.title,
@@ -619,13 +842,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
             _ = finishSave(draft, languageUnappliedMessage: nil)
             return
         }
+        if isCheckingLocale {
+            _ = finishSave(
+                draft.with(localeIdentifier: localeSelection.committedIdentifier),
+                languageUnappliedMessage: nil
+            )
+            return
+        }
         guard let request = localeSelection.beginAssetRequest(status: .installing) else {
-            messageLabel.stringValue = localeSelection.statusMessage
+            dictationMessage.stringValue = localeSelection.statusMessage
             NSSound.beep()
             return
         }
-        isSaving = true
-        messageLabel.stringValue = localeSelection.statusMessage
+        isCheckingLocale = true
+        dictationMessage.stringValue = localeSelection.statusMessage
         let inspectAssets = checkSpeechAssets
         saveTask = Task { @MainActor [weak self] in
             let status = await inspectAssets(request.localeIdentifier)
@@ -639,12 +869,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
                 generation: request.generation,
                 status: status
             )
-            isSaving = false
+            isCheckingLocale = false
             if applied,
                localeSelection.canConfirm,
                let locale = localeSelection.selectedIdentifier {
                 let saved = finishSave(
-                    draft.with(localeIdentifier: locale),
+                    committedSettings.with(localeIdentifier: locale),
                     languageUnappliedMessage: nil
                 )
                 if saved {
@@ -660,7 +890,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
                 syncLocalePopup()
             }
             _ = finishSave(
-                draft,
+                committedSettings,
                 languageUnappliedMessage: "Settings saved. Dictation language was not changed: " + reason
             )
         }
@@ -674,20 +904,36 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         let result = save(settings)
         if let result {
             messageLabel.stringValue = result
+            restoreCommittedControls()
             updateShortcutStatus()
             setLaunchAtLoginStatus(launchAtLoginStatusProvider())
             NSSound.beep()
             return false
         }
+        committedSettings = settings
         lastRequestedLaunchAtLogin = settings.launchAtLogin
         committedShortcut = settings.globalShortcut
         if let languageUnappliedMessage {
-            messageLabel.stringValue = languageUnappliedMessage
+            dictationMessage.stringValue = languageUnappliedMessage
             NSSound.beep()
             return true
         }
-        window?.close()
+        messageLabel.stringValue = "Saved."
         return true
+    }
+
+    private func restoreCommittedControls() {
+        modePopup.selectItem(withTitle: committedSettings.defaultMode.displayName)
+        retentionPopup.selectItem(withTitle: committedSettings.audioRetention.displayName)
+        previewCheckbox.state = committedSettings.showVolatilePreview ? .on : .off
+        keepAudioCheckbox.state = committedSettings.keepSuccessfulAudioIndefinitely ? .on : .off
+        selectedInput = committedSettings.selectedInput
+        selectedInputChannel = committedSettings.selectedInputChannel
+        configureInputMenu(devices: inputDevices, selected: selectedInput)
+        configureChannelMenu()
+        localeSelection.abandonUncommitted()
+        syncLocalePopup()
+        shortcutRecorder.restoreCandidate(committedShortcut)
     }
 
     private func configureDictionaryTable() {
@@ -782,9 +1028,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
 
     @objc private func addStarterTermsAction() {
         let (document, error) = addStarterTerms()
+        if let error {
+            dictionaryMessage.stringValue = error
+            return
+        }
         dictionaryEntries = document.entries
+        committedDictionaryEntries = document.entries
         dictionaryTable.reloadData()
-        dictionaryMessage.stringValue = error ?? ""
+        dictionaryMessage.stringValue = ""
         previewSampleChanged()
     }
 
@@ -841,8 +1092,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
 
     private func persistDictionaryEntries() {
         if let error = saveDictionary(DictionaryDocument(entries: dictionaryEntries)) {
+            dictionaryEntries = committedDictionaryEntries
             dictionaryMessage.stringValue = error
         } else {
+            committedDictionaryEntries = dictionaryEntries
             dictionaryMessage.stringValue = ""
         }
     }
