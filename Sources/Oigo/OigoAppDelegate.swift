@@ -419,11 +419,15 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func showOnboarding(_ support: OigoSystemSupportResult) {
         let storedState = onboardingStore.load()
-        let initialStep = storedState.isComplete ? .system : storedState.step
+        let initialStep: OigoOnboardingStep = storedState.isComplete
+            ? .system
+            : storedState.step.migratedForFourStageFlow
         let window = OnboardingWindowController(
             support: support,
             initialStep: initialStep,
+            processingMode: settings.defaultMode,
             globalShortcut: settings.globalShortcut,
+            copyOnlyAccepted: storedState.copyOnlyAccepted,
             inputDevices: currentInputDevices(),
             selectedInput: settings.selectedInput,
             selectedInputChannel: settings.selectedInputChannel,
@@ -462,8 +466,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     self.showSettingsPersistenceFailure(error)
                 }
             },
-            saveStep: { [weak self] step in
-                self?.onboardingStore.save(OigoOnboardingState(step: step))
+            saveStep: { [weak self] step, copyOnlyAccepted in
+                self?.onboardingStore.save(
+                    OigoOnboardingState(step: step, copyOnlyAccepted: copyOnlyAccepted)
+                )
             },
             saveInputSelection: { [weak self] selection, channel in
                 guard let self else { return }

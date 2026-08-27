@@ -6,6 +6,58 @@ public enum OigoOnboardingStageStatus: Equatable, Sendable {
     case failed
 }
 
+public enum OigoOnboardingChecklistStatus: Equatable, Sendable {
+    case pending
+    case active
+    case succeeded
+    case failed
+}
+
+public enum OigoOnboardingChecklistItem: String, CaseIterable, Sendable {
+    case shortcutAndAdmission
+    case targetCaptured
+    case durableSession
+    case microphoneCapture
+    case speechAnalysis
+    case recordingFinalized
+    case rawTranscript
+    case cleanup
+    case insertionAndVerification
+
+    public var title: String {
+        switch self {
+        case .shortcutAndAdmission:
+            "Shortcut received and operation admitted"
+        case .targetCaptured:
+            "Destination captured"
+        case .durableSession:
+            "Durable session created"
+        case .microphoneCapture:
+            "Microphone capture started"
+        case .speechAnalysis:
+            "Speech analysis active or truthfully degraded"
+        case .recordingFinalized:
+            "Recording finalized and audio preserved"
+        case .rawTranscript:
+            "Raw transcript persisted"
+        case .cleanup:
+            "Normalization and optional cleanup resolved"
+        case .insertionAndVerification:
+            "Insertion attempted and destination verified or fallback named"
+        }
+    }
+}
+
+public struct OigoOnboardingChecklistRow: Equatable, Sendable {
+    public let item: OigoOnboardingChecklistItem
+    public let status: OigoOnboardingChecklistStatus
+
+    public init(item: OigoOnboardingChecklistItem, status: OigoOnboardingChecklistStatus) {
+        self.item = item
+        self.status = status
+    }
+}
+
 public enum OigoOnboardingFailedStage: String, Equatable, Sendable {
     case storage
     case selectedSource
@@ -87,6 +139,13 @@ public enum OigoOnboardingRecoveryAction: Equatable, Sendable {
 }
 
 public struct OigoOnboardingEvidence: Equatable, Sendable {
+    public var operationAdmitted: OigoOnboardingStageStatus = .notStarted
+    public var targetCaptured: OigoOnboardingStageStatus = .notStarted
+    public var sessionCreated: OigoOnboardingStageStatus = .notStarted
+    public var captureStarted: OigoOnboardingStageStatus = .notStarted
+    public var speechAnalysis: OigoOnboardingStageStatus = .notStarted
+    public var recordingFinalized: OigoOnboardingStageStatus = .notStarted
+    public var rawTranscript: OigoOnboardingStageStatus = .notStarted
     public var storage: OigoOnboardingStageStatus = .notStarted
     public var selectedSource: OigoOnboardingStageStatus = .notStarted
     public var canonicalBuffer: OigoOnboardingStageStatus = .notStarted
@@ -146,6 +205,9 @@ public struct OigoOnboardingProductionReport: Equatable, Sendable {
     public var usedInput: OigoInputSelection
     public var usedChannel: Int
     public var sessionCreated: Bool
+    public var captureStarted: Bool
+    public var recordingFinalized: Bool
+    public var rawTranscriptPersisted: Bool
     public var cafInitialized: Bool
     public var speechFinalized: Bool
     public var transcriptNonempty: Bool
@@ -162,6 +224,9 @@ public struct OigoOnboardingProductionReport: Equatable, Sendable {
         usedInput: OigoInputSelection,
         usedChannel: Int,
         sessionCreated: Bool,
+        captureStarted: Bool? = nil,
+        recordingFinalized: Bool? = nil,
+        rawTranscriptPersisted: Bool? = nil,
         cafInitialized: Bool,
         speechFinalized: Bool,
         transcriptNonempty: Bool,
@@ -177,6 +242,9 @@ public struct OigoOnboardingProductionReport: Equatable, Sendable {
         self.usedInput = usedInput
         self.usedChannel = usedChannel
         self.sessionCreated = sessionCreated
+        self.captureStarted = captureStarted ?? sessionCreated
+        self.recordingFinalized = recordingFinalized ?? cafInitialized
+        self.rawTranscriptPersisted = rawTranscriptPersisted ?? transcriptNonempty
         self.cafInitialized = cafInitialized
         self.speechFinalized = speechFinalized
         self.transcriptNonempty = transcriptNonempty
@@ -203,6 +271,7 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
     public private(set) var storageReady = false
     public private(set) var destinationEditable = false
     public private(set) var destinationCleared = false
+    public private(set) var targetCaptured = false
     public private(set) var probeActive = false
     public private(set) var testRunning = false
     public private(set) var acceptedCanonicalBuffer = false
@@ -238,6 +307,48 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
             && transcriptNonempty
             && clipboardWritten
             && (insertionOutcome == .copied || insertionOutcome == .secureRejected)
+    }
+
+    public var checklist: [OigoOnboardingChecklistRow] {
+        let testStatus: OigoOnboardingChecklistStatus = testRunning ? .active : .pending
+        return [
+            OigoOnboardingChecklistRow(
+                item: .shortcutAndAdmission,
+                status: checklistStatus(evidence.operationAdmitted)
+            ),
+            OigoOnboardingChecklistRow(
+                item: .targetCaptured,
+                status: checklistStatus(evidence.targetCaptured, active: testRunning && !targetCaptured)
+            ),
+            OigoOnboardingChecklistRow(
+                item: .durableSession,
+                status: checklistStatus(evidence.sessionCreated, active: testRunning && boundSessionID == nil)
+            ),
+            OigoOnboardingChecklistRow(
+                item: .microphoneCapture,
+                status: checklistStatus(evidence.captureStarted, active: testRunning)
+            ),
+            OigoOnboardingChecklistRow(
+                item: .speechAnalysis,
+                status: checklistStatus(evidence.speechAnalysis, active: testRunning)
+            ),
+            OigoOnboardingChecklistRow(
+                item: .recordingFinalized,
+                status: checklistStatus(evidence.recordingFinalized)
+            ),
+            OigoOnboardingChecklistRow(
+                item: .rawTranscript,
+                status: checklistStatus(evidence.rawTranscript)
+            ),
+            OigoOnboardingChecklistRow(
+                item: .cleanup,
+                status: checklistStatus(evidence.cleanup)
+            ),
+            OigoOnboardingChecklistRow(
+                item: .insertionAndVerification,
+                status: insertionChecklistStatus(testStatus)
+            )
+        ]
     }
 
     public var failedStage: OigoOnboardingFailedStage? {
@@ -306,6 +417,7 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
         usedInput = nil
         usedChannel = nil
         destinationCleared = false
+        targetCaptured = false
         probeActive = false
         testRunning = false
         acceptedCanonicalBuffer = false
@@ -414,6 +526,7 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
         generation += 1
         testRunning = false
         destinationCleared = false
+        targetCaptured = false
         insertionPath = .none
         insertionInvoked = false
         insertionOutcome = nil
@@ -426,6 +539,13 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
         boundSessionID = nil
         destinationFailure = nil
         evidence.shortcut = .notStarted
+        evidence.operationAdmitted = .succeeded
+        evidence.targetCaptured = .notStarted
+        evidence.sessionCreated = .notStarted
+        evidence.captureStarted = .notStarted
+        evidence.speechAnalysis = .notStarted
+        evidence.recordingFinalized = .notStarted
+        evidence.rawTranscript = .notStarted
         evidence.durableCAF = .notStarted
         evidence.speech = .notStarted
         evidence.cleanup = .notStarted
@@ -457,6 +577,7 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
             return false
         }
         boundSessionID = sessionID
+        evidence.sessionCreated = .succeeded
         return true
     }
 
@@ -466,6 +587,8 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
             return false
         }
         destinationCleared = true
+        targetCaptured = true
+        evidence.targetCaptured = .succeeded
         return true
     }
 
@@ -502,9 +625,19 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
             evidence.selectedSource = .succeeded
         }
         if sessionCreated {
+            evidence.sessionCreated = .succeeded
+            evidence.captureStarted = report.captureStarted ? .succeeded : .failed
+            evidence.speechAnalysis = report.speechFinalized ? .succeeded : .failed
+            evidence.recordingFinalized = report.recordingFinalized ? .succeeded : .failed
+            evidence.rawTranscript = report.rawTranscriptPersisted ? .succeeded : .failed
             evidence.durableCAF = report.cafInitialized ? .succeeded : .failed
             evidence.speech = report.speechFinalized ? .succeeded : .failed
         } else {
+            evidence.sessionCreated = .failed
+            evidence.captureStarted = .failed
+            evidence.speechAnalysis = .notStarted
+            evidence.recordingFinalized = .failed
+            evidence.rawTranscript = .failed
             evidence.durableCAF = .failed
             evidence.speech = .notStarted
             evidence.cleanup = .notStarted
@@ -664,6 +797,35 @@ public struct OigoOnboardingEvidenceMachine: Equatable, Sendable {
             && buffer.sampleRate > 0
             && buffer.frameCount > 0
             && buffer.pcmData.count >= buffer.frameCount * MemoryLayout<Float>.size
+    }
+
+    private func checklistStatus(
+        _ status: OigoOnboardingStageStatus,
+        active: Bool = false
+    ) -> OigoOnboardingChecklistStatus {
+        switch status {
+        case .notStarted:
+            active ? .active : .pending
+        case .succeeded:
+            .succeeded
+        case .failed:
+            .failed
+        }
+    }
+
+    private func insertionChecklistStatus(
+        _ activeStatus: OigoOnboardingChecklistStatus
+    ) -> OigoOnboardingChecklistStatus {
+        switch outcome {
+        case .passed, .copyOnlyAccepted:
+            .succeeded
+        case .skipped:
+            .pending
+        case .failed:
+            .failed
+        case .pending:
+            activeStatus
+        }
     }
 
     private mutating func applyStorageStatus() {
