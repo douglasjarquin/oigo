@@ -786,7 +786,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             _ = finishSave(draft, languageUnappliedMessage: nil)
             return
         }
-        guard !isCheckingLocale else {
+        if isCheckingLocale {
+            _ = finishSave(
+                draft.with(localeIdentifier: localeSelection.committedIdentifier),
+                languageUnappliedMessage: nil
+            )
             return
         }
         guard let request = localeSelection.beginAssetRequest(status: .installing) else {
@@ -814,7 +818,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
                localeSelection.canConfirm,
                let locale = localeSelection.selectedIdentifier {
                 let saved = finishSave(
-                    draft.with(localeIdentifier: locale),
+                    committedSettings.with(localeIdentifier: locale),
                     languageUnappliedMessage: nil
                 )
                 if saved {
@@ -830,7 +834,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
                 syncLocalePopup()
             }
             _ = finishSave(
-                draft,
+                committedSettings,
                 languageUnappliedMessage: "Settings saved. Dictation language was not changed: " + reason
             )
         }
