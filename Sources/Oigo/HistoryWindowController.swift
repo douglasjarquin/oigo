@@ -259,13 +259,13 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         let label = NSTextField(
             wrappingLabelWithString: listDateFormatter.string(from: projection.date)
                 + "  ·  " + (projection.duration.map(Self.durationText) ?? "")
-                + "  ·  " + projection.statusLabel
+                + "\n" + projection.statusLabel
                 + "\n" + projection.summary
         )
         label.font = .systemFont(ofSize: 12)
         label.textColor = .labelColor
         label.lineBreakMode = .byTruncatingTail
-        label.maximumNumberOfLines = 2
+        label.maximumNumberOfLines = 3
         label.setAccessibilityLabel(projection.accessibilityLabel)
         return label
     }
@@ -460,7 +460,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         tableView.delegate = self
         tableView.dataSource = self
         tableView.usesAlternatingRowBackgroundColors = false
-        tableView.rowHeight = 68
+        tableView.rowHeight = 82
         tableView.headerView = NSTableHeaderView()
         tableView.selectionHighlightStyle = .regular
         tableView.allowsMultipleSelection = false

@@ -16,7 +16,7 @@ public struct OigoHistoryRowProjection: Equatable, Sendable {
         statusLabel = status.label
         hasRecoveryAction = status.hasRecoveryAction
         accessibilityLabel = [
-            summary,
+            Self.dateText(date),
             Self.durationText(duration),
             status.label,
             status.detail
@@ -150,6 +150,10 @@ public struct OigoHistoryRowProjection: Equatable, Sendable {
         }
         let seconds = max(0, Int(duration.rounded()))
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private static func dateText(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
     }
 }
 

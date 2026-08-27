@@ -52,7 +52,8 @@ final class HistoryWorkspaceScenario: NativeUIContractScenario {
             )
             guard projection.statusLabel == archetype.4,
                   projection.summary == "bounded summary",
-                  projection.accessibilityLabel.contains(archetype.4) else {
+                  projection.accessibilityLabel.contains(archetype.4),
+                  !projection.accessibilityLabel.contains("bounded summary") else {
                 throw ContractInputError(category: "history-row-archetype")
             }
         }
