@@ -164,6 +164,10 @@ select {
   color: currentColor;
 }
 
+.hero .mark {
+  margin-bottom: var(--space-8);
+}
+
 .button-cluster {
   gap: 14px;
   flex-wrap: wrap;

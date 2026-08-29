@@ -1,6 +1,6 @@
 ---
 interface Props {
-  size?: 'small' | 'medium' | 'large' | 'document';
+  size?: 'small' | 'medium' | 'large' | 'document' | 'icon';
   label?: string;
 }
 
@@ -10,6 +10,7 @@ const dimensions = {
   medium: { width: 16, height: 21, stroke: 2.4 },
   large: { width: 72, height: 94, stroke: 2.2 },
   document: { width: 34, height: 45, stroke: 2.2 },
+  icon: { width: 54, height: 70, stroke: 2.4 },
 }[size];
 ---
 
