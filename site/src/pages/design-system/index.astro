@@ -117,7 +117,7 @@ const patterns = [
   .surface-pair { display: flex; flex: none; overflow: hidden; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; }
   .surface-pair i { width: 26px; height: 26px; } .surface-single { width: 54px; height: 26px; flex: none; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; }
   .surface-row strong { width: 150px; flex: none; color: var(--color-text-primary); font-size: 12.5px; font-weight: 400; }
-  .surface-row .code-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .surface-row .code-note { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .type-grid { grid-template-columns: 1.4fr 1fr; }
   .type-samples { gap: 0; }
   .type-row { display: grid; grid-template-columns: minmax(180px, 290px) 150px minmax(0, 1fr); align-items: baseline; gap: var(--space-5); padding: var(--space-3) 0; border-bottom: 1px solid rgba(255,255,255,.05); }
