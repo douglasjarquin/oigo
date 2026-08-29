@@ -1,16 +1,17 @@
 ---
 interface Props {
-  size?: 'small' | 'medium' | 'large' | 'document' | 'icon';
+  size?: 'small' | 'medium' | 'large' | 'document' | 'icon' | 'download';
   label?: string;
 }
 
 const { size = 'medium', label = 'Oigo mark' } = Astro.props;
 const dimensions = {
   small: { width: 12, height: 16, stroke: 2.4 },
-  medium: { width: 16, height: 21, stroke: 2.4 },
-  large: { width: 72, height: 94, stroke: 2.2 },
+  medium: { width: 40, height: 52, stroke: 2.4 },
+  large: { width: 88, height: 115, stroke: 2.4 },
   document: { width: 34, height: 45, stroke: 2.2 },
   icon: { width: 54, height: 70, stroke: 2.4 },
+  download: { width: 44, height: 58, stroke: 2.4 },
 }[size];
 ---
 
