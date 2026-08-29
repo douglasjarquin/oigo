@@ -110,7 +110,7 @@ const faq = [
     <h2 class="section-heading">Questions</h2>
     <div class="faq-list">
       {faq.map((item, index) => (
-        <details class="faq-item" open={index === 0}>
+        <details class="faq-item" name="faq" open={index === 0}>
           <summary>{item.question}</summary>
           <p class="faq-answer">{item.answer}</p>
         </details>
