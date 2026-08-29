@@ -1,3 +1,0 @@
-PASS Oigo xcode_exit=0 artifact=Oigo.app dependency=OigoPresentation linkage=OigoPresentation,MacUtilityUI
-PASS OigoUIGallery xcode_exit=0 artifact=OigoUIGallery.app dependency=OigoPresentation linkage=OigoPresentation,MacUtilityUI
-PASS isolated_derived_data_cleanup=true
