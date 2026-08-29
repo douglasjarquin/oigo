@@ -110,9 +110,9 @@ const patterns = [
   .swatch-card > div:last-child { display: flex; flex-direction: column; gap: 3px; padding: var(--space-3) 14px; }
   .swatch-card p { margin: 3px 0 0; color: var(--color-text-muted); font-size: 11.5px; line-height: 1.45; }
   .surfaces-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .surface-list { display: flex; flex-direction: column; gap: var(--space-3); }
+  .surface-list { display: flex; min-width: 0; flex-direction: column; gap: var(--space-3); }
   .surface-list h3 { margin: 0; color: #c9c9ce; font-size: 13px; }
-  .surface-list-inner { overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; }
+  .surface-list-inner { min-width: 0; overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; }
   .surface-row { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.05); background: var(--color-card); }
   .surface-pair { display: flex; flex: none; overflow: hidden; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; }
   .surface-pair i { width: 26px; height: 26px; } .surface-single { width: 54px; height: 26px; flex: none; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; }
