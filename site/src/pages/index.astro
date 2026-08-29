@@ -1,0 +1,201 @@
+---
+import BaseLayout from '../components/BaseLayout.astro';
+import DownloadCta from '../components/DownloadCta.astro';
+import Mark from '../components/Mark.astro';
+import ProductMockup from '../components/ProductMockup.astro';
+
+const steps = [
+  { number: '01', title: 'Hold ⌥Space', body: 'From any app. A small HUD confirms Oigo is recording and shows a live one-line preview of what it hears.' },
+  { number: '02', title: 'Speak', body: 'Transcription runs live and on-device while you talk. Audio is saved to disk from the first word, so nothing is ever lost.' },
+  { number: '03', title: 'Release', body: 'The transcript is pasted at your cursor — cleaned up first if you’re in Clean mode. Under a second, then the HUD gets out of your way.' },
+];
+
+const privacy = [
+  { title: 'On-device models', body: 'Apple’s speech frameworks do all recognition and cleanup locally, even offline.' },
+  { title: 'No network', body: 'Oigo makes zero network requests. No server exists to send anything to.' },
+  { title: 'No account, no telemetry', body: 'Nothing to sign into, nothing phoned home. Not even anonymous usage stats.' },
+  { title: 'Open source', body: 'MIT-licensed. Audit the code, build it yourself, or fork it.' },
+];
+
+const faq = [
+  { question: 'Is it really free?', answer: 'Yes. Oigo is MIT-licensed and free forever. There is no pro tier, no trial, and nothing to unlock. If you find it useful, star the repo or contribute.' },
+  { question: 'Does any audio ever leave my Mac?', answer: 'No. Recording and transcription use Apple’s on-device speech frameworks. Oigo makes no network requests — you can verify this in the source, or with Little Snitch.' },
+  { question: 'What does Clean mode actually change?', answer: 'It removes filler words (um, uh, like), fixes punctuation and capitalization, and joins broken sentences. It never rewrites your meaning, and the raw transcript is always preserved in History.' },
+  { question: 'Which permissions does it need?', answer: 'Microphone (to hear you), Accessibility (to paste into other apps), and Speech Recognition (for on-device models). Accessibility is optional — without it, Oigo copies results to your clipboard instead.' },
+  { question: 'What happens if something fails mid-dictation?', answer: 'Audio is written to disk from the first word. If transcription or pasting fails, the recording is preserved and marked in History with a one-click Retry.' },
+  { question: 'Which languages are supported?', answer: 'Any language with Apple on-device speech assets — English, Spanish, and many more. Oigo prompts you to install assets the first time you pick a language.' },
+];
+---
+
+<BaseLayout
+  title="Oigo — system-wide dictation for Mac"
+  description="Hold a key, speak, and let Oigo put your words where your cursor is. Private, on-device dictation for Mac."
+  navigation
+>
+  <header class="hero page-width">
+    <div class="availability"><span class="status-dot" aria-hidden="true"></span>Free &amp; open source · macOS 15+</div>
+    <Mark size="large" label="Oigo mark" />
+    <h1>Hold a key. Speak.<br />Your words appear.</h1>
+    <p class="hero-copy">Oigo is system-wide dictation for your Mac. Hold <span class="key-cap">⌥Space</span> in any app, talk, release — the transcript lands where your cursor is. Everything runs on your Mac. Nothing leaves it.</p>
+    <div class="button-cluster hero-actions">
+      <a class="button-primary" href="#download"><span aria-hidden="true">⇩</span> Download for Mac</a>
+      <a class="button-secondary" href="https://github.com/douglasjarquin/oigo">View on GitHub</a>
+    </div>
+    <div class="license-line">Free forever · MIT license · no account</div>
+  </header>
+
+  <div class="page-width hero-mockup">
+    <ProductMockup />
+  </div>
+
+  <section id="how" class="page-width landing-section">
+    <p class="overline">How it works</p>
+    <h2 class="section-heading">One shortcut, held like a walkie-talkie.</h2>
+    <div class="three-column-grid section-content-gap">
+      {steps.map((step) => (
+        <article class="card step-card">
+          <span class="mono step-number">{step.number}</span>
+          <h3>{step.title}</h3>
+          <p>{step.body}</p>
+        </article>
+      ))}
+    </div>
+    <p class="note-card">Works everywhere your cursor does — Mail, Slack, Xcode, a web form. If an app refuses synthetic input, Oigo copies the result to your clipboard instead and tells you so.</p>
+  </section>
+
+  <section id="modes" class="page-width landing-section">
+    <p class="overline">Two modes</p>
+    <h2 class="section-heading">Raw speed, or a tidy transcript.</h2>
+    <div class="two-column-grid section-content-gap">
+      <article class="card mode-card">
+        <div class="mode-title"><h3>Instant</h3><span class="mono mode-note">raw transcript</span></div>
+        <p>Pastes the moment you release the key. What you said is what you get — fastest path from thought to text.</p>
+        <div class="transcript-well">um so schedule the design review for thursday afternoon and uh send the agenda to the platform team</div>
+      </article>
+      <article class="card mode-card mode-card-featured">
+        <div class="mode-title"><h3>Clean</h3><span class="mono mode-note action-text">default</span></div>
+        <p>Strips filler words and fixes punctuation before pasting — still on-device, still under a second. The raw transcript is always kept in History.</p>
+        <div class="transcript-well clean-transcript">Schedule the design review for Thursday afternoon and send the agenda to the platform team.</div>
+      </article>
+    </div>
+  </section>
+
+  <section id="privacy" class="band-section">
+    <div class="page-width band-inner">
+      <p class="overline">Privacy</p>
+      <h2 class="section-heading">Your voice never leaves this Mac.</h2>
+      <p class="band-copy">Recording, transcription, and cleanup all run on Apple’s on-device speech models. Oigo has no server, no account, no analytics — and the source is public, so you don’t have to take our word for it.</p>
+      <div class="four-column-grid section-content-gap">
+        {privacy.map((item) => (
+          <article class="privacy-card">
+            <h3>{item.title}</h3>
+            <p>{item.body}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section id="history" class="page-width landing-section history-section">
+    <div class="history-copy">
+      <p class="overline">History &amp; recovery</p>
+      <h2 class="section-heading">A dictation is never lost.</h2>
+      <p>Audio is written to disk from the first word, before transcription starts. If a paste fails, a mic disconnects, or your Mac sleeps mid-sentence, the recording survives — open History, retry transcription, copy the text again. Audio follows your retention setting; transcripts stay until you delete them.</p>
+    </div>
+    <ProductMockup variant="history" />
+  </section>
+
+  <section id="faq" class="faq-section page-width">
+    <p class="overline">FAQ</p>
+    <h2 class="section-heading">Questions</h2>
+    <div class="faq-list">
+      {faq.map((item, index) => (
+        <details class="faq-item" open={index === 0}>
+          <summary>{item.question}</summary>
+          <p class="faq-answer">{item.answer}</p>
+        </details>
+      ))}
+    </div>
+  </section>
+
+  <section id="download" class="band-section download-section">
+    <div class="page-width band-inner download-inner">
+      <Mark size="medium" label="Oigo mark" />
+      <h2 class="section-heading">Start dictating in a minute.</h2>
+      <p>Free and open source. No account, no trial clock, no upsell.</p>
+      <DownloadCta />
+      <div class="license-line">v0.9 beta · macOS 15 Sequoia or later · Apple silicon &amp; Intel · notarized</div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .page-width { width: min(100% - 80px, 1060px); margin-inline: auto; }
+  .hero { display: flex; flex-direction: column; align-items: center; padding: var(--space-24) 0 var(--space-20); text-align: center; }
+  .availability { display: inline-flex; align-items: center; gap: var(--space-2); margin-bottom: 36px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 100px; padding: 5px 14px; color: var(--color-text-muted); font: 12px/1.4 var(--font-mono); }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-confirmed); }
+  .hero > .mark { margin-bottom: var(--space-8); }
+  .hero h1 { max-width: 720px; margin: 0 0 var(--space-5); color: var(--color-text-primary); font-size: 56px; line-height: 1.08; font-weight: 700; letter-spacing: -0.02em; text-wrap: balance; }
+  .hero-copy { max-width: 560px; margin: 0 0 var(--space-10); color: var(--color-text-secondary); font-size: 19px; line-height: 1.5; text-wrap: pretty; }
+  .key-cap { color: #d1d1d6; font: 17px var(--font-mono); }
+  .hero-actions { justify-content: center; }
+  .license-line { margin-top: 14px; color: var(--color-text-tertiary); font: 12px/1.4 var(--font-mono); }
+  .hero-mockup { padding-bottom: var(--space-24); }
+  .product-window-notes { position: relative; }
+  .chrome-time { font-size: 11px; font-variant-numeric: tabular-nums; }
+  .three-column-grid, .four-column-grid, .two-column-grid { display: grid; gap: var(--space-5); }
+  .three-column-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .four-column-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .two-column-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .landing-section { padding-bottom: var(--space-24); }
+  .section-content-gap { margin-top: var(--space-12); }
+  .step-card { display: flex; flex-direction: column; gap: 14px; padding: 26px 24px; }
+  .step-number { color: var(--color-action); font-size: 13px; }
+  .step-card h3, .mode-card h3, .privacy-card h3 { margin: 0; color: var(--color-text-primary); font-size: 17px; font-weight: 600; }
+  .step-card p, .mode-card p, .privacy-card p, .history-copy > p { margin: 0; color: var(--color-text-secondary); font-size: 14px; line-height: 1.55; text-wrap: pretty; }
+  .note-card { margin: var(--space-5) 0 0; border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: var(--space-4) 22px; color: var(--color-text-secondary); font-size: 13px; line-height: 1.5; }
+  .mode-card { padding: var(--space-7); }
+  .mode-title { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+  .mode-title h3 { font-size: 19px; font-weight: 700; }
+  .mode-note { color: var(--color-text-tertiary); font-size: 11px; }
+  .action-text { color: var(--color-action); }
+  .mode-card-featured { border-color: rgba(63, 140, 255, 0.25); }
+  .transcript-well { border: 1px solid rgba(255, 255, 255, 0.06); border-radius: var(--radius-small); padding: 14px 16px; background: var(--color-well); color: #aeaeb2; font: 12.5px/1.6 var(--font-mono); }
+  .clean-transcript { border-color: rgba(63, 140, 255, 0.2); color: var(--color-text-body); }
+  .band-section { border-top: 1px solid var(--color-hairline); border-bottom: 1px solid var(--color-hairline); background: var(--color-band); }
+  .band-inner { padding: 88px 0; }
+  .band-copy { max-width: 600px; margin: 18px 0 48px; color: var(--color-text-secondary); font-size: 16px; line-height: 1.6; text-wrap: pretty; }
+  .privacy-card { display: flex; flex-direction: column; gap: var(--space-2); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: var(--radius-card); padding: 22px; background: rgba(255, 255, 255, 0.03); }
+  .privacy-card h3 { font-size: 15px; }
+  .privacy-card p { color: var(--color-text-muted); font-size: 13px; }
+  .history-section { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 56px; padding-top: var(--space-24); }
+  .history-copy > p { font-size: 15px; line-height: 1.65; }
+  .product-window-history { overflow: hidden; background: #28282c; box-shadow: var(--shadow-history); }
+  .history-chrome { display: flex; align-items: center; gap: var(--space-2); min-height: 34px; padding: 0 12px; border-bottom: 1px solid var(--color-hairline); color: #d8d8dc; font-size: 12px; }
+  .history-chrome strong { flex: 1; margin-right: 48px; text-align: center; }
+  .traffic-lights { display: flex; gap: 7px; }
+  .traffic-lights i { width: 11px; height: 11px; border-radius: 50%; background: #ff5f57; }
+  .traffic-lights i:nth-child(2) { background: #febc2e; }
+  .traffic-lights i:nth-child(3) { background: #28c840; }
+  .history-list { display: flex; flex-direction: column; }
+  .history-row { gap: var(--space-3); min-width: 0; padding: var(--space-3) var(--space-4); border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+  .history-state { width: 14px; flex: none; text-align: center; font-size: 12px; }
+  .history-state.confirmed { color: var(--color-confirmed); }
+  .history-state.attention { color: var(--color-attention); }
+  .history-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+  .history-copy > span { overflow: hidden; color: #f0f0f2; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+  .history-copy small { color: var(--color-text-muted); font-size: 11px; }
+  .history-action { flex: none; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 5px; padding: 3px 10px; background: #48484c; color: var(--color-text-primary); font-size: 11px; }
+  .faq-section { padding-bottom: var(--space-24); }
+  .faq-list { margin-top: var(--space-12); }
+  .download-inner { display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .download-inner > .mark { margin-bottom: var(--space-6); }
+  .download-inner p { margin: 0 0 var(--space-8); color: var(--color-text-secondary); font-size: 15px; }
+  .download-inner .license-line { margin-top: var(--space-4); }
+  .site-footer { border-top: 1px solid var(--color-hairline); }
+  .footer-inner { width: min(100% - 80px, 1060px); min-height: 84px; margin-inline: auto; gap: var(--space-6); }
+  .footer-inner a, .footer-brand { color: var(--color-text-muted); font-size: 12.5px; }
+  .footer-brand { display: flex; align-items: center; gap: var(--space-2); }
+  @media (max-width: 900px) { .four-column-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .history-section { gap: var(--space-8); } }
+  @media (max-width: 760px) { .page-width, .footer-inner { width: min(100% - 32px, 1060px); } .hero { padding-top: var(--space-20); } .hero h1 { font-size: clamp(40px, 11vw, 56px); } .hero-copy { font-size: 17px; } .three-column-grid, .two-column-grid, .history-section { grid-template-columns: 1fr; } .four-column-grid { grid-template-columns: 1fr; } .history-section { padding-top: var(--space-20); } .footer-inner { align-items: flex-start; flex-wrap: wrap; gap: var(--space-3) var(--space-4); padding: var(--space-6) 0; } .footer-spacer { display: none; } }
+</style>

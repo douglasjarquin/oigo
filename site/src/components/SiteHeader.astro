@@ -1,0 +1,21 @@
+---
+import Mark from './Mark.astro';
+
+const base = import.meta.env.BASE_URL;
+---
+
+<a class="skip-link" href="#main-content">Skip to content</a>
+<nav class="site-header" aria-label="Primary navigation">
+  <a class="brand-lockup" href={base} aria-label="Oigo home">
+    <Mark size="medium" />
+    <span>Oigo</span>
+  </a>
+  <span class="header-spacer"></span>
+  <div class="header-links">
+    <a href={`${base}#how`}>How it works</a>
+    <a href={`${base}#modes`}>Modes</a>
+    <a href={`${base}#privacy`}>Privacy</a>
+    <a href={`${base}#faq`}>FAQ</a>
+    <a class="button-primary" href={`${base}#download`}>Download</a>
+  </div>
+</nav>

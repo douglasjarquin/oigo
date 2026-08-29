@@ -1,0 +1,15 @@
+---
+interface Props { title: string; items: string[][]; paired?: boolean; }
+const { title, items, paired = false } = Astro.props;
+---
+
+<div class="surface-list">
+  <h3>{title}</h3>
+  <div class="surface-list-inner">
+    {items.map((item) => <div class="surface-row">
+      {paired ? <span class="surface-pair"><i style={`background:${item[1]}`}></i><i style={`background:${item[2]}`}></i></span> : <span class="surface-single" style={`background:${item[1]}`}></span>}
+      <strong>{item[0]}</strong>
+      <span class="code-note">{paired ? `light-dark(${item[1]}, ${item[2]})` : item[1]}</span>
+    </div>)}
+  </div>
+</div>

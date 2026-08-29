@@ -1,0 +1,39 @@
+---
+import '../styles/global.css';
+import SiteFooter from './SiteFooter.astro';
+import SiteHeader from './SiteHeader.astro';
+
+interface Props {
+  title: string;
+  description: string;
+  navigation?: boolean;
+  document?: boolean;
+}
+
+const { title, description, navigation = false, document: isDocument = false } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#0a0a0c" />
+    <link rel="canonical" href={canonical} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta name="twitter:card" content="summary" />
+    <title>{title}</title>
+  </head>
+  <body class:list={{ 'document-page': isDocument }}>
+    {navigation && <SiteHeader />}
+    <main id="main-content">
+      <slot />
+    </main>
+    {navigation && <SiteFooter />}
+  </body>
+</html>

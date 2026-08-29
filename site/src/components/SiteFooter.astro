@@ -1,0 +1,19 @@
+---
+import Mark from './Mark.astro';
+
+const base = import.meta.env.BASE_URL;
+---
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span class="footer-brand">
+      <Mark size="small" />
+      <span>Oigo — “¿Oigo?” · I can hear you.</span>
+    </span>
+    <span class="footer-spacer"></span>
+    <a href="https://github.com/douglasjarquin/oigo">GitHub</a>
+    <a href="https://github.com/douglasjarquin/oigo/releases">Releases</a>
+    <a href="https://github.com/douglasjarquin/oigo/blob/main/LICENSE">MIT License</a>
+    <a href={`${base}#privacy`}>Privacy</a>
+  </div>
+</footer>

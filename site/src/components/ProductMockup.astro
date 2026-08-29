@@ -1,0 +1,60 @@
+---
+import Mark from './Mark.astro';
+
+interface HistoryItem {
+  state: 'confirmed' | 'attention';
+  text: string;
+  meta: string;
+  action: string;
+}
+
+interface Props {
+  variant?: 'notes' | 'history';
+}
+
+const { variant = 'notes' } = Astro.props;
+const history: HistoryItem[] = [
+  { state: 'confirmed', text: 'Schedule the design review for Thursday…', meta: 'Just now · 0:18 · Clean · Notes', action: 'Copy' },
+  { state: 'attention', text: 'Recording preserved — transcription degraded', meta: '2:14 PM · 1:02 · audio kept', action: 'Retry' },
+  { state: 'confirmed', text: 'Ping the vendor about the September invoice…', meta: '1:48 PM · 0:09 · Instant · Mail', action: 'Copy' },
+  { state: 'confirmed', text: 'Draft standup update: shipped the importer…', meta: '11:20 AM · 0:31 · Clean · Slack', action: 'Copy' },
+];
+---
+
+{variant === 'notes' ? (
+  <div class="product-window product-window-notes" aria-label="Illustration of Oigo recording in Notes">
+    <div class="mockup-chrome">
+      <strong>Notes</strong>
+      <span class="chrome-menu">File</span>
+      <span class="chrome-menu">Edit</span>
+      <span class="chrome-menu">Format</span>
+      <span class="chrome-spacer"></span>
+      <span class="recording-indicator"><Mark size="small" label="Recording" /></span>
+      <span class="mono chrome-time">9:41 AM</span>
+    </div>
+    <div class="mockup-document">
+      <h3>Design review notes</h3>
+      <div class="mockup-transcript">Schedule the design review for Thursday afternoon and send the agenda to the platform team.<span class="caret" aria-hidden="true"></span></div>
+    </div>
+    <div class="recording-hud">
+      <div class="hud-line"><span class="recording-dot" aria-hidden="true"></span><span class="mono">00:07</span><span>Recording · Notes</span></div>
+      <div class="hud-caption">Release ⌥Space to finish</div>
+    </div>
+  </div>
+) : (
+  <div class="product-window product-window-history" aria-label="Illustration of Oigo History and recovery">
+    <div class="history-chrome">
+      <span class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></span>
+      <strong>History</strong>
+    </div>
+    <div class="history-list">
+      {history.map((item) => (
+        <div class="history-row">
+          <span class:list={['history-state', item.state]} aria-label={item.state === 'attention' ? 'Needs attention' : 'Complete'}>{item.state === 'attention' ? '!' : '✓'}</span>
+          <span class="history-copy"><span>{item.text}</span><small>{item.meta}</small></span>
+          <span class="history-action">{item.action}</span>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
