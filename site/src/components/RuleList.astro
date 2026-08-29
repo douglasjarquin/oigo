@@ -1,6 +1,6 @@
 ---
 interface Props { items: string[]; negativeFrom?: number; }
-const { items, negativeFrom = Math.max(0, items.length - 2) } = Astro.props;
+const { items, negativeFrom = Math.max(0, items.length - 1) } = Astro.props;
 ---
 
 <ul class="rule-list">

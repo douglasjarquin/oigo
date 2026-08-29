@@ -58,3 +58,24 @@ const history: HistoryItem[] = [
     </div>
   </div>
 )}
+
+<style>
+  .product-window-notes { position: relative; }
+  .chrome-time { font-size: 11px; font-variant-numeric: tabular-nums; }
+  .product-window-history { overflow: hidden; background: #28282c; box-shadow: var(--shadow-history); }
+  .history-chrome { display: flex; align-items: center; gap: var(--space-2); min-height: 34px; padding: 0 12px; border-bottom: 1px solid var(--color-hairline); color: #d8d8dc; font-size: 12px; }
+  .history-chrome strong { flex: 1; margin-right: 48px; text-align: center; }
+  .traffic-lights { display: flex; gap: 7px; }
+  .traffic-lights i { width: 11px; height: 11px; border-radius: 50%; background: #ff5f57; }
+  .traffic-lights i:nth-child(2) { background: #febc2e; }
+  .traffic-lights i:nth-child(3) { background: #28c840; }
+  .history-list { display: flex; flex-direction: column; }
+  .history-row { gap: var(--space-3); min-width: 0; padding: var(--space-3) var(--space-4); border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+  .history-state { width: 14px; flex: none; text-align: center; font-size: 12px; }
+  .history-state.confirmed { color: var(--color-confirmed); }
+  .history-state.attention { color: var(--color-attention); }
+  .history-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+  .history-copy > span { overflow: hidden; color: #f0f0f2; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+  .history-copy small { color: var(--color-text-muted); font-size: 11px; }
+  .history-action { flex: none; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 5px; padding: 3px 10px; background: #48484c; color: var(--color-text-primary); font-size: 11px; }
+</style>
