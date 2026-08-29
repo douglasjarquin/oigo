@@ -1,4 +1,0 @@
-Building for debugging...
-[0/3] Write swift-version--58304C5D6DBC2206.txt
-Build of product 'oigo-native-ui-contract-tests' complete! (0.08s)
-PASS popover-routing fixture=primary-secondary-control-click routes=3 menu=history,settings,separator,quit surfaces=exclusive activation=accessory stale=fenced resources=0

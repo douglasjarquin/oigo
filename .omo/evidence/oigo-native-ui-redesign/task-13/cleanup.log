@@ -1,9 +1,0 @@
-SCENARIO task-owned cleanup
-TEMP_ROOT removed=true recovery=Trash
-DERIVED_DATA removed=true recovery=Trash
-SWIFTPM_SCRATCH removed=true recovery=Trash
-SYNTHETIC_FIXTURES removed=true recovery=Trash
-DEFAULTS_SUITE created=false
-OWNED_PROCESSES remaining=0
-POPOVER_RUNTIME resources-after-dismissal=0 contract-proved=true
-RESULT exit=0 observable=clean

@@ -1,4 +1,0 @@
-RED presentation_sources_embedded_in_Oigo=true
-RED shared_presentation_module=false
-202:    private func status(for row: String) -> (label: String, primary: String, primaryEnabled: Bool, notice: String?) {
-RED gallery_imports_authoritative_presentation=false

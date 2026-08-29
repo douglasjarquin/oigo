@@ -1,8 +1,0 @@
-SCENARIO non-visual source membership and isolated Debug builds
-COMMAND swift build | RESULT exit=0 observable=Build-complete
-COMMAND swift build --product Oigo | RESULT exit=0 observable=Oigo-executable
-COMMAND python3 Scripts/check-xcode-source-membership.py . | RESULT exit=0 observable=membership-pass
-COMMAND xcodebuild -project Oigo.xcodeproj -list | RESULT exit=0 observable=project-syntax-pass
-COMMAND xcodebuild Oigo Debug isolated DerivedData | RESULT exit=0 observable=Oigo.app-executable
-COMMAND xcodebuild OigoUIGallery Debug isolated DerivedData | RESULT exit=0 observable=OigoUIGallery.app-executable
-VISUAL native-rendered-pixel=WAIVED owner=user follow-up=manual-inspection-before-merge

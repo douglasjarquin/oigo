@@ -1,4 +1,0 @@
-SCENARIO RED stale quick-control generation and bounded latest summary
-COMMAND swift run oigo-native-ui-contract-tests --scenario popover-actions --fixture bounded-summary-and-rollback
-ERROR rejected-input:missing-popover-actions-source
-RESULT exit=64 expected_nonzero=true observable=missing-popover-actions-source

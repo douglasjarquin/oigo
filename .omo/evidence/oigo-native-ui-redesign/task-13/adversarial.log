@@ -1,9 +1,0 @@
-SCENARIO adversarial popover action contracts
-PROBE malformed-action exit=64 verdict=PASS observable=ERROR rejected-input:incomplete-popover-actions-contract
-PROBE stale-callback exit=64 verdict=PASS observable=ERROR rejected-input:stale-callback
-PROBE dirty-worktree exit=64 verdict=PASS observable=ERROR rejected-input:dirty-worktree
-PROBE long-running-retry exit=64 verdict=PASS observable=ERROR rejected-input:long-running-retry-cancelled
-PROBE flaky-event-order exit=64 verdict=PASS observable=ERROR rejected-input:flaky-event-ordering
-PROBE misleading-success exit=64 verdict=PASS observable=ERROR rejected-input:misleading-success-output
-PROBE repeated-interruption exit=64 verdict=PASS observable=ERROR rejected-input:repeated-interruption
-PROBE prompt-injection verdict=NOT_APPLICABLE reason=typed-synthetic-fixtures-no-external-text-interpreter
