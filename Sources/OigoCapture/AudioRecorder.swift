@@ -4,7 +4,7 @@ import CoreAudio
 import Foundation
 import OigoCore
 
-public enum AudioRecorderError: Error, CustomStringConvertible, Sendable {
+public enum AudioRecorderError: Error, CustomStringConvertible, DictationStartupFailureEvidence, Sendable {
     case alreadyRecording
     case notRecording
     case missingApplicationBundle
@@ -42,6 +42,10 @@ public enum AudioRecorderError: Error, CustomStringConvertible, Sendable {
         case .engineStartFailed(let reason):
             "audio engine could not start: " + reason
         }
+    }
+
+    public var dictationStartupFailureReason: String {
+        description
     }
 }
 

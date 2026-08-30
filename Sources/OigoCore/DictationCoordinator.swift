@@ -562,43 +562,33 @@ public final class DictationCoordinator {
             currentSession = persistedSession
             let startupSession = persistedSession
 
-            try await withTaskCancellationHandler(operation: {
-                try await BoundedOperation.run(
-                    operationID: operationID,
-                    stage: .startup,
-                    timeout: timeoutPolicy.budget(for: .startup),
-                    registry: operationRegistry
-                ) {
-                    try await transcription.start(
-                        session: startupSession,
-                        format: format,
-                        store: store,
-                        onUpdate: { [weak self] update in
-                            Task { @MainActor [weak self] in
-                                guard self?.activeOperationID == operationID,
-                                      self?.acceptsCallbacks == true else {
-                                    return
-                                }
-                                if let degradation = update.liveDegradation {
-                                    self?.noteLiveTranscriptionDegradation(
-                                        degradation,
-                                        operationID: operationID
-                                    )
-                                }
-                                onUpdate(update)
+            try await BoundedOperation.run(
+                operationID: operationID,
+                stage: .startup,
+                timeout: timeoutPolicy.budget(for: .startup),
+                registry: operationRegistry
+            ) {
+                try await transcription.start(
+                    session: startupSession,
+                    format: format,
+                    store: store,
+                    onUpdate: { [weak self] update in
+                        Task { @MainActor [weak self] in
+                            guard self?.activeOperationID == operationID,
+                                  self?.acceptsCallbacks == true else {
+                                return
                             }
+                            if let degradation = update.liveDegradation {
+                                self?.noteLiveTranscriptionDegradation(
+                                    degradation,
+                                    operationID: operationID
+                                )
+                            }
+                            onUpdate(update)
                         }
-                    )
-                }
-            }, onCancel: {
-                Task { @MainActor [weak self] in
-                    await self?.requestCancellation(
-                        transcription,
-                        operationID: operationID,
-                        stage: .cancellation
-                    )
-                }
-            })
+                    }
+                )
+            }
             try Task.checkCancellation()
             preparedSession = try store.update(
                 currentSession ?? persistedSession,
@@ -1546,6 +1536,9 @@ public final class DictationCoordinator {
     }
 
     private static func failureReason(for error: Error) -> String {
+        if let startupFailure = error as? any DictationStartupFailureEvidence {
+            return startupFailure.dictationStartupFailureReason
+        }
         if let timeout = error as? any TranscriptionTimeoutEvidence {
             switch timeout.stage {
             case .startup:

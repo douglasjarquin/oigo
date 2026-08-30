@@ -1,5 +1,30 @@
 import Foundation
 
+public protocol DictationStartupFailureEvidence: Error, Sendable {
+    var dictationStartupFailureReason: String { get }
+}
+
+public enum KeyboardStartupReadinessFailure: String, Equatable, Sendable {
+    case microphoneDenied = "microphone-denied"
+    case inputUnavailable = "input-unavailable"
+}
+
+public enum KeyboardStartupReadinessPolicy {
+    public static func failure(
+        microphonePermission: OigoPermissionState,
+        inputSelection: OigoInputSelection,
+        inputDevices: [OigoInputDevice]
+    ) -> KeyboardStartupReadinessFailure? {
+        if microphonePermission == .denied {
+            return .microphoneDenied
+        }
+        guard (try? OigoInputDeviceCatalog.resolve(inputSelection, from: inputDevices)) != nil else {
+            return .inputUnavailable
+        }
+        return nil
+    }
+}
+
 public enum LiveTranscriptionDegradation: String, Equatable, Sendable {
     case queueSaturated = "speech_queue_saturated"
     case continuationTerminated = "speech_continuation_terminated"

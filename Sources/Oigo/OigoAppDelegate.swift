@@ -1057,6 +1057,27 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 )
                 updateSurface()
                 try throwInjectedQAFailureIfNeeded()
+                if let readinessFailure = KeyboardStartupReadinessPolicy.failure(
+                    microphonePermission: microphonePermissionState(),
+                    inputSelection: settings.selectedInput,
+                    inputDevices: currentInputDevices()
+                ) {
+                    statusSurface.hideHUD(generation: handle.generation)
+                    hudGeneration = nil
+                    shortcutBridge.reset()
+                    lastFailureCode = readinessFailure.rawValue
+                    failureDetail = readinessFailure.rawValue
+                    shortcutFeedbackDetail = switch readinessFailure {
+                    case .microphoneDenied:
+                        "Microphone access is required. Allow Oigo in System Settings."
+                    case .inputUnavailable:
+                        "No selected microphone input is available. Choose an input in Oigo Settings."
+                    }
+                    historyWindow?.showMessage(shortcutFeedbackDetail ?? readinessFailure.rawValue)
+                    reportOnboardingTestFailure()
+                    updateSurface()
+                    return
+                }
                 let microphoneStateBeforeRequest = microphonePermissionState()
                 let capturedTarget = try await insertion.captureTargetBeforeMicrophonePermission {
                     try await self.ensureMicrophonePermission()

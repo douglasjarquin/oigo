@@ -7,7 +7,7 @@ import OigoHotKey
 @available(macOS 26.0, *)
 @MainActor
 struct OigoIssue82ContractTests {
-    static func main() {
+    static func main() async {
         let arguments = Array(CommandLine.arguments.dropFirst())
         let filter: String? = if let index = arguments.firstIndex(of: "--filter"),
                                   arguments.indices.contains(index + 1) {
@@ -16,7 +16,7 @@ struct OigoIssue82ContractTests {
             nil
         }
         let normalizedFilter = filter?.replacingOccurrences(of: "-", with: " ")
-        let scenarios: [(String, () throws -> Void)] = [
+        let scenarios: [(String, () async throws -> Void)] = [
             ("registrar atomic replacement", testRegistrarAtomicReplacement),
             ("registrar failure and generation", testRegistrarFailureAndGeneration),
             ("intent rapid tap", testIntentRapidTap),
@@ -27,6 +27,7 @@ struct OigoIssue82ContractTests {
             ("recorder rejection", testRecorderRejection),
             ("app bridge release during startup", testAppBridgeReleaseDuringStartup),
             ("app bridge processing feedback", testAppBridgeProcessingFeedback),
+            ("keyboard startup cancellation cleanup", testKeyboardStartupCancellationCleanup),
             ("production bridge", testProductionBridge),
             ("configuration atomic save", testConfigurationAtomicSave),
             ("configuration failure restoration", testConfigurationFailureRestoration),
@@ -42,7 +43,7 @@ struct OigoIssue82ContractTests {
         var failures = 0
         for (name, test) in selected {
             do {
-                try test()
+                try await test()
                 print("GREEN: " + name)
             } catch {
                 failures += 1
