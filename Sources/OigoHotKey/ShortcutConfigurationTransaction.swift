@@ -1,5 +1,16 @@
 import OigoCore
 
+public enum ShortcutConfigurationError: Error, Equatable, CustomStringConvertible, Sendable {
+    case invalidCommittedShortcut(String)
+
+    public var description: String {
+        switch self {
+        case .invalidCommittedShortcut(let reason):
+            reason
+        }
+    }
+}
+
 @MainActor
 public protocol GlobalShortcutRegistrationClient: AnyObject {
     var status: GlobalShortcutRegistrationStatus { get }
@@ -18,12 +29,16 @@ public final class ShortcutConfigurationTransaction {
     private let registrar: any GlobalShortcutRegistrationClient
     private let onEvent: @MainActor (GlobalShortcutEvent) -> Void
     private var configurationError: String?
+    private var registrationReady: Bool
 
     public private(set) var committedShortcut: ToggleShortcut
     public private(set) var candidateShortcut: ToggleShortcut
 
     public var registrationStatus: GlobalShortcutRegistrationStatus {
-        switch registrar.status {
+        guard registrationReady else {
+            return .inactive("Global shortcut registration is waiting for setup")
+        }
+        return switch registrar.status {
         case .active(let shortcut, let generation) where shortcut == committedShortcut:
             .active(shortcut, generation: generation)
         case .active:
@@ -37,6 +52,10 @@ public final class ShortcutConfigurationTransaction {
         registrationStatus.isActive
     }
 
+    public var isOperationReady: Bool {
+        isCommittedShortcutActive
+    }
+
     public var lastError: String? {
         configurationError ?? registrar.lastError
     }
@@ -44,11 +63,13 @@ public final class ShortcutConfigurationTransaction {
     public init(
         committedShortcut: ToggleShortcut,
         registrar: any GlobalShortcutRegistrationClient,
+        registrationReady: Bool = true,
         onEvent: @escaping @MainActor (GlobalShortcutEvent) -> Void
     ) {
         self.committedShortcut = committedShortcut
         candidateShortcut = committedShortcut
         self.registrar = registrar
+        self.registrationReady = registrationReady
         self.onEvent = onEvent
     }
 
@@ -84,13 +105,15 @@ public final class ShortcutConfigurationTransaction {
             return basicValidation
         }
 
-        do {
-            try registrar.register(shortcut: candidate, onEvent: onEvent)
-        } catch {
-            candidateShortcut = committedShortcut
-            let validation = OigoShortcutValidation.conflict(String(describing: error))
-            configurationError = Self.message(for: validation)
-            return validation
+        if registrationReady {
+            do {
+                try registrar.register(shortcut: candidate, onEvent: onEvent)
+            } catch {
+                candidateShortcut = committedShortcut
+                let validation = OigoShortcutValidation.conflict(String(describing: error))
+                configurationError = Self.message(for: validation)
+                return validation
+            }
         }
 
         do {
@@ -108,16 +131,18 @@ public final class ShortcutConfigurationTransaction {
                 configurationError = Self.message(for: validation)
                 return validation
             }
-            do {
-                try registrar.register(shortcut: committedShortcut, onEvent: onEvent)
-            } catch let restoreRegistrationError {
-                failure += ". Previous shortcut registration could not be restored: \(restoreRegistrationError)"
-                candidateShortcut = committedShortcut
-                registrar.unregister()
-                failure += ". Shortcut registration was disabled until a shortcut is saved again"
-                let validation = OigoShortcutValidation.conflict(failure)
-                configurationError = Self.message(for: validation)
-                return validation
+            if registrationReady {
+                do {
+                    try registrar.register(shortcut: committedShortcut, onEvent: onEvent)
+                } catch let restoreRegistrationError {
+                    failure += ". Previous shortcut registration could not be restored: \(restoreRegistrationError)"
+                    candidateShortcut = committedShortcut
+                    registrar.unregister()
+                    failure += ". Shortcut registration was disabled until a shortcut is saved again"
+                    let validation = OigoShortcutValidation.conflict(failure)
+                    configurationError = Self.message(for: validation)
+                    return validation
+                }
             }
             candidateShortcut = committedShortcut
             failure += ". Previous shortcut was restored"
@@ -137,8 +162,16 @@ public final class ShortcutConfigurationTransaction {
     }
 
     public func activateCommittedShortcut() throws {
+        registrationReady = true
         guard !isCommittedShortcutActive else {
             return
+        }
+        let validation = OigoShortcutValidator.validate(committedShortcut, occupied: [])
+        guard validation.isAvailable else {
+            configurationError = Self.message(for: validation)
+            throw ShortcutConfigurationError.invalidCommittedShortcut(
+                configurationError ?? "Stored shortcut is invalid"
+            )
         }
         do {
             try registrar.register(shortcut: committedShortcut, onEvent: onEvent)
@@ -151,7 +184,18 @@ public final class ShortcutConfigurationTransaction {
     }
 
     public func deactivateShortcut() {
-        registrar.unregister()
+        registrationReady = false
+        if registrar.status.isActive {
+            registrar.unregister()
+        }
+    }
+
+    public func setRegistrationReady(_ ready: Bool) throws {
+        guard ready else {
+            deactivateShortcut()
+            return
+        }
+        try activateCommittedShortcut()
     }
 
     public func clear(

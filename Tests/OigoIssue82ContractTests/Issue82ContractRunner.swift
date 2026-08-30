@@ -33,7 +33,9 @@ struct OigoIssue82ContractTests {
             ("configuration atomic save", testConfigurationAtomicSave),
             ("configuration failure restoration", testConfigurationFailureRestoration),
             ("settings store persistence failure restoration", testSettingsStorePersistenceFailureRestoration),
-            ("compound rollback failure fails closed", testCompoundRollbackFailureFailsClosed)
+            ("compound rollback failure fails closed", testCompoundRollbackFailureFailsClosed),
+            ("app delegate shortcut readiness", testAppDelegateShortcutReadiness),
+            ("app delegate shortcut failure", testAppDelegateShortcutFailure)
         ]
         let selected = scenarios.filter { normalizedFilter == nil || $0.0.contains(normalizedFilter ?? "") }
         guard !selected.isEmpty else {

@@ -216,6 +216,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var shortcutConfiguration = ShortcutConfigurationTransaction(
         committedShortcut: settings.globalShortcut,
         registrar: shortcutRegistrar,
+        registrationReady: false,
         onEvent: { [weak self] event in self?.handleGlobalShortcut(event) }
     )
     private lazy var statusSurface = StatusSurfaceController { [weak self] command in
@@ -396,7 +397,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
         presentationPublicationFence.shutdown()
-        unregisterShortcut()
+        shortcutConfiguration.deactivateShortcut()
         shortcutBridge.reset()
         let storageWasChecking = storageCapability.health == .checking
         storageCapability.shutdown()
@@ -714,7 +715,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     self.updateSurface()
                     return
                 }
-                guard self.shortcutConfiguration.registrationStatus.isActive else {
+                self.onboardingStore.markCompleted()
+                self.synchronizeShortcutRegistration()
+                guard self.shortcutConfiguration.isOperationReady else {
                     self.onboardingWindow?.showRegistrationFailure(
                         self.shortcutConfiguration.lastError
                             ?? self.shortcutConfiguration.registrationStatus.message
@@ -722,9 +725,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     self.updateSurface()
                     return
                 }
-                self.onboardingStore.markCompleted()
                 self.onboardingWindow = nil
-                self.registerShortcut()
                 self.updateSurface()
             },
             onClose: { [weak self] in
@@ -807,25 +808,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         statusSurface.install(statusItem: item)
     }
 
-    private func registerShortcut() {
-        guard storageCapability.health.isReady,
-              onboardingStore.load().isComplete,
-              !shortcutConfiguration.isCommittedShortcutActive else {
-            return
-        }
+    private func synchronizeShortcutRegistration() {
+        let ready = storageCapability.health.isReady && onboardingStore.load().isComplete
         do {
-            try shortcutConfiguration.activateCommittedShortcut()
-            shortcutConfiguration.clearError()
+            try shortcutConfiguration.setRegistrationReady(ready)
             shortcutBridge.reset()
         } catch {
             NSLog("Oigo could not register the global toggle shortcut: %@", Self.failureReason(for: error))
             shortcutBridge.reset()
             updateSurface()
         }
-    }
-
-    private func unregisterShortcut() {
-        shortcutConfiguration.deactivateShortcut()
     }
 
     private func installWorkspaceInterruptionObservers() {
@@ -905,6 +897,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleGlobalShortcut(_ event: GlobalShortcutEvent) {
         performanceInstrumentation.mark(.shortcutReceived)
+        guard shortcutConfiguration.isOperationReady else {
+            shortcutBridge.reset()
+            updateSurface()
+            return
+        }
         _ = productionShortcutBridge.receive(event)
     }
 
@@ -2979,11 +2976,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             if historyWindow != nil {
                 refreshHistory()
             }
-            if onboardingStore.load().isComplete {
-                registerShortcut()
-            }
+            synchronizeShortcutRegistration()
         } else {
-            unregisterShortcut()
+            synchronizeShortcutRegistration()
             reportedMalformedSessionCount = 0
             historyWindow?.showMessage(displayedStorageHealth.statusMessage)
         }
@@ -3175,7 +3170,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             do {
                 try launchAtLoginController.setEnabled(newSettings.launchAtLogin)
             } catch {
-                registerShortcut()
+                synchronizeShortcutRegistration()
                 settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                 return "Launch at Login could not be changed: " + Self.failureReason(for: error)
             }
@@ -3250,9 +3245,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
            ) {
             transcription = nil
         }
-        if !shortcutConfiguration.isCommittedShortcutActive {
-            registerShortcut()
-        }
+        synchronizeShortcutRegistration()
         if previousSettings.audioRetention != settings.audioRetention
             || previousSettings.keepSuccessfulAudioIndefinitely != settings.keepSuccessfulAudioIndefinitely {
             scheduleIdleMaintenance(.settingsChanged)
@@ -3493,6 +3486,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func rerunOnboarding() {
         onboardingStore.rerun()
+        synchronizeShortcutRegistration()
         showOnboarding(OigoSystemSupportEvaluator.current())
     }
 

@@ -168,5 +168,109 @@ extension OigoIssue82ContractTests {
         }
     }
 
+    static func testAppDelegateShortcutReadiness() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let appDelegate = try String(
+            contentsOf: repository.appendingPathComponent("Sources/Oigo/OigoAppDelegate.swift"),
+            encoding: .utf8
+        )
+        guard appDelegate.components(separatedBy: "private let shortcutRegistrar").count == 2,
+              appDelegate.components(separatedBy: "ShortcutConfigurationTransaction(").count == 2,
+              appDelegate.contains("try shortcutConfiguration.setRegistrationReady(ready)"),
+              appDelegate.contains("guard shortcutConfiguration.isOperationReady else"),
+              !appDelegate.contains("shortcutRegistered") else {
+            throw ContractFailure(message: "AppDelegate retained duplicate shortcut ownership or stale callback readiness")
+        }
+
+        let defaultShortcut = ToggleShortcut.default
+        let customShortcut = ToggleShortcut(keyCode: 0, modifiers: ToggleShortcutModifiers.command)
+        let registrar = RecordingConfigurationRegistrationClient()
+        let transaction = ShortcutConfigurationTransaction(
+            committedShortcut: defaultShortcut,
+            registrar: registrar,
+            registrationReady: false,
+            onEvent: { _ in }
+        )
+        var persisted = defaultShortcut
+
+        guard transaction.save(
+            customShortcut,
+            persist: { persisted = $0 },
+            restore: { persisted = defaultShortcut }
+        ).isAvailable,
+              persisted == customShortcut,
+              transaction.committedShortcut == customShortcut,
+              registrar.calls.isEmpty,
+              !transaction.registrationStatus.isActive,
+              !transaction.isOperationReady else {
+            throw ContractFailure(message: "AppDelegate shortcut registered or enabled operation before readiness")
+        }
+
+        try transaction.setRegistrationReady(true)
+        try transaction.setRegistrationReady(true)
+        guard registrar.calls == ["register:0/256"],
+              transaction.registrationStatus.isActive,
+              transaction.isOperationReady else {
+            throw ContractFailure(message: "AppDelegate shortcut did not register exactly once after readiness")
+        }
+
+        try transaction.setRegistrationReady(false)
+        guard registrar.calls == ["register:0/256", "unregister:0/256"],
+              !transaction.registrationStatus.isActive,
+              !transaction.isOperationReady else {
+            throw ContractFailure(message: "AppDelegate shortcut teardown retained stale registration readiness")
+        }
+    }
+
+    static func testAppDelegateShortcutFailure() throws {
+        let defaultShortcut = ToggleShortcut.default
+        let customShortcut = ToggleShortcut(keyCode: 0, modifiers: ToggleShortcutModifiers.command)
+        let launchRegistrar = RecordingConfigurationRegistrationClient()
+        launchRegistrar.failFor = defaultShortcut
+        let launch = ShortcutConfigurationTransaction(
+            committedShortcut: defaultShortcut,
+            registrar: launchRegistrar,
+            registrationReady: false,
+            onEvent: { _ in }
+        )
+
+        do {
+            try launch.setRegistrationReady(true)
+            throw ContractFailure(message: "AppDelegate shortcut launch failure unexpectedly succeeded")
+        } catch is ContractFailure {
+            throw ContractFailure(message: "AppDelegate shortcut launch failure unexpectedly succeeded")
+        } catch {
+            guard !launch.registrationStatus.isActive,
+                  !launch.isOperationReady,
+                  launch.lastError != nil else {
+                throw ContractFailure(message: "AppDelegate shortcut launch failure published stale success")
+            }
+        }
+
+        let replacementRegistrar = RecordingConfigurationRegistrationClient(active: defaultShortcut)
+        replacementRegistrar.failFor = customShortcut
+        let replacement = ShortcutConfigurationTransaction(
+            committedShortcut: defaultShortcut,
+            registrar: replacementRegistrar,
+            onEvent: { _ in }
+        )
+        var persisted = defaultShortcut
+        guard replacement.validate(customShortcut).isConflict,
+              replacement.save(
+                customShortcut,
+                persist: { persisted = $0 },
+                restore: { persisted = defaultShortcut }
+              ).isConflict,
+              persisted == defaultShortcut,
+              replacement.committedShortcut == defaultShortcut,
+              replacement.registrationStatus.isActive,
+              replacement.isOperationReady else {
+            throw ContractFailure(message: "AppDelegate shortcut conflict replaced or disabled the current registration")
+        }
+    }
+
 
 }
