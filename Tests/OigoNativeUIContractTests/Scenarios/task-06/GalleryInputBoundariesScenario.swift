@@ -16,7 +16,8 @@ final class GalleryInputBoundariesScenario: NativeUIContractScenario {
         let fixtureRoot = qaRoot.appendingPathComponent("fixtures/native/task-06", isDirectory: true)
         let sessionRoot = qaRoot.appendingPathComponent("session/task-06", isDirectory: true)
         let evidenceRoot = arguments.evidenceRoot
-        let outsideEvidenceRoot = evidenceRoot.deletingLastPathComponent().appendingPathComponent("task-5")
+        let outsideEvidenceRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            .appendingPathComponent(".omo/evidence/oigo-shortcut-transcription-design-fidelity-outside-task-6")
         let missingRoot = fixtureRoot.appendingPathComponent("missing-owned-directory", isDirectory: true)
 
         try expectContractArguments(
