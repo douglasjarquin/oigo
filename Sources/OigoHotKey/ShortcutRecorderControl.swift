@@ -38,10 +38,13 @@ public final class ShortcutRecorderControl: NSControl {
     }
 
     public func beginRecording() {
+        if let window, window.firstResponder !== self, !window.makeFirstResponder(self) {
+            return
+        }
         shortcutBeforeRecording = shortcut
         validationError = nil
         isRecording = true
-        needsDisplay = true
+        updatePresentation()
     }
 
     public func cancelRecording() {
@@ -51,7 +54,7 @@ public final class ShortcutRecorderControl: NSControl {
         shortcut = shortcutBeforeRecording
         validationError = nil
         isRecording = false
-        needsDisplay = true
+        updatePresentation()
     }
 
     public func restoreCandidate(_ shortcut: ToggleShortcut) {
@@ -59,15 +62,25 @@ public final class ShortcutRecorderControl: NSControl {
         self.shortcut = shortcut
         validationError = nil
         isRecording = false
-        needsDisplay = true
+        updatePresentation()
     }
 
     public override func mouseDown(with event: NSEvent) {
         _ = event
-        if let window, !window.makeFirstResponder(self) {
-            return
-        }
         beginRecording()
+    }
+
+    public override func resignFirstResponder() -> Bool {
+        guard super.resignFirstResponder() else {
+            return false
+        }
+        cancelRecording()
+        return true
+    }
+
+    public override func cancelOperation(_ sender: Any?) {
+        _ = sender
+        cancelRecording()
     }
 
     public override func keyDown(with event: NSEvent) {
@@ -99,7 +112,8 @@ public final class ShortcutRecorderControl: NSControl {
             validationError = nil
             isRecording = false
             onCandidateChange?(candidate)
-            needsDisplay = true
+            sendAction(action, to: target)
+            updatePresentation()
         case .conflict(let message), .invalid(let message):
             reject(message)
         }
@@ -133,6 +147,9 @@ public final class ShortcutRecorderControl: NSControl {
     private func configureAppearance() {
         wantsLayer = true
         toolTip = "Click to record a global shortcut"
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("Global shortcut")
+        updatePresentation()
     }
 
     private func carbonModifiers(for flags: NSEvent.ModifierFlags) -> UInt32 {
@@ -155,6 +172,11 @@ public final class ShortcutRecorderControl: NSControl {
     private func reject(_ message: String) {
         validationError = message
         onValidationError?(message)
+        updatePresentation()
+    }
+
+    private func updatePresentation() {
+        setAccessibilityValue(displayValue)
         needsDisplay = true
     }
 }
