@@ -8,10 +8,30 @@ interface Props {
   description: string;
   navigation?: boolean;
   document?: boolean;
+  noindex?: boolean;
 }
 
-const { title, description, navigation = false, document: isDocument = false } = Astro.props;
+const {
+  title,
+  description,
+  navigation = false,
+  document: isDocument = false,
+  noindex = false,
+} = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
+const siteRoot = new URL(String(Astro.site).endsWith('/') ? String(Astro.site) : `${Astro.site}/`);
+const faviconUrl = new URL('favicon.png', siteRoot).href;
+const appleTouchIconUrl = new URL('apple-touch-icon.png', siteRoot).href;
+const ogImageUrl = new URL('og.png', siteRoot).href;
+const jsonLd = noindex
+  ? null
+  : JSON.stringify({
+      '@context': 'https://schema.org',
+      '@graph': [
+        { '@type': 'WebSite', name: 'Oigo', url: siteRoot.href },
+        { '@type': 'Organization', name: 'Oigo', url: siteRoot.href },
+      ],
+    });
 ---
 
 <!doctype html>
@@ -20,14 +40,20 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width" />
     <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex" />}
     <meta name="theme-color" content="#0a0a0c" />
     <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/png" href={faviconUrl} />
+    <link rel="apple-touch-icon" href={appleTouchIconUrl} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
     <meta property="og:url" content={canonical} />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image" content={ogImageUrl} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content={ogImageUrl} />
     <title>{title}</title>
+    {jsonLd && <script is:inline type="application/ld+json" set:html={jsonLd} />}
   </head>
   <body class:list={{ 'document-page': isDocument }}>
     {navigation && <SiteHeader />}

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://douglasjarquin.github.io/oigo/sitemap.xml
