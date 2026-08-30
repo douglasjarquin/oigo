@@ -49,7 +49,7 @@ private struct OigoQALaunchConfiguration {
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let recordedRoot = object["qa_root"] as? String,
               object["reviewed_plan_sha"] as? String == "4b7cf8d3e0e323b5b3d7e0f17467e5b99901682b81255ad5f06c33ad2e42a198",
-              object["execution_base_sha"] as? String == "41ecacd139f90aa6d0b84dbe4ee0fbe122644af2" else {
+              object["execution_base_sha"] as? String == "a8315736e9b9ebb8c8e0a4bd6caa987eb67b2c37" else {
             throw OigoQAInputError.invalidRunMarker
         }
         let qaRoot = URL(fileURLWithPath: recordedRoot).standardizedFileURL.resolvingSymlinksInPath()

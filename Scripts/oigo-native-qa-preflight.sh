@@ -35,7 +35,7 @@ evidence_root="${evidence_root:A}"
 if ! jq -e --arg qa_root "$qa_root" --arg attempt_dir "$attempt_dir" --arg repository "${qa_root:h:h}" '
     .qa_root == $qa_root and .attempt_dir == $attempt_dir and .repository == $repository and
     .reviewed_plan_sha == "4b7cf8d3e0e323b5b3d7e0f17467e5b99901682b81255ad5f06c33ad2e42a198" and
-    .execution_base_sha == "41ecacd139f90aa6d0b84dbe4ee0fbe122644af2" and
+    .execution_base_sha == "a8315736e9b9ebb8c8e0a4bd6caa987eb67b2c37" and
     (.run_uuid | test("^[0-9a-fA-F-]{36}$"))
 ' "$qa_root/run.json" >/dev/null; then print -u2 "ERROR invalid-run-marker"; exit 1; fi
 if [[ "$source_root" != "$qa_root/source-$app_source_sha" ]]; then print -u2 "ERROR source-sha-mismatch"; exit 1; fi
