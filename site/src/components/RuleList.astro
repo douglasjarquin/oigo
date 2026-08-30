@@ -1,0 +1,8 @@
+---
+interface Props { items: string[]; negativeFrom?: number; }
+const { items, negativeFrom = Math.max(0, items.length - 1) } = Astro.props;
+---
+
+<ul class="rule-list">
+  {items.map((item, index) => <li class:list={{ negative: index >= negativeFrom }}>{item}</li>)}
+</ul>

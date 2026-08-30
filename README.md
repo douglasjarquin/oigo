@@ -7,6 +7,11 @@ It records durable local audio, transcribes on-device with Apple Speech, optiona
 macOS 13 through 25 are not supported.
 Intel Macs are not supported.
 
+## Website
+
+The product site lives in `site/` and is published from `main` to <https://douglasjarquin.github.io/oigo/> by `.github/workflows/site.yml`.
+Its web design system is documented in `DESIGN.md`; the native AppKit design system remains `design/docs/design-system.md`.
+
 ## Install
 
 Install a notarized `Oigo.app` from the v1 download, not from this source tree.

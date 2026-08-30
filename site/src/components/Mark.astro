@@ -1,0 +1,25 @@
+---
+interface Props {
+  size?: 'small' | 'medium' | 'large' | 'document' | 'icon' | 'download' | 'design-large' | 'design-medium' | 'design-small' | 'lifecycle' | 'recording';
+  label?: string;
+}
+
+const { size = 'medium', label = 'Oigo mark' } = Astro.props;
+const dimensions = {
+  small: { width: 12, height: 16, stroke: 2.4 },
+  medium: { width: 16, height: 21, stroke: 2.4 },
+  large: { width: 72, height: 94, stroke: 2.2 },
+  document: { width: 34, height: 45, stroke: 2.2 },
+  icon: { width: 54, height: 70, stroke: 2.4 },
+  download: { width: 44, height: 58, stroke: 2.4 },
+  'design-large': { width: 88, height: 115, stroke: 2.4 },
+  'design-medium': { width: 40, height: 52, stroke: 2.4 },
+  'design-small': { width: 14, height: 18, stroke: 2.6 },
+  lifecycle: { width: 13, height: 17, stroke: 2.6 },
+  recording: { width: 12, height: 16, stroke: 2.6 },
+}[size];
+---
+
+<svg class="mark" width={dimensions.width} height={dimensions.height} viewBox="0 0 24 32" role="img" aria-label={label}>
+  <path d="M9.4 5.2 C10.2 3.7 11 2.8 12.4 2.8 C17.8 2.8 20.2 8.3 20.2 16 C20.2 23.7 17.6 29.2 12 29.2 C7 29.2 4 25.2 3.8 19.4 C3.7 13.6 5.6 9.6 8.8 8.4 C11.2 7.5 13.1 8.8 12.9 10.9 C12.7 12.9 10.6 13.4 10 15.1 C9.4 16.8 10.6 18.2 12.3 18.1" fill="none" stroke="currentColor" stroke-width={dimensions.stroke} stroke-linecap="round" />
+</svg>

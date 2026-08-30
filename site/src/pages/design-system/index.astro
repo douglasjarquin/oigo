@@ -1,0 +1,175 @@
+---
+import BaseLayout from '../../components/BaseLayout.astro';
+import CodeNote from '../../components/CodeNote.astro';
+import ComponentExamples from '../../components/ComponentExamples.astro';
+import DocHeading from '../../components/DocHeading.astro';
+import Mark from '../../components/Mark.astro';
+import RuleList from '../../components/RuleList.astro';
+import SurfaceList from '../../components/SurfaceList.astro';
+
+const toc = ['01 Logo', '02 Color', '03 Typography', '04 Layout', '05 Components', '06 Controls & forms', '07 Tables & lists', '08 States', '09 Motion', '10 Voice', '11 Do/Don’t'];
+const accents = [
+  { name: 'Recording Red', value: '#ff3b30', detail: '#ff453a dark', use: 'Recording only: HUD dot, mark stroke, Stop button. Never decorative.', tone: 'recording' },
+  { name: 'Attention Orange', value: '#ff9500', detail: '#ff9f0a dark', use: 'Needs-attention badge, degraded warnings, unavailable devices.', tone: 'attention' },
+  { name: 'Action Blue', value: '#007aff', detail: '#0a84ff dark', use: 'Primary buttons, links, info notices, focus rings, text caret.', tone: 'action' },
+  { name: 'Confirmed Green', value: '#28c840', detail: '#30d158 dark', use: 'Checkmarks: assets ready, permission granted, success rows.', tone: 'confirmed' },
+];
+const surfaces = [
+  ['Desktop backdrop', '#d8d9de', '#1f2024'], ['Window chrome', '#ececee', '#2a2a2e'], ['Content pane', '#f0f0f2', '#28282c'], ['Popover', '#f4f4f6', '#2c2c30'], ['HUD (97% opaque)', '#f8f8fa', '#2e2e32'], ['Editor / document', '#ffffff', '#1e1e20'],
+];
+const marketingSurfaces = [
+  ['Page background', '#0a0a0c'], ['Alternate band', '#0e0e11'], ['Card', '#141417'], ['Code / transcript well', '#0e0e10'], ['Hairline', 'rgba(255,255,255,.07)'],
+];
+const typeSamples = [
+  ['Hold a key. Speak.', 'Marketing display', 'SF Pro 56/1.08 · 700 · -.02em', '30px', '700'], ['Your voice never leaves', 'Marketing H2', 'SF Pro 34 · 700 · -.01em', '24px', '700'], ['Set Up Oigo', 'Window title / stage', 'SF Pro 20 · 600', '20px', '600'], ['Design review notes', 'Section header', 'SF Pro 17 · 700', '17px', '700'], ['Start Dictation', 'Control / body', 'SF Pro 13 · 400–600', '13px', '600'], ['Applies to the next dictation', 'Caption / hint', 'SF Pro 11–11.5 · 400', '11.5px', '400'], ['LAST DICTATION', 'Overline', 'SF Pro 11 · 600 · .04em · caps', '11px', '600'], ['00:12 · ⌥Space', 'Mono: timers, keys', 'SF Mono 11–13 · tabular-nums', '13px', '400'],
+];
+const spacing = [['4', 'icon↔badge, tight stacks'], ['8', 'within a control row'], ['12', 'HUD padding, list rows'], ['16', 'popover sides, card gaps'], ['24', 'card padding'], ['40', 'settings pane sides, page gutter'], ['96', 'marketing section rhythm']];
+const radii = [['5px', 'small buttons, selects, key chips'], ['6px', 'standard buttons, segmented'], ['8px', 'inline notices, wells'], ['10px', 'windows'], ['12px', 'HUD, cards, marketing panels']];
+const releases = [
+  ['v0.9.2', 'Live preview throttling, Shure MV7 channel picker', '2026-08-14'], ['v0.9.1', 'Retry transcription from History, HUD Reduce Motion support', '2026-07-30'], ['v0.9.0', 'First public beta — Instant & Clean modes, on-device only', '2026-07-08'], ['v0.8.4', 'Internal: durable recording pipeline rewrite', '2026-06-19'],
+];
+const specs = [['Requires', 'macOS 15 Sequoia or later'], ['Architecture', 'Apple silicon & Intel, universal binary'], ['Download size', '4.8 MB'], ['License', 'MIT — free forever'], ['Network use', 'None']];
+const lifecycle = [
+  ['Idle', '#8e8e93', '#f5f5f7', 'Hidden', 'resting state', false], ['Preparing', '#c9c9ce', '#f5f5f7', 'Spinner + “Preparing…”', 'until session ready', false], ['Recording', '#ff3b30', '#ff453a', 'Red dot + timer + target app + optional live preview', 'while key held', true], ['Finalizing / Cleaning / Pasting', '#c9c9ce', '#f5f5f7', 'Spinner + phase label', 'persists while active', false], ['Paste attempted', '#28c840', '#f5f5f7', '✓ terminal toast', '~1.8s auto-dismiss', false], ['Copied to Clipboard', '#28c840', '#f5f5f7', '✓ calm fallback, not an error', '~1.8s auto-dismiss', false], ['Failed — preserved', '#ff9500', '#f5f5f7', 'Warning “Recording Saved — Retry Needed”', '~3s · recovery in popover', true], ['Cancelled', '#6e6e73', '#f5f5f7', '“Cancelled”', '~1.5s auto-dismiss', false], ['Needs attention', '#ff9500', '#f5f5f7', 'None — notice lives in popover', 'until resolved', true],
+];
+const timing = [['1 Hz', 'HUD timer tick, monospaced digits'], ['≤5/s', 'live preview updates, one line max'], ['150ms', 'HUD fade in/out + 4px rise'], ['~1.8s', 'success toast dwell'], ['~3s', 'warning toast dwell'], ['~1.5s', 'cancelled toast dwell'], ['1.6s', 'recording pulse period']];
+const copyPairs = [['Paste attempted', 'Pasted successfully!'], ['Recording preserved. Live transcription degraded.', 'Transcription failed.'], ['Shure MV7 is disconnected. Oigo will not substitute another device.', 'Switched to built-in mic for you!'], ['Hold ⌥Space to dictate', 'Press your hotkey to begin your journey']];
+const patterns = [
+  ['✓', 'confirmed', 'One primary action per surface', 'The popover has exactly one filled button; its label and color track state (Start / Stop / Retry). Everything else is bordered or plain text.'], ['✓', 'confirmed', 'Errors point somewhere', 'Transient toasts announce; persistent recovery lives in the popover notice and History. A toast is never the only record of a failure.'], ['✓', 'confirmed', 'Respect the user’s hardware choice', 'A missing device is reported as unavailable, never silently swapped. State the consequence and offer the switch as a button.'], ['✓', 'confirmed', 'Both appearances, one definition', 'Every surface, border, and text color ships as a light-dark() pair. Semantic accents use the darker variant on dark backgrounds.'], ['✕', 'recording', 'No modal interruptions', 'Oigo never steals focus mid-dictation. All states surface through HUD, badge, or popover — the user’s target app keeps focus.'], ['✕', 'recording', 'No decorative motion or color', 'Red is recording, orange is attention, green is confirmed, blue acts. If an element animates, it is reporting live activity — nothing else moves.'],
+];
+
+---
+
+<BaseLayout title="Oigo Design System" description="Oigo's web design system, translated from the product design references." document>
+  <div class="doc-shell">
+    <header class="doc-header">
+      <div class="doc-title-row"><Mark size="document" label="Oigo mark" /><div><h1>Oigo Design System</h1><p class="mono">v1.0 · macOS app + marketing · Aug 2026</p></div></div>
+      <p class="doc-intro">Oigo dresses as a native macOS citizen: system fonts, system colors, system materials. The design system adds only what the platform doesn’t provide — the mark, state semantics, HUD anatomy, voice. When in doubt, do what macOS would do.</p>
+      <nav class="toc" aria-label="Design system sections">{toc.map((item) => <a href={`#section-${item.slice(0, 2)}`}>{item}</a>)}</nav>
+    </header>
+
+    <section id="section-01" class="doc-section"><DocHeading number="01" title="Logo & iconography">The mark is an O whose left wall curls inward like an ear — it also reads as a G. One continuous stroke, always outlined, never filled. “¿Oigo?” — <em>I can hear you.</em></DocHeading><div class="doc-grid three-up"><article class="doc-card"><h3>Primary mark</h3><div class="mark-sizes"><Mark size="design-large" /><Mark size="design-medium" /><Mark size="design-small" /></div><CodeNote>stroke 2.4 · round caps · currentColor<br />menu-bar size (13×17): stroke 2.6</CodeNote></article><article class="doc-card"><h3>App icon</h3><div class="app-icons"><span><Mark size="icon" /></span><span><Mark size="icon" /></span></div><CodeNote>squircle #0b0c10 (default) or #f2f2f4<br />mark at 59% of icon height, centered</CodeNote></article><article class="doc-card"><h3>Rules</h3><RuleList negativeFrom={2} items={['Menu bar uses template rendering — currentColor, adapts to menu bar appearance', 'Recording is the only time the mark itself changes color (red)', 'Never fill the mark, add gradients, or rotate it', 'Never redraw the ear curl — use the provided path']} /></article></div></section>
+
+    <section id="section-02" class="doc-section"><DocHeading number="02" title="Color">In-app color is macOS system color, expressed as <span class="mono">light-dark()</span> pairs so every surface adapts. Semantic accents are reserved: red means recording, orange means attention, blue means information or action, green means confirmed.</DocHeading><h3 class="subhead">Semantic accents</h3><div class="doc-grid four-up">{accents.map((accent) => <article class="swatch-card"><div class:list={['swatch', accent.tone]}></div><div><h3>{accent.name}</h3><CodeNote>{accent.value} · {accent.detail}</CodeNote><p>{accent.use}</p></div></article>)}</div><div class="doc-grid two-up surfaces-grid"><SurfaceList title="Surfaces — app (light-dark pairs)" items={surfaces} paired /><SurfaceList title="Surfaces — marketing (dark only)" items={marketingSurfaces} /><p class="doc-note">The landing page is permanently dark — privacy-forward, terminal-adjacent. Marketing never uses light mode; the app always supports both.</p></div></section>
+
+    <section id="section-03" class="doc-section"><DocHeading number="03" title="Typography">Two families, both system: SF Pro Text for everything, SF Mono for shortcuts, timers, transcripts, and technical annotations. Timers and clocks always set <span class="mono">font-variant-numeric: tabular-nums</span>.</DocHeading><div class="doc-grid type-grid"><article class="doc-card type-samples">{typeSamples.map((sample) => <div class="type-row"><span style={`font-size:${sample[3]};font-weight:${sample[4]}`}>{sample[0]}</span><strong>{sample[1]}</strong><CodeNote>{sample[2]}</CodeNote></div>)}</article><article class="doc-card"><h3>Rules</h3><RuleList items={['App UI floor is 11px (annotations); body is 13px — standard macOS control size', 'Shortcuts render in SF Mono inside a subtle key-cap chip: ⌥Space', 'Marketing headlines: 700 weight, -.02em tracking, text-wrap: balance', 'No third fonts, no italics except quoted transcript previews']} /></article></div></section>
+
+    <section id="section-04" class="doc-section"><DocHeading number="04" title="Layout & spacing">No rigid grid — macOS spacing conventions, consistently applied.</DocHeading><div class="doc-grid three-up"><article class="doc-card"><h3>Spacing scale</h3>{spacing.map((item) => <div class="scale-row"><CodeNote>{item[0]}</CodeNote><i style={`width:${item[0]}px`}></i><span>{item[1]}</span></div>)}</article><article class="doc-card"><h3>Corner radii</h3>{radii.map((item) => <div class="scale-row"><i class="radius-sample" style={`border-radius:${item[0]}`}></i><CodeNote>{item[0]}</CodeNote><span>{item[1]}</span></div>)}</article><article class="doc-card"><h3>Fixed dimensions</h3><dl class="dimensions"><dt>Popover width</dt><dd>340px</dd><dt>HUD width</dt><dd>224–300px</dd><dt>Settings window</dt><dd>720px</dd><dt>Onboarding window</dt><dd>640px</dd><dt>Settings label column</dt><dd>180px right-aligned</dd><dt>Marketing content</dt><dd>1060px max</dd></dl></article></div></section>
+
+    <section id="section-05" class="doc-section"><DocHeading number="05" title="Components">Shown on both schemes. Every component is built from light-dark() pairs — one definition, two appearances.</DocHeading><div class="doc-grid two-up schemes">{['LIGHT', 'DARK'].map((scheme) => <article class:list={['scheme', scheme.toLowerCase()]}><CodeNote>{scheme}</CodeNote><ComponentExamples /></article>)}</div></section>
+
+    <section id="section-06" class="doc-section"><DocHeading number="06" title="Web — controls & forms">For the landing page, docs, and any web surface. Dark only, on marketing surfaces. In-app forms use native macOS controls — see section 05. Web accent is <span class="mono">#3f8cff</span> (Action Blue lifted for dark backgrounds).</DocHeading><div class="doc-grid two-up"><article class="doc-card form-card"><h3 class="subhead">Text inputs</h3><label>Email<input placeholder="you@example.com" /><small>For release announcements only. No marketing.</small></label><label>Focused<input class="focused" value="oigo.app/releases" /></label><label>Invalid<input class="invalid" value="not-an-email" /><small class="error">Enter a valid email address.</small></label><label>Message<textarea rows="3" placeholder="What went wrong, and in which app?"></textarea></label><CodeNote>field #0e0e10 · border rgba(255,255,255,.14) · radius 8 · padding 9×12</CodeNote><h3 class="subhead">Select · slider</h3><div class="control-line"><select><option>macOS 15 Sequoia</option><option>macOS 16</option></select><input type="range" value="65" /><CodeNote>65%</CodeNote></div></article><div class="stacked-doc-cards"><article class="doc-card"><h3 class="subhead">Buttons</h3><div class="control-line"><a class="button-primary" href="#section-06">⇩ Download</a><a class="button-secondary" href="#section-06">View on GitHub</a><a href="#section-06">Text link →</a></div><CodeNote>primary = white fill · secondary = 1px border · radius 9 · never blue-filled</CodeNote></article><article class="doc-card"><h3 class="subhead">Checkbox · radio</h3><label><input type="checkbox" checked /> Notify me about releases</label><label><input type="checkbox" /> Include beta builds</label><label class="disabled"><input type="checkbox" disabled /> Disabled option</label><label><input type="radio" name="architecture" checked /> Apple silicon</label><label><input type="radio" name="architecture" /> Intel</label></article><article class="doc-card"><h3>Web form rules</h3><RuleList items={['Labels above fields; hints below at 11.5px', 'Focus ring: 1px #3f8cff border + 3px glow', 'Invalid: red border + red message replacing the hint', 'No floating labels, placeholder-as-label, or blue-filled buttons']} /></article></div></div></section>
+
+    <section id="section-07" class="doc-section"><DocHeading number="07" title="Web — tables & lists">Web tables are borderless grids on card surfaces: uppercase 11px header on <span class="mono">#18181c</span>, rows on <span class="mono">#141417</span> separated by hairlines. Numbers, versions, and durations in SF Mono with tabular figures. In-app tables (History, Dictionary) use native macOS list styling — see those prototypes.</DocHeading><div class="doc-grid table-grid"><article><h3 class="subhead">Data table (releases)</h3><div class="data-table"><div class="table-row table-header"><span>Version</span><span>Highlights</span><span>Date</span><span></span></div>{releases.map((row) => <div class="table-row"><CodeNote>{row[0]}</CodeNote><span>{row[1]}</span><CodeNote>{row[2]}</CodeNote><a href="#section-07">Notes →</a></div>)}</div><CodeNote>row padding 12×20 · one link column max, right-aligned</CodeNote></article><div class="stacked-doc-cards"><article><h3 class="subhead">Definition table (specs)</h3><div class="definition-table">{specs.map((row) => <div><span>{row[0]}</span><strong>{row[1]}</strong></div>)}</div><CodeNote>two columns, key 130px muted · for specs, requirements, comparisons</CodeNote></article><article><h3 class="subhead">Lists</h3><div class="doc-card list-card"><p><b>—</b> Unordered: em-dash marker in Action Blue, never bullets or emoji</p><p><b>01</b> Ordered: two-digit SF Mono numerals, as in “How it works”</p><p><b>✓</b> Checklist: green check for capabilities, red ✕ for exclusions</p></div></article></div></div></section>
+
+    <section id="section-08" class="doc-section"><DocHeading number="08" title="States & badges">The dictation lifecycle and how each phase surfaces in the menu bar and HUD. Terminal states auto-dismiss; active states persist.</DocHeading><div class="lifecycle"><div class="lifecycle-row lifecycle-header"><span>Phase</span><span>Menu-bar icon</span><span>HUD</span><span>Duration</span></div>{lifecycle.map((row) => <div class="lifecycle-row"><span class="phase"><i style={`background:${row[1]}`}></i>{row[0]}</span><span class="life-mark" style={`color:${row[2]}`}><Mark size="lifecycle" />{row[5] && <i class="badge" style={`background:${row[1]}`}></i>}</span><span>{row[3]}</span><CodeNote>{row[4]}</CodeNote></div>)}</div></section>
+
+    <section id="section-09" class="doc-section"><DocHeading number="09" title="Motion & timing">Motion is informational, never decorative. Two animations exist in the entire app.</DocHeading><div class="doc-grid two-up"><article class="doc-card"><h3>Animations</h3><p class="animation-row"><i class="recording-dot"></i><strong>Recording pulse</strong><CodeNote>opacity 1→.45 · 1.6s ease-in-out ∞</CodeNote></p><p class="animation-row"><i class="spinner"></i><strong>Activity spinner</strong><CodeNote>system spinner · .9s linear ∞</CodeNote></p><hr /><p>HUD enters/exits with a 150ms fade + 4px rise. No springs, no bounces. Respect Reduce Motion: pulse becomes static, fades become instant.</p></article><article class="doc-card"><h3>Timing constants</h3>{timing.map((row) => <p class="timing-row"><CodeNote>{row[0]}</CodeNote><span>{row[1]}</span></p>)}</article></div></section>
+
+    <section id="section-10" class="doc-section"><DocHeading number="10" title="Voice & copy">Oigo speaks like a careful engineer: precise about what happened, honest about what it can’t verify, never alarmed. It says “Paste attempted,” not “Pasted” — it can’t know. Failures lead with what was preserved.</DocHeading><div class="doc-grid two-up"><article class="doc-card"><h3>Principles</h3><RuleList negativeFrom={4} items={['Claim only what you know. “Paste attempted”, “Copied to Clipboard” — never assert success inside another app.', 'Lead with preservation. Every failure message starts from what survived: “Recording preserved.”', 'Name the fix. Every notice pairs a problem with exactly one action button.', 'Sentence case, no exclamation marks, no blame. “Microphone unavailable”, not “Oops! Mic error!”']} /></article><article class="doc-card"><h3>Do / don’t</h3>{copyPairs.map((pair) => <div class="copy-pair"><p><b>✓</b>{pair[0]}</p><p><b>✕</b><del>{pair[1]}</del></p></div>)}</article></div></section>
+
+    <section id="section-11" class="doc-section final-doc-section"><DocHeading number="11" title="Do / don’t — patterns" /><div class="doc-grid two-up">{patterns.map((pattern) => <article class="doc-card pattern-card"><h3><b class={pattern[1]}>{pattern[0]}</b>{pattern[2]}</h3><p>{pattern[3]}</p></article>)}</div><p class="reference-links">Reference implementations: <a href="https://github.com/douglasjarquin/oigo/blob/main/design/Popover%20%2B%20HUD%20Prototype.dc.html">Popover + HUD</a> · <a href="https://github.com/douglasjarquin/oigo/blob/main/design/State%20Boards.dc.html">State Boards</a> · <a href="https://github.com/douglasjarquin/oigo/blob/main/design/Settings.dc.html">Settings</a> · <a href="https://github.com/douglasjarquin/oigo/blob/main/design/Onboarding.dc.html">Onboarding</a> · <a href="https://github.com/douglasjarquin/oigo/blob/main/design/History.dc.html">History</a> · <a href="https://github.com/douglasjarquin/oigo/blob/main/design/Oigo%20Icon.dc.html">Icon</a> · <a href="https://github.com/douglasjarquin/oigo/blob/main/design/Landing%20Page.dc.html">Landing Page</a></p></section>
+  </div>
+</BaseLayout>
+
+<style is:global>
+  .document-page { background: var(--color-page); }
+  .doc-shell { width: min(100% - 112px, 1400px); margin: 0 auto; padding: 48px 0 72px; display: flex; flex-direction: column; gap: var(--space-16); }
+  .doc-header { display: flex; flex-direction: column; gap: var(--space-4); border-bottom: 1px solid rgba(255, 255, 255, .09); padding-bottom: var(--space-10); }
+  .doc-title-row { display: flex; align-items: center; gap: var(--space-4); }
+  .doc-title-row h1 { margin: 0; color: var(--color-text-primary); font-size: 30px; line-height: 1.2; letter-spacing: -.01em; }
+  .doc-title-row p { margin: var(--space-1) 0 0; color: var(--color-text-muted); font-size: 12px; }
+  .doc-intro, .doc-heading p, .doc-note, .doc-card p, .pattern-card p { max-width: 720px; margin: 0; color: var(--color-text-secondary); font-size: 13.5px; line-height: 1.6; text-wrap: pretty; }
+  .toc { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  .toc a { border: 1px solid rgba(255, 255, 255, .12); border-radius: 100px; padding: var(--space-1) var(--space-3); color: var(--color-text-muted); font: 11px/1.4 var(--font-mono); }
+  .doc-section { display: flex; flex-direction: column; gap: var(--space-6); scroll-margin-top: var(--space-6); }
+  .doc-heading { display: flex; flex-direction: column; gap: var(--space-1); }
+  .doc-heading .number { color: var(--color-action); font: 12px/1.4 var(--font-mono); }
+  .doc-heading h2 { margin: 0; color: var(--color-text-primary); font-size: 24px; line-height: 1.2; }
+  .doc-grid { display: grid; gap: var(--space-5); align-items: start; }
+  .three-up { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .four-up { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .two-up { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .doc-card, .swatch-card, .definition-table, .data-table, .lifecycle { border: 1px solid var(--color-hairline); border-radius: var(--radius-card); background: var(--color-card); }
+  .doc-card { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-6); }
+  .doc-card h3, .swatch-card h3 { margin: 0; color: #c9c9ce; font-size: 13px; font-weight: 600; }
+  .subhead { color: var(--color-text-muted) !important; font-size: 11px !important; letter-spacing: .05em; text-transform: uppercase; }
+  .mono, .doc-card code { font-family: var(--font-mono); }
+  .code-note { color: var(--color-text-muted); font: 11px/1.6 var(--font-mono); }
+  .mark-sizes { display: flex; align-items: flex-end; gap: var(--space-8); min-height: 115px; color: var(--color-text-primary); }
+  .app-icons { display: flex; align-items: flex-end; gap: var(--space-4); }
+  .app-icons span { display: grid; width: 92px; height: 92px; place-items: center; border-radius: 21px; background: #0b0c10; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08), 0 8px 20px rgba(0,0,0,.45); color: var(--color-text-primary); }
+  .app-icons span:last-child { background: #f2f2f4; color: #1d1d1f; }
+  .rule-list { display: flex; flex-direction: column; gap: var(--space-3); margin: 0; padding: 0; list-style: none; color: var(--color-text-secondary); font-size: 12.5px; line-height: 1.5; }
+  .rule-list li { display: flex; gap: var(--space-2); }
+  .rule-list li::before { flex: none; color: var(--color-confirmed); content: '✓'; }
+  .rule-list li.negative::before { color: var(--color-recording); content: '✕'; }
+  .swatch-card { overflow: hidden; }
+  .swatch { height: 64px; }
+  .swatch.recording { background: #ff3b30; } .swatch.attention { background: #ff9500; } .swatch.action { background: #007aff; } .swatch.confirmed { background: #28c840; }
+  .swatch-card > div:last-child { display: flex; flex-direction: column; gap: 3px; padding: var(--space-3) 14px; }
+  .swatch-card p { margin: 3px 0 0; color: var(--color-text-muted); font-size: 11.5px; line-height: 1.45; }
+  .surfaces-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .surface-list { display: flex; min-width: 0; flex-direction: column; gap: var(--space-3); }
+  .surface-list h3 { margin: 0; color: #c9c9ce; font-size: 13px; }
+  .surface-list-inner { min-width: 0; overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; }
+  .surface-row { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.05); background: var(--color-card); }
+  .surface-pair { display: flex; flex: none; overflow: hidden; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; }
+  .surface-pair i { width: 26px; height: 26px; } .surface-single { width: 54px; height: 26px; flex: none; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; }
+  .surface-row strong { width: 150px; flex: none; color: var(--color-text-primary); font-size: 12.5px; font-weight: 400; }
+  .surface-row .code-note { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .type-grid { grid-template-columns: 1.4fr 1fr; }
+  .type-samples { gap: 0; }
+  .type-row { display: grid; grid-template-columns: minmax(180px, 290px) 150px minmax(0, 1fr); align-items: baseline; gap: var(--space-5); padding: var(--space-3) 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+  .type-row > span { overflow: hidden; color: var(--color-text-primary); text-overflow: ellipsis; white-space: nowrap; }
+  .type-row strong { color: #c9c9ce; font-size: 12.5px; font-weight: 400; }
+  .scale-row, .timing-row { display: flex; align-items: center; gap: var(--space-3); min-width: 0; color: var(--color-text-muted); font-size: 11.5px; }
+  .scale-row i { height: 10px; min-width: 4px; border-radius: 2px; background: var(--color-action); opacity: .75; }
+  .scale-row .radius-sample { width: 34px; height: 26px; flex: none; border: 1.5px solid var(--color-action); opacity: .85; }
+  .dimensions { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: var(--space-2) var(--space-4); margin: 0; color: var(--color-text-secondary); font-size: 12.5px; line-height: 1.5; }
+  .dimensions dd { margin: 0; color: #c9c9ce; font: 11px var(--font-mono); }
+  .schemes { gap: var(--space-5); }
+  .scheme { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; border-radius: var(--radius-card); padding: var(--space-6); }
+  .scheme.light { background: #d8d9de; color: #1d1d1f; } .scheme.dark { background: #1f2024; color: var(--color-text-body); }
+  .component-group { display: flex; flex-direction: column; gap: var(--space-2); }
+  .component-label { color: var(--color-text-muted); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+  .component-line, .control-line { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+  .scheme button, .form-card input, .form-card textarea, .form-card select, .scheme select { border: 1px solid rgba(255,255,255,.2); border-radius: var(--radius-small); padding: 4px 12px; background: #48484c; color: var(--color-text-primary); font-size: 12px; }
+  .scheme button { min-height: 30px; border: 0; background: #0a84ff; color: #fff; font-weight: 600; cursor: pointer; }
+  .scheme button.stop { background: #ff3b30; } .scheme button.disabled { opacity: .5; } .scheme button.text-button { border: 0; background: transparent; color: var(--color-action); }
+  .notice-sample { display: flex; align-items: flex-start; gap: 10px; max-width: 360px; border-radius: 8px; padding: 10px 12px; background: rgba(255,255,255,.06); font-size: 11.5px; }
+  .hud-sample { max-width: 300px; border-radius: var(--radius-card); padding: 10px 14px; background: rgba(46,46,50,.97); box-shadow: 0 8px 28px rgba(0,0,0,.3); }
+  .form-card { gap: var(--space-3); }
+  .form-card label { display: flex; flex-direction: column; gap: 5px; color: #d1d1d6; font-size: 12.5px; }
+  .form-card input, .form-card textarea, .form-card select { padding: 9px 12px; background: var(--color-well); color: var(--color-text-primary); font-size: 13.5px; font-family: inherit; }
+  .form-card input.focused { border-color: var(--color-action); box-shadow: 0 0 0 3px rgba(63,140,255,.22); } .form-card input.invalid { border-color: var(--color-recording); }
+  .form-card small { color: var(--color-text-muted); font-size: 11.5px; } .form-card small.error { color: var(--color-recording); }
+  .form-card input[type='range'] { padding: 0; accent-color: var(--color-action); }
+  .stacked-doc-cards { display: flex; flex-direction: column; gap: var(--space-5); }
+  .stacked-doc-cards > article, .table-grid > article { display: flex; flex-direction: column; gap: var(--space-2); }
+  .stacked-doc-cards .doc-card { gap: var(--space-3); }
+  .stacked-doc-cards label { display: block; margin: var(--space-2) 0; color: var(--color-text-body); font-size: 13.5px; }
+  .stacked-doc-cards label input { margin-right: var(--space-2); accent-color: var(--color-action); }
+  .stacked-doc-cards label.disabled { color: var(--color-text-tertiary); }
+  .table-grid { grid-template-columns: 1.3fr 1fr; }
+  .table-row { display: grid; grid-template-columns: 90px minmax(0, 1fr) 110px 90px; gap: 0; align-items: center; padding: 12px 20px; border-top: 1px solid rgba(255,255,255,.05); background: var(--color-card); color: var(--color-text-secondary); font-size: 13px; }
+  .table-header { border: 0; background: #18181c; color: var(--color-text-muted); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+  .table-row a { justify-self: end; font-size: 12.5px; }
+  .definition-table { overflow: hidden; }
+  .definition-table > div { display: flex; align-items: baseline; gap: var(--space-4); padding: 11px 20px; border-top: 1px solid rgba(255,255,255,.05); font-size: 13px; }
+  .definition-table span { width: 130px; flex: none; color: var(--color-text-muted); font-size: 12.5px; } .definition-table strong { color: var(--color-text-body); font-weight: 400; }
+  .list-card p { display: flex; gap: 10px; margin: 0; } .list-card b { width: 24px; flex: none; color: var(--color-action); font-family: var(--font-mono); }
+  .lifecycle { overflow: hidden; }
+  .lifecycle-row { display: grid; grid-template-columns: 170px 130px minmax(0, 1fr) 200px; gap: 0; align-items: center; padding: 11px 20px; border-top: 1px solid rgba(255,255,255,.05); color: var(--color-text-secondary); font-size: 12.5px; }
+  .lifecycle-header { border: 0; background: #18181c; color: var(--color-text-muted); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+  .phase { display: flex; align-items: center; gap: var(--space-2); color: #f0f0f2; font-size: 13px; } .phase i { width: 8px; height: 8px; border-radius: 50%; }
+  .life-mark { position: relative; display: flex; width: 30px; justify-content: center; } .life-mark .badge { position: absolute; top: -1px; right: 2px; width: 5px; height: 5px; border-radius: 50%; }
+  .animation-row { display: grid; grid-template-columns: 16px 130px minmax(0, 1fr); align-items: center; gap: var(--space-3); }
+  .animation-row strong { color: var(--color-text-primary); font-size: 12.5px; font-weight: 400; } .animation-row .recording-dot { display: block; } .spinner { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.22); border-top-color: #ddd; border-radius: 50%; animation: oigo-pulse .9s linear infinite; }
+  .doc-card hr { width: 100%; border: 0; border-top: 1px solid rgba(255,255,255,.06); } .timing-row .code-note { width: 60px; flex: none; text-align: right; color: var(--color-action); }
+  .copy-pair { padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,.05); } .copy-pair p { display: flex; gap: var(--space-2); font-size: 12.5px; } .copy-pair b { color: var(--color-confirmed); } .copy-pair p:last-child b { color: var(--color-recording); } .copy-pair p:last-child { color: var(--color-text-tertiary); }
+  .pattern-card h3 { display: flex; align-items: baseline; gap: var(--space-2); } .pattern-card h3 b { font-size: 12px; } .confirmed { color: var(--color-confirmed); } .recording { color: var(--color-recording); }
+  .reference-links { border-top: 1px solid var(--color-hairline); padding-top: var(--space-5); color: var(--color-text-tertiary); font: 11px/1.5 var(--font-mono); }
+  @media (max-width: 980px) { .doc-shell { width: min(100% - 48px, 720px); } .three-up, .four-up, .two-up, .surfaces-grid, .type-grid, .table-grid { grid-template-columns: 1fr; } .lifecycle { overflow-x: auto; } .lifecycle-row { min-width: 760px; } }
+  @media (max-width: 560px) { .doc-shell { width: min(100% - 32px, 720px); padding-top: var(--space-10); } .doc-title-row h1 { font-size: 24px; } .doc-title-row > .mark { width: 48px; height: 63px; } .doc-card { padding: var(--space-5); } .type-row { grid-template-columns: 1fr; gap: var(--space-1); } .surface-row strong { width: 120px; } }
+</style>
