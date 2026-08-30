@@ -73,10 +73,11 @@ public final class ShortcutConfigurationTransaction {
             return basicValidation
         }
 
-        let previous = committedShortcut
         do {
             try registrar.register(shortcut: candidate, onEvent: onEvent)
         } catch {
+            candidateShortcut = committedShortcut
+            registrar.unregister()
             let validation = OigoShortcutValidation.conflict(String(describing: error))
             configurationError = Self.message(for: validation)
             return validation
@@ -86,23 +87,14 @@ public final class ShortcutConfigurationTransaction {
             try persist(candidate)
         } catch {
             var failure = "Shortcut save failed: \(error)"
-            var compensationFailed = false
             do {
                 try restore()
             } catch let restorePersistenceError {
-                compensationFailed = true
                 failure += ". Previous settings could not be restored: \(restorePersistenceError)"
             }
-            do {
-                try registrar.register(shortcut: previous, onEvent: onEvent)
-            } catch let restoreError {
-                compensationFailed = true
-                failure += ". Previous registration could not be restored: \(restoreError)"
-            }
-            if compensationFailed {
-                registrar.unregister()
-                failure += ". Shortcut registration was disabled until the prior settings can be restored"
-            }
+            candidateShortcut = committedShortcut
+            registrar.unregister()
+            failure += ". Shortcut registration was disabled until a shortcut is saved again"
             let validation = OigoShortcutValidation.conflict(failure)
             configurationError = Self.message(for: validation)
             return validation

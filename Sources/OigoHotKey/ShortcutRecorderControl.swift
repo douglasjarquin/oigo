@@ -51,7 +51,6 @@ public final class ShortcutRecorderControl: NSControl {
         shortcut = shortcutBeforeRecording
         validationError = nil
         isRecording = false
-        onCandidateChange?(shortcut)
         needsDisplay = true
     }
 
