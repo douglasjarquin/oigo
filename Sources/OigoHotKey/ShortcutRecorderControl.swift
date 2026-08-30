@@ -57,6 +57,16 @@ public final class ShortcutRecorderControl: NSControl {
         updatePresentation()
     }
 
+    public func clearShortcut() {
+        shortcutBeforeRecording = .default
+        shortcut = .default
+        validationError = nil
+        isRecording = false
+        onCandidateChange?(shortcut)
+        sendAction(action, to: target)
+        updatePresentation()
+    }
+
     public func restoreCandidate(_ shortcut: ToggleShortcut) {
         shortcutBeforeRecording = shortcut
         self.shortcut = shortcut

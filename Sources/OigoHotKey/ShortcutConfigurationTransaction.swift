@@ -110,6 +110,13 @@ public final class ShortcutConfigurationTransaction {
         candidateShortcut = committedShortcut
     }
 
+    public func clear(
+        persist: (ToggleShortcut) throws -> Void,
+        restore: () throws -> Void
+    ) -> OigoShortcutValidation {
+        save(.default, persist: persist, restore: restore)
+    }
+
     public func clearError() {
         configurationError = nil
     }

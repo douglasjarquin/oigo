@@ -13,6 +13,7 @@ final class ShortcutRecorderScenario: NativeUIContractScenario {
         }
 
         try MainActor.assumeIsolated {
+            try assertNestedEvidenceRootIsCreated(arguments: arguments)
             let selected = arguments.fixtureRoot.lastPathComponent
             guard ["task-07", "success", "failure"].contains(selected) else {
                 throw ContractInputError(category: "unsupported-shortcut-fixture")
@@ -25,9 +26,31 @@ final class ShortcutRecorderScenario: NativeUIContractScenario {
             }
             print(
                 "PASS shortcut-recorder focus=first-responder keyCode=0 capture-count=1 "
-                    + "repeat=ignored modifiers=0xf00 cancel=preserved clear=preserved "
+                    + "repeat=ignored modifiers=0xf00 cancel=preserved clear=default-committed "
                     + "focus-loss=preserved reuse=committed"
             )
+        }
+    }
+
+    private static func assertNestedEvidenceRootIsCreated(arguments: ContractArguments) throws {
+        let nestedEvidenceRoot = arguments.evidenceRoot
+            .appendingPathComponent("shortcut-recorder-nested-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: nestedEvidenceRoot) }
+        guard !FileManager.default.fileExists(atPath: nestedEvidenceRoot.path) else {
+            throw ContractInputError(category: "stale-nested-evidence-root")
+        }
+        let nested = try ContractArguments.parse([
+            "--scenario", scenarioName,
+            "--defaults-suite", arguments.defaultsSuite,
+            "--fixture-root", arguments.fixtureRoot.path,
+            "--evidence-root", nestedEvidenceRoot.path
+        ])
+        var isDirectory = ObjCBool(false)
+        let normalizedNestedEvidenceRoot = nestedEvidenceRoot.standardizedFileURL.resolvingSymlinksInPath()
+        guard nested.evidenceRoot.path == normalizedNestedEvidenceRoot.path,
+              FileManager.default.fileExists(atPath: nestedEvidenceRoot.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            throw ContractInputError(category: "nested-evidence-root-not-created")
         }
     }
 
@@ -101,7 +124,7 @@ final class ShortcutRecorderScenario: NativeUIContractScenario {
         guard !harness.recorder.isRecording,
               harness.recorder.shortcut == committed,
               harness.target.invocationCount == 0 else {
-            throw ContractInputError(category: "clear-mutated-committed-shortcut")
+            throw ContractInputError(category: "cancel-operation-mutated-committed-shortcut")
         }
 
         harness.recorder.beginRecording()
@@ -130,6 +153,44 @@ final class ShortcutRecorderScenario: NativeUIContractScenario {
               harness.target.invocationCount == 1,
               harness.target.lastSender === harness.recorder else {
             throw ContractInputError(category: "post-cancel-reuse-failed")
+        }
+
+        try runClearTransaction()
+    }
+
+    @MainActor
+    private static func runClearTransaction() throws {
+        let harness = makeHarness()
+        let custom = ToggleShortcut(keyCode: 13, modifiers: ToggleShortcutModifiers.command)
+        let registrar = ScenarioRegistrar(active: custom)
+        let transaction = ShortcutConfigurationTransaction(
+            committedShortcut: custom,
+            registrar: registrar,
+            onEvent: { _ in }
+        )
+        var persisted = custom
+        harness.recorder.restoreCandidate(custom)
+        harness.recorder.onCandidateChange = { transaction.setCandidate($0) }
+
+        harness.recorder.beginRecording()
+        harness.recorder.clearShortcut()
+        guard !harness.recorder.isRecording,
+              harness.recorder.shortcut == .default,
+              transaction.candidateShortcut == .default,
+              harness.target.invocationCount == 1,
+              harness.target.lastSender === harness.recorder else {
+            throw ContractInputError(category: "clear-did-not-remove-custom-candidate")
+        }
+
+        guard transaction.clear(
+            persist: { persisted = $0 },
+            restore: { persisted = custom }
+        ).isAvailable,
+              transaction.committedShortcut == .default,
+              transaction.candidateShortcut == .default,
+              persisted == .default,
+              registrar.status == .active(.default, generation: 2) else {
+            throw ContractInputError(category: "clear-did-not-commit-canonical-default")
         }
     }
 

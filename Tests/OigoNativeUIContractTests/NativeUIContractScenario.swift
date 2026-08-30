@@ -50,7 +50,15 @@ struct ContractArguments {
         guard isWithin(evidenceRoot, of: approvedTaskEvidenceRoot) else {
             throw ContractInputError(category: "outside-evidence-root")
         }
-        guard isDirectory(fixtureRoot), isDirectory(evidenceRoot) else {
+        guard isDirectory(fixtureRoot) else {
+            throw ContractInputError(category: "missing-owned-directory")
+        }
+        do {
+            try FileManager.default.createDirectory(at: evidenceRoot, withIntermediateDirectories: true)
+        } catch {
+            throw ContractInputError(category: "missing-owned-directory")
+        }
+        guard isDirectory(evidenceRoot) else {
             throw ContractInputError(category: "missing-owned-directory")
         }
 
