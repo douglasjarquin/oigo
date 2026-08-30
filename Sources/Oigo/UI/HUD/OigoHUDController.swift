@@ -77,6 +77,7 @@ public final class OigoHUDController {
     private var recordingTimer: Timer?
     private var recordingStartedAt: Date?
     private var previewText = ""
+    private var shortcutReleaseHint: String?
     private var sessionReference: AnyObject?
     private var renderRevision: UInt64 = 0
 
@@ -119,7 +120,8 @@ public final class OigoHUDController {
         generation: UInt64,
         placementInput: HUDPlacementInput? = nil,
         startedAt: Date? = nil,
-        sessionReference: AnyObject? = nil
+        sessionReference: AnyObject? = nil,
+        shortcutReleaseHint: String
     ) -> Bool {
         guard lifecycle.present(state, generation: generation, visible: true) else {
             return false
@@ -129,7 +131,8 @@ public final class OigoHUDController {
         stopRecordingTimer()
         releaseTransientReferences()
 
-        let content = OigoHUDShellPolicy.content(for: state)
+        self.shortcutReleaseHint = shortcutReleaseHint
+        let content = OigoHUDShellPolicy.content(for: state, releaseHint: shortcutReleaseHint)
         render(content: content, state: state, startedAt: startedAt)
         if state == .shutdown {
             lifecycle.shutdown()
@@ -158,7 +161,7 @@ public final class OigoHUDController {
         guard lifecycle.generation == generation,
               lifecycle.visible,
               let state = lifecycle.state,
-              OigoHUDShellPolicy.content(for: state).allowsPreview,
+              OigoHUDShellPolicy.allowsPreview(state),
               lifecycle.previewPublicationAllowed(at: time) else {
             return false
         }
@@ -185,17 +188,17 @@ public final class OigoHUDController {
 
     @discardableResult
     public func cancel(generation: UInt64, afterDurableRaw: Bool) -> Bool {
-        guard lifecycle.generation == generation else { return false }
+        guard lifecycle.generation == generation, let shortcutReleaseHint else { return false }
         let state: OigoHUDState = afterDurableRaw ? .cancelledAfterRaw : .cancelledBeforeRaw
         invalidateOperationResources()
-        return present(state, generation: generation)
+        return present(state, generation: generation, shortcutReleaseHint: shortcutReleaseHint)
     }
 
     @discardableResult
     public func interrupt(generation: UInt64) -> Bool {
-        guard lifecycle.generation == generation else { return false }
+        guard lifecycle.generation == generation, let shortcutReleaseHint else { return false }
         invalidateOperationResources()
-        return present(.interrupted, generation: generation)
+        return present(.interrupted, generation: generation, shortcutReleaseHint: shortcutReleaseHint)
     }
 
     public func shutdown() {
@@ -303,7 +306,7 @@ public final class OigoHUDController {
     private func renderPreview() {
         previewLabel.stringValue = previewText.isEmpty ? "" : "\u{201C}" + previewText + "\u{201D}"
         previewLabel.isHidden = previewText.isEmpty || lifecycle.state.map {
-            !OigoHUDShellPolicy.content(for: $0).allowsPreview
+            !OigoHUDShellPolicy.allowsPreview($0)
         } ?? true
     }
 

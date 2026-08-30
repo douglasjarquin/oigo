@@ -635,19 +635,32 @@ private final class HUDTimerProbe: @unchecked Sendable {
             _ = notification
             let recordingReached = CommandLine.arguments[1] == "recording"
             let controller = OigoHUDController()
-            guard controller.present(.preparing, generation: 1) else { exit(2) }
+            guard controller.present(
+                .preparing,
+                generation: 1,
+                shortcutReleaseHint: "Release Test-Key to finish."
+            ) else { exit(2) }
             var timerStarts = 0
             var generation: UInt64 = 1
             if recordingReached {
                 generation = 2
-                guard controller.present(.recording, generation: generation, startedAt: Date()) else {
+                guard controller.present(
+                    .recording,
+                    generation: generation,
+                    startedAt: Date(),
+                    shortcutReleaseHint: "Release Test-Key to finish."
+                ) else {
                     exit(3)
                 }
                 if controller.resourceSnapshot.recordingTimerActive {
                     timerStarts += 1
                 }
                 generation = 3
-                guard controller.present(.cancelledBeforeRaw, generation: generation) else {
+                guard controller.present(
+                    .cancelledBeforeRaw,
+                    generation: generation,
+                    shortcutReleaseHint: "Release Test-Key to finish."
+                ) else {
                     exit(4)
                 }
             }

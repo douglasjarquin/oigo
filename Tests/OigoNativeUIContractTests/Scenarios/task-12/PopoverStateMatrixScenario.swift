@@ -319,7 +319,11 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
             operationGate: .init(activeOperation: nil, busyReason: busyReason),
             coordinator: .init(state: coordinator, generation: 42),
             storage: storage,
-            shortcut: .init(registration: shortcut, isConfigured: true),
+            shortcut: .init(
+                registration: shortcut,
+                isConfigured: true,
+                shortcut: .default
+            ),
             permissions: permissions,
             input: .init(selection: selectedInput, channelIndex: 0),
             localeAssets: .init(localeIdentifier: locale, status: assets, generation: 42),

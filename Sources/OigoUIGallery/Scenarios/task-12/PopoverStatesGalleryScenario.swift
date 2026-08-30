@@ -159,10 +159,13 @@ private final class PopoverStatesGalleryViewController: NSViewController {
         primary.widthAnchor.constraint(equalToConstant: 308).isActive = true
         card.addArrangedSubview(primary)
 
-        let shortcut = NSTextField(labelWithString: "Hold  ⌥ Space  to dictate")
+        let shortcutCopy = presentation.shortcut.isAvailable
+            ? presentation.shortcut.holdHint : presentation.shortcut.inactiveHint
+        let shortcut = NSTextField(labelWithString: shortcutCopy)
         shortcut.font = .preferredFont(forTextStyle: .caption1)
         shortcut.textColor = .secondaryLabelColor
         shortcut.alignment = .center
+        shortcut.setAccessibilityLabel(shortcutCopy)
         shortcut.widthAnchor.constraint(equalToConstant: 308).isActive = true
         card.addArrangedSubview(shortcut)
 

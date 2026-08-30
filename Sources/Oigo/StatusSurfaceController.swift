@@ -239,7 +239,8 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
         generation: UInt64,
         geometry: HUDTargetGeometrySnapshot?,
         startedAt: Date? = nil,
-        preview: String = ""
+        preview: String = "",
+        shortcutCopy: OigoShortcutCopy
     ) {
         if hudGeneration != generation || hudState != state {
             let displays = AccessibilityHUDGeometryCapture.displayGeometry()
@@ -256,7 +257,8 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
                 state,
                 generation: generation,
                 placementInput: placement,
-                startedAt: startedAt
+                startedAt: startedAt,
+                shortcutReleaseHint: shortcutCopy.releaseHint
             ) else {
                 return
             }

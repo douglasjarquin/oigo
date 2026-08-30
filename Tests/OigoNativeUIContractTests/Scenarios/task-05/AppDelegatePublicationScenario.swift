@@ -213,7 +213,11 @@ final class AppDelegatePublicationScenario: NativeUIContractScenario {
             operationGate: .init(activeOperation: nil, busyReason: nil),
             coordinator: .init(state: .idle, generation: generation),
             storage: .init(status: storage),
-            shortcut: .init(registration: .registered, isConfigured: true),
+            shortcut: .init(
+                registration: .registered,
+                isConfigured: true,
+                shortcut: .default
+            ),
             permissions: .init(microphone: .granted, accessibility: .granted),
             input: .init(selection: .systemDefault, channelIndex: 0),
             localeAssets: .init(localeIdentifier: locale, status: .ready, generation: generation),

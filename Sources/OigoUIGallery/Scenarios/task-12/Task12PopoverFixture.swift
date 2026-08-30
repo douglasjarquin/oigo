@@ -1,7 +1,13 @@
 import Foundation
+import OigoCore
 import OigoPresentation
 
 enum Task12PopoverFixture {
+    static let committedShortcut = ToggleShortcut(
+        keyCode: 0,
+        modifiers: ToggleShortcutModifiers.option
+    )
+
     static func presentation(rowNamed name: String) -> OigoPopoverPresentation {
         guard let row = OigoPresentationStateRow(rawValue: name) else {
             preconditionFailure("unknown Task 12 presentation row")
@@ -102,7 +108,7 @@ enum Task12PopoverFixture {
             shortcut: .init(
                 registration: shortcut,
                 isConfigured: true,
-                displayName: "⌥ Space"
+                shortcut: committedShortcut
             ),
             permissions: permissions,
             input: .init(selection: selectedInput, channelIndex: 0),

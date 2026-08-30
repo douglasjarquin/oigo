@@ -45,6 +45,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var copyOnlySetupAccepted = false
     private var storageHealth: DurableSessionHealth
     private var committedShortcut: ToggleShortcut
+    private var committedShortcutCopy: OigoShortcutCopy {
+        committedShortcut.copy
+    }
     private var inputMenuSelections: [OigoInputSelection] = []
     private var selectedInput: OigoInputSelection
     private var selectedInputChannel: Int
@@ -218,7 +221,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     func showRegistrationFailure(_ message: String) {
         currentStep = .shortcut
-        statusLabel.stringValue = "Global shortcut inactive: " + message
+        statusLabel.stringValue = committedShortcutCopy.unavailableMessage(message)
         render()
     }
 
@@ -604,7 +607,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         case .pending:
             testResult = "Test not completed"
         }
-        return "Shortcut: \(committedShortcut.displayName)\n"
+        return "Shortcut: \(committedShortcutCopy.displayName)\n"
             + "Mode: \(processingMode.displayName)\n"
             + "Microphone: \(input), channel \(selectedInputChannel + 1)\n"
             + "Language: \(localeSelection.committedIdentifier) (assets: \(assetPosture))\n"
@@ -622,11 +625,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             return localeSelection.statusMessage
         case .shortcutAndInsertion:
             switch registrationStatus() {
-            case .active(let shortcut, _):
+            case .active:
                 let suffix = registrationError().map { ". Last error: " + $0 } ?? ""
-                return "Registered: " + shortcut.displayName + suffix + ". Candidate: " + shortcutRecorder.displayValue
+                return committedShortcutCopy.registeredStatus + suffix
+                    + ". Candidate: " + shortcutRecorder.displayValue
             case .inactive(let message):
-                return "Global shortcut inactive: " + (registrationError() ?? message)
+                return committedShortcutCopy.unavailableMessage(registrationError() ?? message)
             }
         case .tryIt:
             return evidence.statusMessage
@@ -883,18 +887,24 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             let candidate = shortcutRecorder.shortcut
             let result = validateShortcut(candidate)
             guard result.isAvailable else {
-                statusLabel.stringValue = "Global shortcut inactive: " + Self.validationMessage(result)
+                statusLabel.stringValue = committedShortcutCopy.unavailableMessage(
+                    Self.validationMessage(result)
+                )
                 renderButtons()
                 return
             }
             let saved = saveShortcut(candidate)
             guard saved.isAvailable else {
-                statusLabel.stringValue = "Global shortcut inactive: " + Self.validationMessage(saved)
+                statusLabel.stringValue = committedShortcutCopy.unavailableMessage(
+                    Self.validationMessage(saved)
+                )
                 renderButtons()
                 return
             }
             guard registrationStatus().isActive else {
-                statusLabel.stringValue = "Global shortcut inactive: " + (registrationError() ?? "Registration is not active")
+                statusLabel.stringValue = committedShortcutCopy.unavailableMessage(
+                    registrationError() ?? "Registration is not active"
+                )
                 renderButtons()
                 return
             }

@@ -174,7 +174,8 @@ private enum OigoHUDPublication {
         generation: UInt64,
         geometry: HUDTargetGeometrySnapshot?,
         startedAt: Date?,
-        preview: String
+        preview: String,
+        shortcutCopy: OigoShortcutCopy
     )
     case hidden(generation: UInt64?)
 }
@@ -1097,8 +1098,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     shortcutBridge.reset()
                     failureDetail = "microphone_permission_retry_required"
                     lastFailureCode = "microphone_permission_retry_required"
-                    shortcutFeedbackDetail = "Microphone permission granted. Press the shortcut again to start dictation."
-                    historyWindow?.showMessage(shortcutFeedbackDetail ?? "Press the shortcut again to start dictation.")
+                    shortcutFeedbackDetail = settings.globalShortcut.copy.retryHint
+                    historyWindow?.showMessage(settings.globalShortcut.copy.retryHint)
                     reportOnboardingTestFailure()
                     updateSurface()
                     return
@@ -1448,10 +1449,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             guard let displayState else { return }
             insertionDisplayStatus = displayState
-            shortcutFeedbackDetail = "Shortcut ignored while \(state.rawValue.capitalized) is running"
+            shortcutFeedbackDetail = settings.globalShortcut.copy.ignoredMessage(
+                while: state.rawValue.capitalized
+            )
             updateSurface()
         case .ignoredRecordingNotOwned:
-            statusItem?.button?.toolTip = "Shortcut ignored: recording was started from the menu"
+            statusItem?.button?.toolTip = settings.globalShortcut.copy.menuRecordingIgnoredMessage
         case .ignoredBusy(_):
             if let busy = commandAvailability.busyReason {
                 showBusy(busy)
@@ -2214,6 +2217,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             storageReady: storageHealth.isReady
         )
         let settingsSnapshot = settings
+        let committedShortcutCopy = settingsSnapshot.globalShortcut.copy
         let shortcutStatus = shortcutRegistrar.status
         let shortcutError = shortcutConfiguration.lastError
         let inputDevices = currentInputDevices()
@@ -2246,7 +2250,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             shortcut: .init(
                 registration: Self.presentationShortcutStatus(shortcutStatus, error: shortcutError),
                 isConfigured: true,
-                displayName: settingsSnapshot.globalShortcut.displayName
+                shortcut: settingsSnapshot.globalShortcut
             ),
             permissions: .init(
                 microphone: Self.presentationPermission(microphonePermissionState()),
@@ -2282,6 +2286,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         )
         let shortcutCopy = Self.presentationShortcutCopy(
             shortcutStatus,
+            committedShortcutCopy: committedShortcutCopy,
             error: shortcutError,
             feedback: shortcutFeedbackDetail
         )
@@ -2296,7 +2301,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             hud: presentationHUD(
                 coordinatorState: coordinatorState,
                 operationHandle: operationHandle,
-                terminal: terminal
+                terminal: terminal,
+                shortcutCopy: committedShortcutCopy
             )
         )
     }
@@ -2321,13 +2327,21 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             onboardingWindow?.setCommandAvailability(snapshot.availability)
             statusItem?.button?.toolTip = snapshot.shortcutToolTip
             switch snapshot.hud {
-            case .visible(let state, let generation, let geometry, let startedAt, let preview):
+            case .visible(
+                let state,
+                let generation,
+                let geometry,
+                let startedAt,
+                let preview,
+                let shortcutCopy
+            ):
                 statusSurface.presentHUD(
                     state,
                     generation: generation,
                     geometry: geometry,
                     startedAt: startedAt,
-                    preview: preview
+                    preview: preview,
+                    shortcutCopy: shortcutCopy
                 )
             case .hidden(let generation):
                 if let generation {
@@ -2536,7 +2550,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func presentationHUD(
         coordinatorState: DictationState,
         operationHandle: AppOperationHandle?,
-        terminal: OigoTerminalPresentationInput?
+        terminal: OigoTerminalPresentationInput?,
+        shortcutCopy: OigoShortcutCopy
     ) -> OigoHUDPublication {
         guard let generation = hudGeneration else {
             return .hidden(generation: nil)
@@ -2548,7 +2563,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 generation: generation,
                 geometry: hudGeometrySnapshot,
                 startedAt: nil,
-                preview: ""
+                preview: "",
+                shortcutCopy: shortcutCopy
             )
         }
 
@@ -2578,7 +2594,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             geometry: hudGeometrySnapshot,
             startedAt: state == .recording || state == .degradedRecording
                 ? (recordingStartedAt ?? Date()) : nil,
-            preview: state == .recording && previewEnabled ? livePreview : ""
+            preview: state == .recording && previewEnabled ? livePreview : "",
+            shortcutCopy: shortcutCopy
         )
     }
 
@@ -2796,25 +2813,26 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private static func presentationShortcutCopy(
         _ status: GlobalShortcutRegistrationStatus,
+        committedShortcutCopy: OigoShortcutCopy,
         error: String?,
         feedback: String?
     ) -> (title: String, toolTip: String) {
         switch status {
-        case .active(let shortcut, _):
+        case .active:
             if let error {
                 return (
                     "Global Shortcut Active - Open Settings…",
-                    "Global shortcut active: \(shortcut.displayName). Last registration error: \(error)"
+                    committedShortcutCopy.activeToolTip + ". Last registration error: " + error
                 )
             }
             return (
-                "Global Shortcut: " + shortcut.displayName,
-                feedback ?? "Global shortcut active: " + shortcut.displayName
+                committedShortcutCopy.globalTitle,
+                feedback ?? committedShortcutCopy.activeToolTip
             )
         case .inactive(let message):
             return (
                 "Global Shortcut Inactive - Open Settings…",
-                "Global Shortcut Inactive: " + (error ?? message)
+                committedShortcutCopy.unavailableMessage(error ?? message)
             )
         }
     }

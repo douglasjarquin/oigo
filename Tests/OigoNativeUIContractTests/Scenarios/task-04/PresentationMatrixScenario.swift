@@ -360,7 +360,11 @@ final class PresentationMatrixScenario: NativeUIContractScenario {
             operationGate: .init(activeOperation: nil, busyReason: busy),
             coordinator: .init(state: coordinator, generation: 42),
             storage: .init(status: storage),
-            shortcut: .init(registration: shortcut, isConfigured: shortcut == .registered),
+            shortcut: .init(
+                registration: shortcut,
+                isConfigured: shortcut == .registered,
+                shortcut: .default
+            ),
             permissions: .init(microphone: microphone, accessibility: accessibility),
             input: .init(selection: input, channelIndex: 0),
             localeAssets: .init(localeIdentifier: locale, status: assets, generation: 42),
@@ -426,7 +430,11 @@ final class PresentationMatrixScenario: NativeUIContractScenario {
             operationGate: conflict.operationGate,
             coordinator: conflict.coordinator,
             storage: conflict.storage,
-            shortcut: .init(registration: .conflict, isConfigured: true),
+            shortcut: .init(
+                registration: .conflict,
+                isConfigured: true,
+                shortcut: .default
+            ),
             permissions: .init(microphone: .denied, accessibility: .denied),
             input: .init(selection: .pinnedUnavailable, channelIndex: 0),
             localeAssets: .init(localeIdentifier: locale, status: .unavailable, generation: 42),

@@ -31,6 +31,8 @@ public struct OigoPopoverActionPresentation: Equatable, Sendable {
 public struct OigoPopoverShortcutPresentation: Equatable, Sendable {
     public let glyphs: [String]
     public let accessibilityLabel: String
+    public let holdHint: String
+    public let inactiveHint: String
     public let isAvailable: Bool
 }
 
@@ -220,19 +222,11 @@ public struct OigoPopoverPresentation: Equatable, Sendable {
     private static func shortcutPresentation(
         _ shortcut: OigoShortcutPresentationInput
     ) -> OigoPopoverShortcutPresentation {
-        let names = shortcut.displayName.split(separator: "-").map(String.init)
-        let glyphs = names.map { component -> String in
-            switch component {
-            case "Shift": "⇧"
-            case "Control": "⌃"
-            case "Option": "⌥"
-            case "Command": "⌘"
-            default: component
-            }
-        }
         return .init(
-            glyphs: glyphs,
-            accessibilityLabel: shortcut.displayName.replacingOccurrences(of: "-", with: " "),
+            glyphs: shortcut.copy.glyphs,
+            accessibilityLabel: shortcut.copy.accessibilityLabel,
+            holdHint: shortcut.copy.holdHint,
+            inactiveHint: shortcut.copy.inactiveHint,
             isAvailable: shortcut.registration == .registered && shortcut.isConfigured
         )
     }

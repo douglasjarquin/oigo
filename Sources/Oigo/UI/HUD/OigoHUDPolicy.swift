@@ -9,7 +9,10 @@ public enum OigoHUDShellPolicy {
     public static let ordinaryTerminalDismissal: TimeInterval = 1.8
     public static let actionableTerminalDismissal: TimeInterval = 3.0
 
-    public static func content(for state: OigoHUDState) -> OigoHUDContent {
+    public static func content(
+        for state: OigoHUDState,
+        releaseHint: String
+    ) -> OigoHUDContent {
         switch state {
         case .preparing:
             content(
@@ -21,7 +24,7 @@ public enum OigoHUDShellPolicy {
         case .recording:
             content(
                 title: "Recording",
-                detail: "Release the shortcut to finish.",
+                detail: releaseHint,
                 tone: .recording,
                 iconRole: .recording,
                 showsRecordingElapsed: true,
@@ -184,6 +187,10 @@ public enum OigoHUDShellPolicy {
 
     public static func isRecording(_ state: OigoHUDState) -> Bool {
         [.recording, .degradedRecording].contains(state)
+    }
+
+    public static func allowsPreview(_ state: OigoHUDState) -> Bool {
+        state == .recording
     }
 
     private static func content(

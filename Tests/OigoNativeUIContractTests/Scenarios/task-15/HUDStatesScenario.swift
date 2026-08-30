@@ -217,7 +217,10 @@ final class HUDStatesScenario: NativeUIContractScenario {
             statePass = false
             break
         }
-        let content = OigoHUDShellPolicy.content(for: state)
+        let content = OigoHUDShellPolicy.content(
+            for: state,
+            releaseHint: "Release the shortcut to finish."
+        )
         let dismissal = content.dismissal
         guard content.title == expected.title,
               content.detail == expected.detail,
@@ -295,7 +298,8 @@ final class HUDStatesScenario: NativeUIContractScenario {
                 .recording,
                 generation: 1,
                 startedAt: Date(),
-                sessionReference: sessionReference
+                sessionReference: sessionReference,
+                shortcutReleaseHint: "Release Test-Key to finish."
             ) else {
                 exit(1)
             }
@@ -303,7 +307,12 @@ final class HUDStatesScenario: NativeUIContractScenario {
             guard controller.isVisible, recording.recordingTimerActive else {
                 exit(2)
             }
-            guard controller.present(.shutdown, generation: 2, sessionReference: sessionReference) else {
+            guard controller.present(
+                .shutdown,
+                generation: 2,
+                sessionReference: sessionReference,
+                shortcutReleaseHint: "Release Test-Key to finish."
+            ) else {
                 exit(3)
             }
             let shutdown = controller.resourceSnapshot

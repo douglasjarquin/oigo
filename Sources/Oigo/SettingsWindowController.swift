@@ -27,6 +27,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private let storageStatus = NSTextField(labelWithString: "")
     private var retryStorageButton: NSButton?
     private let shortcutStatus = NSTextField(wrappingLabelWithString: "")
+    private let shortcutHelp = NSTextField(wrappingLabelWithString: "")
     private let messageLabel = NSTextField(labelWithString: "")
     private let dictationMessage = NSTextField(wrappingLabelWithString: "")
     private let registrationStatus: () -> GlobalShortcutRegistrationStatus
@@ -56,6 +57,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private let isPresented: () -> Bool
     private let onClose: () -> Void
     private var committedShortcut: ToggleShortcut
+    private var committedShortcutCopy: OigoShortcutCopy {
+        committedShortcut.copy
+    }
     private var inputMenuSelections: [OigoInputSelection] = []
     private var selectedInput: OigoInputSelection
     private var selectedInputChannel: Int
@@ -404,9 +408,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         nextDictationNotice.isHidden = true
 
         let shortcutTitle = NSTextField(labelWithString: "Global shortcut")
-        let shortcutHelp = NSTextField(
-            wrappingLabelWithString: "Click the recorder and press a shortcut. The default is \(ToggleShortcut.default.displayName). Validation never displaces the current working registration."
-        )
+        shortcutHelp.stringValue = committedShortcutCopy.settingsHint
         shortcutHelp.textColor = .secondaryLabelColor
         let modeLabel = NSTextField(labelWithString: "Default mode")
         let localeLabel = NSTextField(labelWithString: "Dictation language")
@@ -726,12 +728,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     private func updateShortcutStatus() {
+        shortcutHelp.stringValue = committedShortcutCopy.settingsHint
         switch registrationStatus() {
-        case .active(let shortcut, _):
+        case .active:
             let suffix = registrationError().map { ". Last error: " + $0 } ?? ""
-            shortcutStatus.stringValue = "Registration active: " + shortcut.displayName + suffix
+            shortcutStatus.stringValue = committedShortcutCopy.activeStatus + suffix
         case .inactive(let message):
-            shortcutStatus.stringValue = "Registration inactive: " + (registrationError() ?? message)
+            shortcutStatus.stringValue = committedShortcutCopy.unavailableMessage(
+                registrationError() ?? message
+            )
         }
     }
 
@@ -915,6 +920,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         committedSettings = settings
         lastRequestedLaunchAtLogin = settings.launchAtLogin
         committedShortcut = settings.globalShortcut
+        updateShortcutStatus()
         if let languageUnappliedMessage {
             dictationMessage.stringValue = languageUnappliedMessage
             NSSound.beep()

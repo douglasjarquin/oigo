@@ -125,6 +125,7 @@ public final class OigoPopoverViewController: NSViewController {
         suffix.textColor = .secondaryLabelColor
         let row = horizontalRow([flexibleSpace(), hint, glyphs, suffix, flexibleSpace()])
         row.setAccessibilityIdentifier("popover-shortcut")
+        row.setAccessibilityLabel(shortcut.isAvailable ? shortcut.holdHint : shortcut.inactiveHint)
         contentStack.addArrangedSubview(row)
     }
 
