@@ -191,6 +191,24 @@ private struct OigoAppDelegatePresentationSnapshot {
     let hud: OigoHUDPublication
 }
 
+struct OigoSettingsShortcutCallbacks {
+    let validate: (ToggleShortcut) -> OigoShortcutValidation
+    let saveShortcut: (ToggleShortcut) -> OigoShortcutValidation
+    let saveSettings: (OigoSettings) -> String?
+}
+
+struct OigoSettingsShortcutCallbackCounts {
+    var validation = 0
+    var shortcutSave = 0
+    var settingsSave = 0
+}
+
+struct OigoSettingsShortcutOwnerState {
+    let persistedSettings: OigoSettings
+    let committedShortcut: ToggleShortcut
+    let registrationActive: Bool
+}
+
 @available(macOS 26.0, *)
 @MainActor
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
@@ -214,7 +232,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     )
     private lazy var shortcutRegistration = AppShortcutRegistrationController(
         committedShortcut: settings.globalShortcut,
-        registrar: CarbonGlobalShortcutRegistrar(),
+        registrar: shortcutRegistrar,
         onRegisteredEvent: { [weak self] event in self?.handleGlobalShortcut(event) }
     )
     private lazy var statusSurface = StatusSurfaceController { [weak self] command in
@@ -229,10 +247,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             self?.performPopoverCommand(command)
         }
     }
-    private let settingsStore = OigoSettingsStore()
-    private let onboardingStore = OigoOnboardingStore()
+    private let settingsStore: OigoSettingsStore
+    private let onboardingStore: OigoOnboardingStore
+    private let shortcutRegistrar: any GlobalShortcutRegistrationClient
+    private let shortcutStorageReady: (() -> Bool)?
+    private let settingsPermissionStates: (() -> (OigoPermissionState, OigoPermissionState))?
     private let storageCapability: DurableSessionCapability
-    private let launchAtLoginController = OigoLaunchAtLoginController(client: SystemLaunchAtLoginClient())
+    private let launchAtLoginController: OigoLaunchAtLoginController
     private let transcriptCleanupMetrics = TranscriptCleanupMetrics()
     private lazy var transcriptCleanup: TranscriptCleanupCoordinator = {
         let metrics = transcriptCleanupMetrics
@@ -258,7 +279,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var historyCursor: SessionHistoryCursor?
     private var historyHasMore = false
     private var statusItem: NSStatusItem?
-    private var settings = OigoSettingsStore().load()
+    private var settings: OigoSettings
     private var targetSnapshot: InsertionTargetSnapshot?
     private var targetSnapshotGeneration: UInt64?
     private var insertionDisplayStatus: OigoHUDProcessingState?
@@ -336,9 +357,26 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var finishRequestedAfterStart = false
     private var shortcutFeedbackDetail: String?
     private var workspaceObservers: [NSObjectProtocol] = []
+    private(set) var settingsShortcutCallbackCounts = OigoSettingsShortcutCallbackCounts()
+    private(set) var settingsShortcutPreSaveState: OigoSettingsShortcutOwnerState?
     init(
-        storageBootstrapper: any DurableSessionBootstrapping = DurableSessionBootstrapper()
+        storageBootstrapper: any DurableSessionBootstrapping = DurableSessionBootstrapper(),
+        settingsStore: OigoSettingsStore? = nil,
+        onboardingStore: OigoOnboardingStore? = nil,
+        shortcutRegistrar: (any GlobalShortcutRegistrationClient)? = nil,
+        shortcutStorageReady: (() -> Bool)? = nil,
+        settingsPermissionStates: (() -> (OigoPermissionState, OigoPermissionState))? = nil,
+        launchAtLoginController: OigoLaunchAtLoginController? = nil
     ) {
+        let settingsStore = settingsStore ?? OigoSettingsStore()
+        self.settingsStore = settingsStore
+        self.onboardingStore = onboardingStore ?? OigoOnboardingStore()
+        self.shortcutRegistrar = shortcutRegistrar ?? CarbonGlobalShortcutRegistrar()
+        self.shortcutStorageReady = shortcutStorageReady
+        self.settingsPermissionStates = settingsPermissionStates
+        self.launchAtLoginController = launchAtLoginController
+            ?? OigoLaunchAtLoginController(client: SystemLaunchAtLoginClient())
+        settings = settingsStore.load()
         storageCapability = DurableSessionCapability(bootstrapper: storageBootstrapper)
         super.init()
         storageCapability.onChange = { [weak self] in
@@ -463,6 +501,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentSettings(supportedLocales: [String]) {
         let sessionID = UUID()
+        let shortcutCallbacks = settingsShortcutCallbacks()
         let window = SettingsWindowController(
             settings: settings,
             inputDevices: currentInputDevices(),
@@ -488,9 +527,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             registrationError: { [weak self] in
                 self?.shortcutRegistration.lastError
             },
-            save: { [weak self] settings in
-                self?.applySettings(settings) ?? "Oigo is no longer available."
-            },
+            validateShortcut: shortcutCallbacks.validate,
+            saveShortcut: shortcutCallbacks.saveShortcut,
+            save: shortcutCallbacks.saveSettings,
             checkSpeechAssets: { [weak self] identifier in
                 await self?.inspectSpeechAssets(for: identifier) ?? .unavailable("Oigo is no longer available")
             },
@@ -809,7 +848,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func synchronizeShortcutRegistration() {
         do {
             try shortcutRegistration.synchronize(
-                storageReady: storageCapability.health.isReady,
+                storageReady: isShortcutStorageReady,
                 onboardingComplete: onboardingStore.load().isComplete
             )
             shortcutBridge.reset()
@@ -818,6 +857,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             shortcutBridge.reset()
             updateSurface()
         }
+    }
+
+    private var isShortcutStorageReady: Bool {
+        shortcutStorageReady?() ?? storageCapability.health.isReady
     }
 
     private func installWorkspaceInterruptionObservers() {
@@ -3153,9 +3196,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         TranscriptCleanupMode(rawValue: mode.rawValue) ?? .instant
     }
 
-    private func applySettings(_ newSettings: OigoSettings) -> String? {
+    private func applySettings(_ requestedSettings: OigoSettings) -> String? {
         let previousSettings = settings
-        let shortcutChanged = previousSettings.globalShortcut != newSettings.globalShortcut
+        let newSettings = requestedSettings.with(globalShortcut: shortcutRegistration.committedShortcut)
         let currentLaunchStatus = launchAtLoginController.status
         let launchAtLoginChanged = OigoLaunchAtLoginReconciliation.shouldMutate(
             requested: newSettings.launchAtLogin,
@@ -3172,55 +3215,23 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        if shortcutChanged {
-            let shortcutValidation = shortcutRegistration.save(
-                newSettings.globalShortcut,
-                persist: { [weak self] shortcut in
-                    guard let self else { throw OigoSettingsStoreError.storeUnavailable }
-                    try self.settingsStore.save(newSettings.with(globalShortcut: shortcut))
-                },
-                restore: { [weak self] in
-                    guard let self else { throw OigoSettingsStoreError.storeUnavailable }
-                    try self.settingsStore.save(previousSettings)
-                }
-            )
-            guard shortcutValidation.isAvailable else {
-                let shortcutError = Self.shortcutValidationMessage(shortcutValidation)
-                guard launchAtLoginChanged else {
-                    settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
-                    updateSurface()
-                    return shortcutError
-                }
-                do {
-                    try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
-                } catch {
-                    settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
-                    updateSurface()
-                    return shortcutError + "; Launch at Login could not be restored: " + Self.failureReason(for: error)
-                }
-                settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
-                updateSurface()
-                return shortcutError
-            }
-        } else {
-            do {
-                try settingsStore.save(newSettings)
-            } catch {
-                var message = "Settings could not be saved: \(error)"
-                guard launchAtLoginChanged else {
-                    settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
-                    updateSurface()
-                    return message
-                }
-                do {
-                    try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
-                } catch let restoreError {
-                    message += "; Launch at Login could not be restored: \(restoreError)"
-                }
+        do {
+            try settingsStore.save(newSettings)
+        } catch {
+            var message = "Settings could not be saved: \(error)"
+            guard launchAtLoginChanged else {
                 settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                 updateSurface()
                 return message
             }
+            do {
+                try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
+            } catch let restoreError {
+                message += "; Launch at Login could not be restored: \(restoreError)"
+            }
+            settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
+            updateSurface()
+            return message
         }
 
         settings = newSettings
@@ -3426,7 +3437,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func validateShortcut(_ candidate: ToggleShortcut) -> OigoShortcutValidation {
-        guard storageCapability.health.isReady else {
+        guard isShortcutStorageReady else {
             return .invalid("Storage unavailable. Retry storage before enabling a shortcut.")
         }
         shortcutRegistration.setCandidate(candidate)
@@ -3453,6 +3464,56 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         settings = previousSettings.with(globalShortcut: candidate)
         updateSurface()
         return .available
+    }
+
+    func settingsShortcutCallbacks() -> OigoSettingsShortcutCallbacks {
+        OigoSettingsShortcutCallbacks(
+            validate: { [weak self] candidate in
+                guard let self else {
+                    return .invalid("Oigo is no longer available")
+                }
+                self.settingsShortcutCallbackCounts.validation += 1
+                return self.validateShortcut(candidate)
+            },
+            saveShortcut: { [weak self] candidate in
+                guard let self else {
+                    return .invalid("Oigo is no longer available")
+                }
+                self.settingsShortcutCallbackCounts.shortcutSave += 1
+                self.settingsShortcutPreSaveState = self.settingsShortcutOwnerState
+                return self.saveShortcut(candidate)
+            },
+            saveSettings: { [weak self] requestedSettings in
+                guard let self else {
+                    return "Oigo is no longer available."
+                }
+                self.settingsShortcutCallbackCounts.settingsSave += 1
+                return self.applySettings(requestedSettings)
+            }
+        )
+    }
+
+    var settingsShortcutOwnerState: OigoSettingsShortcutOwnerState {
+        OigoSettingsShortcutOwnerState(
+            persistedSettings: settingsStore.load(),
+            committedShortcut: shortcutRegistration.committedShortcut,
+            registrationActive: shortcutRegistration.registrationStatus.isActive
+        )
+    }
+
+    var shortcutRegistrationStatus: GlobalShortcutRegistrationStatus {
+        shortcutRegistration.registrationStatus
+    }
+
+    var shortcutRegistrationError: String? {
+        shortcutRegistration.lastError
+    }
+
+    func activateSettingsShortcutOwnerForTesting() throws {
+        try shortcutRegistration.synchronize(
+            storageReady: isShortcutStorageReady,
+            onboardingComplete: onboardingStore.load().isComplete
+        )
     }
 
     private static func shortcutValidationMessage(_ validation: OigoShortcutValidation) -> String {
@@ -3642,6 +3703,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func microphonePermissionState() -> OigoPermissionState {
+        if let settingsPermissionStates {
+            return settingsPermissionStates().0
+        }
         if qaLaunchConfiguration?.failureProvider == .microphoneDenied {
             return .denied
         }
@@ -3677,6 +3741,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func accessibilityPermissionState() -> OigoPermissionState {
+        if let settingsPermissionStates {
+            return settingsPermissionStates().1
+        }
         if qaLaunchConfiguration?.failureProvider == .accessibilityDenied {
             return .denied
         }

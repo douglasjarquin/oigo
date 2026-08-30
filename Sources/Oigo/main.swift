@@ -57,6 +57,26 @@ if ProcessInfo.processInfo.environment["OIGO_QA_MODE"] == "1",
     }
 }
 
+if ProcessInfo.processInfo.environment["OIGO_QA_MODE"] == "1",
+   CommandLine.arguments.count == 5,
+   CommandLine.arguments[1] == "--task-12-settings-shortcut-probe" {
+    guard #available(macOS 26.0, *) else {
+        FileHandle.standardError.write(Data("ERROR task-12-settings-probe unsupported-system\n".utf8))
+        exit(1)
+    }
+    do {
+        try Task12SettingsShortcutProbe.run(
+            mode: CommandLine.arguments[2],
+            defaultsSuite: CommandLine.arguments[3],
+            outputURL: URL(fileURLWithPath: CommandLine.arguments[4])
+        )
+        exit(0)
+    } catch {
+        FileHandle.standardError.write(Data(("ERROR task-12-settings-probe " + String(describing: error) + "\n").utf8))
+        exit(1)
+    }
+}
+
 let application = NSApplication.shared
 let delegate: NSApplicationDelegate
 if #available(macOS 26.0, *) {

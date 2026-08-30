@@ -96,6 +96,7 @@ enum Task8ShortcutConsumerProbe {
             microphoneState: .granted, accessibilityState: .granted, storageHealth: .checking,
             launchAtLoginStatus: .disabled, launchAtLoginStatusProvider: { .disabled },
             openLoginItemsSettings: {}, registrationStatus: { status }, registrationError: { nil },
+            validateShortcut: { _ in .available }, saveShortcut: { _ in .available },
             save: { _ in nil }, checkSpeechAssets: { _ in .ready },
             refreshPermissions: { (.granted, .granted) }, openMicrophoneSettings: {},
             openAccessibilitySettings: {}, rerunOnboarding: {}, openHistory: {}, openDataFolder: {},
