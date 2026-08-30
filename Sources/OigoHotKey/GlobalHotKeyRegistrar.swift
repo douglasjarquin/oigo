@@ -4,6 +4,9 @@ import OigoCore
 public enum GlobalShortcutRegistrationError: Error, Equatable, CustomStringConvertible, Sendable {
     case installHandler(OSStatus)
     case registerHotKey(OSStatus)
+    case registerHotKeyCleanup(registerStatus: OSStatus, removeHandlerStatus: OSStatus)
+    case unregisterHotKey(OSStatus)
+    case removeHandler(OSStatus)
 
     public var description: String {
         switch self {
@@ -11,6 +14,28 @@ public enum GlobalShortcutRegistrationError: Error, Equatable, CustomStringConve
             return "could not install the global shortcut handler (OSStatus \(status))"
         case .registerHotKey(let status):
             return "could not register the global shortcut (OSStatus \(status)); choose another shortcut"
+        case .registerHotKeyCleanup(let registerStatus, let removeHandlerStatus):
+            return "could not register the global shortcut (OSStatus \(registerStatus)) or remove its handler (OSStatus \(removeHandlerStatus))"
+        case .unregisterHotKey(let status):
+            return "could not unregister the global shortcut (OSStatus \(status))"
+        case .removeHandler(let status):
+            return "could not remove the global shortcut handler (OSStatus \(status))"
+        }
+    }
+}
+
+public enum GlobalShortcutRegistrarError: Error, Equatable, CustomStringConvertible, Sendable {
+    case replacementTeardown(previous: String, candidateCleanup: String?)
+    case teardown([String])
+
+    public var description: String {
+        switch self {
+        case .replacementTeardown(let previous, nil):
+            return "previous shortcut teardown failed: \(previous); the candidate was removed and registration is inactive"
+        case .replacementTeardown(let previous, let candidateCleanup?):
+            return "previous shortcut teardown failed: \(previous); candidate cleanup also failed: \(candidateCleanup); registration is inactive"
+        case .teardown(let failures):
+            return "shortcut teardown failed: \(failures.joined(separator: "; ")); registration is inactive"
         }
     }
 }
@@ -71,19 +96,26 @@ public final class CarbonGlobalShortcutBackend: GlobalShortcutRegistrationBacken
             return noErr
         }
 
-        func close() {
+        func close() throws {
             if let hotKey {
-                UnregisterEventHotKey(hotKey)
+                let status = UnregisterEventHotKey(hotKey)
+                guard status == noErr else {
+                    throw GlobalShortcutRegistrationError.unregisterHotKey(status)
+                }
                 self.hotKey = nil
             }
             if let eventHandler {
-                RemoveEventHandler(eventHandler)
+                let status = RemoveEventHandler(eventHandler)
+                guard status == noErr else {
+                    throw GlobalShortcutRegistrationError.removeHandler(status)
+                }
                 self.eventHandler = nil
             }
         }
     }
 
     private var nextEventID: UInt32 = 0
+    private var retainedFailedRegistrations: [RegistrationHandle] = []
 
     public init() {}
 
@@ -138,14 +170,22 @@ public final class CarbonGlobalShortcutBackend: GlobalShortcutRegistrationBacken
             &handle.hotKey
         )
         guard hotKeyStatus == noErr else {
-            handle.close()
+            do {
+                try handle.close()
+            } catch let GlobalShortcutRegistrationError.removeHandler(removeHandlerStatus) {
+                retainedFailedRegistrations.append(handle)
+                throw GlobalShortcutRegistrationError.registerHotKeyCleanup(
+                    registerStatus: hotKeyStatus,
+                    removeHandlerStatus: removeHandlerStatus
+                )
+            }
             throw GlobalShortcutRegistrationError.registerHotKey(hotKeyStatus)
         }
         return handle
     }
 
-    public func unregister(_ handle: any GlobalShortcutRegistrationHandle) {
-        (handle as? RegistrationHandle)?.close()
+    public func unregister(_ handle: any GlobalShortcutRegistrationHandle) throws {
+        try (handle as? RegistrationHandle)?.close()
     }
 }
 
@@ -160,6 +200,7 @@ public final class CarbonGlobalShortcutRegistrar {
 
     private let backend: any GlobalShortcutRegistrationBackend
     private var activeRegistration: ActiveRegistration?
+    private var retainedFailedHandles: [any GlobalShortcutRegistrationHandle] = []
     private var nextGenerationValue: UInt64 = 0
 
     public private(set) var status = GlobalShortcutRegistrationStatus.inactive(
@@ -197,18 +238,38 @@ public final class CarbonGlobalShortcutRegistrar {
                 generation: generation,
                 receive: eventAction
             )
-            let previous = activeRegistration
-            activeRegistration = ActiveRegistration(
+            let candidate = ActiveRegistration(
                 shortcut: shortcut,
                 generation: generation,
                 handle: handle,
                 action: onEvent
             )
+            if let previous = activeRegistration {
+                do {
+                    try backend.unregister(previous.handle)
+                } catch {
+                    failClosed(retaining: previous.handle)
+                    let previousFailure = String(describing: error)
+                    let candidateCleanupFailure: String?
+                    do {
+                        try backend.unregister(candidate.handle)
+                        candidateCleanupFailure = nil
+                    } catch {
+                        retainedFailedHandles.append(candidate.handle)
+                        candidateCleanupFailure = String(describing: error)
+                    }
+                    let failure = GlobalShortcutRegistrarError.replacementTeardown(
+                        previous: previousFailure,
+                        candidateCleanup: candidateCleanupFailure
+                    )
+                    lastError = failure.description
+                    status = .inactive(failure.description)
+                    throw failure
+                }
+            }
+            activeRegistration = candidate
             status = .active(shortcut, generation: generation)
             lastError = nil
-            if let previous {
-                backend.unregister(previous.handle)
-            }
         } catch {
             let reason = String(describing: error)
             lastError = reason
@@ -234,7 +295,20 @@ public final class CarbonGlobalShortcutRegistrar {
                 generation: generation,
                 receive: eventAction
             )
-            backend.unregister(handle)
+            do {
+                try backend.unregister(handle)
+            } catch {
+                if let activeRegistration {
+                    retainedFailedHandles.append(activeRegistration.handle)
+                    self.activeRegistration = nil
+                }
+                retainedFailedHandles.append(handle)
+                _ = nextGeneration()
+                let failure = GlobalShortcutRegistrarError.teardown([String(describing: error)])
+                status = .inactive(failure.description)
+                lastError = failure.description
+                throw failure
+            }
             lastError = nil
         } catch {
             lastError = String(describing: error)
@@ -242,13 +316,28 @@ public final class CarbonGlobalShortcutRegistrar {
         }
     }
 
-    public func unregister() {
-        if let activeRegistration {
-            backend.unregister(activeRegistration.handle)
-        }
+    public func unregister() throws {
+        var handles = retainedFailedHandles
+        retainedFailedHandles = []
+        if let activeRegistration { handles.append(activeRegistration.handle) }
         activeRegistration = nil
         _ = nextGeneration()
         status = .inactive("Global shortcut is not registered")
+        var failures: [String] = []
+        for handle in handles {
+            do {
+                try backend.unregister(handle)
+            } catch {
+                retainedFailedHandles.append(handle)
+                failures.append(String(describing: error))
+            }
+        }
+        guard failures.isEmpty else {
+            let failure = GlobalShortcutRegistrarError.teardown(failures)
+            status = .inactive(failure.description)
+            lastError = failure.description
+            throw failure
+        }
         lastError = nil
     }
 
@@ -263,5 +352,11 @@ public final class CarbonGlobalShortcutRegistrar {
             return
         }
         activeRegistration.action(event)
+    }
+
+    private func failClosed(retaining handle: any GlobalShortcutRegistrationHandle) {
+        retainedFailedHandles.append(handle)
+        activeRegistration = nil
+        _ = nextGeneration()
     }
 }

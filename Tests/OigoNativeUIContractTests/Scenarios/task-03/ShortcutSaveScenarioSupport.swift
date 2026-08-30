@@ -86,7 +86,7 @@ final class ScenarioRegistrar: GlobalShortcutRegistrationClient {
         lastError = nil
     }
 
-    func unregister() {
+    func unregister() throws {
         generation += 1
         status = .inactive("Global shortcut is not registered")
         lastError = nil

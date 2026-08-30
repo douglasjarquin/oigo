@@ -63,7 +63,7 @@ final class RecordingConfigurationRegistrationClient: GlobalShortcutRegistration
         lastError = nil
     }
 
-    func unregister() {
+    func unregister() throws {
         if case .active(let shortcut, _) = status {
             calls.append("unregister:\(shortcut.keyCode)/\(shortcut.modifiers)")
         }

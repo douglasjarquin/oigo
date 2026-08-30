@@ -61,7 +61,7 @@ final class ShortcutRegistrationScenario: NativeUIContractScenario {
         guard defaultApp.backend.registrationCount == 1 else {
             throw ContractInputError(category: "default-registration-not-once")
         }
-        defaultApp.shutdown()
+        try defaultApp.shutdown()
 
         defaults.removePersistentDomain(forName: defaultsSuiteName)
         let primary = ShortcutRegistrationApp(defaults: defaults)
@@ -112,7 +112,7 @@ final class ShortcutRegistrationScenario: NativeUIContractScenario {
         primary.onboardingStore.rerun()
         try primary.synchronize()
         rows.append(primary.row("disable"))
-        primary.shutdown()
+        try primary.shutdown()
         rows.append(primary.row("teardown"))
         guard !primary.row("probe").keyboardActive,
               !primary.row("probe").appAlive else {
@@ -152,7 +152,7 @@ final class ShortcutRegistrationScenario: NativeUIContractScenario {
               relaunch.row("probe").keyboardActive else {
             throw ContractInputError(category: "registration-relaunch-not-once")
         }
-        relaunch.shutdown()
+        try relaunch.shutdown()
 
         defaults.removePersistentDomain(forName: defaultsSuiteName)
         let invalidShortcut = ToggleShortcut(keyCode: 0, modifiers: 0)
@@ -234,8 +234,8 @@ private final class ShortcutRegistrationApp {
         )
     }
 
-    func shutdown() {
-        controller.shutdown()
+    func shutdown() throws {
+        try controller.shutdown()
         _ = operationGate.enterShutdown()
     }
 
@@ -303,7 +303,7 @@ private final class RegistrationScenarioBackend: GlobalShortcutRegistrationBacke
         return handle
     }
 
-    func unregister(_ handle: any GlobalShortcutRegistrationHandle) {
+    func unregister(_ handle: any GlobalShortcutRegistrationHandle) throws {
         guard let handle = handle as? Handle,
               registrations.removeValue(forKey: ObjectIdentifier(handle)) != nil else { return }
         unregistrationCount += 1

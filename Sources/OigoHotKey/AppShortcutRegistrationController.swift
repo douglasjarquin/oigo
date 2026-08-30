@@ -77,13 +77,13 @@ public final class AppShortcutRegistrationController {
         transaction.save(candidate, persist: persist, restore: restore)
     }
 
-    public func deactivate() {
-        transaction.deactivateShortcut()
+    public func deactivate() throws {
+        try transaction.deactivateShortcut()
     }
 
-    public func shutdown() {
-        transaction.deactivateShortcut()
+    public func shutdown() throws {
         applicationActive = false
+        try transaction.deactivateShortcut()
     }
 
     public func state(commandAvailability: AppCommandAvailability) -> AppShortcutRegistrationState {

@@ -227,7 +227,7 @@ extension OigoIssue82ContractTests {
               !disabled.mouseStartEnabled else {
             throw ContractFailure(message: "AppDelegate shortcut teardown retained stale registration readiness")
         }
-        controller.shutdown()
+        try controller.shutdown()
         guard !controller.state(commandAvailability: commandAvailability(
             setupComplete: true,
             storageReady: true
@@ -287,6 +287,32 @@ extension OigoIssue82ContractTests {
                   storageReady: true
               )).keyboardOperationEnabled else {
             throw ContractFailure(message: "AppDelegate shortcut conflict replaced or disabled the current registration")
+        }
+
+        let teardownBackend = RecordingRegistrationBackend()
+        let teardown = AppShortcutRegistrationController(
+            committedShortcut: defaultShortcut,
+            registrar: CarbonGlobalShortcutRegistrar(backend: teardownBackend),
+            onRegisteredEvent: { _ in }
+        )
+        try teardown.synchronize(storageReady: true, onboardingComplete: true)
+        teardownBackend.failUnregisterFor = defaultShortcut
+        var teardownFailurePropagated = false
+        do {
+            try teardown.shutdown()
+        } catch {
+            teardownFailurePropagated = true
+        }
+        let teardownState = teardown.state(commandAvailability: commandAvailability(
+            setupComplete: true,
+            storageReady: true
+        ))
+        guard teardownFailurePropagated,
+              !teardownState.registrationStatus.isActive,
+              !teardownState.keyboardOperationEnabled,
+              !teardownState.applicationActive,
+              teardownState.registrationError?.contains("teardown failed") == true else {
+            throw ContractFailure(message: "AppDelegate shortcut teardown failure was not propagated fail closed")
         }
     }
 

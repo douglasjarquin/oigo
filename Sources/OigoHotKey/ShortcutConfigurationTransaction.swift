@@ -21,7 +21,7 @@ public protocol GlobalShortcutRegistrationClient: AnyObject {
         onEvent: @escaping @MainActor (GlobalShortcutEvent) -> Void
     ) throws
     func probe(shortcut: ToggleShortcut) throws
-    func unregister()
+    func unregister() throws
 }
 
 @MainActor
@@ -125,7 +125,11 @@ public final class ShortcutConfigurationTransaction {
             } catch let restorePersistenceError {
                 failure += ". Previous settings could not be restored: \(restorePersistenceError)"
                 candidateShortcut = committedShortcut
-                registrar.unregister()
+                do {
+                    try registrar.unregister()
+                } catch let teardownError {
+                    failure += ". Shortcut teardown also failed: \(teardownError)"
+                }
                 failure += ". Shortcut registration was disabled until a shortcut is saved again"
                 let validation = OigoShortcutValidation.conflict(failure)
                 configurationError = Self.message(for: validation)
@@ -137,7 +141,11 @@ public final class ShortcutConfigurationTransaction {
                 } catch let restoreRegistrationError {
                     failure += ". Previous shortcut registration could not be restored: \(restoreRegistrationError)"
                     candidateShortcut = committedShortcut
-                    registrar.unregister()
+                    do {
+                        try registrar.unregister()
+                    } catch let teardownError {
+                        failure += ". Shortcut teardown also failed: \(teardownError)"
+                    }
                     failure += ". Shortcut registration was disabled until a shortcut is saved again"
                     let validation = OigoShortcutValidation.conflict(failure)
                     configurationError = Self.message(for: validation)
@@ -183,16 +191,16 @@ public final class ShortcutConfigurationTransaction {
         }
     }
 
-    public func deactivateShortcut() {
+    public func deactivateShortcut() throws {
         registrationReady = false
         if registrar.status.isActive {
-            registrar.unregister()
+            try registrar.unregister()
         }
     }
 
     public func setRegistrationReady(_ ready: Bool) throws {
         guard ready else {
-            deactivateShortcut()
+            try deactivateShortcut()
             return
         }
         try activateCommittedShortcut()

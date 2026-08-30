@@ -46,7 +46,7 @@ public protocol GlobalShortcutRegistrationBackend: AnyObject {
         receive: @escaping @MainActor (GlobalShortcutEvent) -> Void
     ) throws -> any GlobalShortcutRegistrationHandle
 
-    func unregister(_ handle: any GlobalShortcutRegistrationHandle)
+    func unregister(_ handle: any GlobalShortcutRegistrationHandle) throws
 }
 
 @MainActor

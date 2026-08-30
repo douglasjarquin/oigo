@@ -552,7 +552,7 @@ private final class Task11ProbeRegistrar: GlobalShortcutRegistrationClient {
         lastError = nil
     }
 
-    func unregister() {
+    func unregister() throws {
         status = .inactive("Global shortcut registration is waiting for setup")
     }
 }

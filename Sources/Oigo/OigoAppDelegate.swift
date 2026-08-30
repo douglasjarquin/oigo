@@ -220,7 +220,7 @@ struct OigoSettingsShortcutOwnerState {
 private final class OigoInjectedShortcutRegistrar: GlobalShortcutRegistrationClient {
     private let registerBehavior: (ToggleShortcut) throws -> Void
     private let probeBehavior: (ToggleShortcut) throws -> Void
-    private let unregisterBehavior: () -> Void
+    private let unregisterBehavior: () throws -> Void
     private var generation: UInt64 = 0
     private(set) var status: GlobalShortcutRegistrationStatus = .inactive(
         "Global shortcut registration is waiting for setup"
@@ -230,7 +230,7 @@ private final class OigoInjectedShortcutRegistrar: GlobalShortcutRegistrationCli
     init(
         register: @escaping (ToggleShortcut) throws -> Void,
         probe: @escaping (ToggleShortcut) throws -> Void,
-        unregister: @escaping () -> Void
+        unregister: @escaping () throws -> Void
     ) {
         registerBehavior = register
         probeBehavior = probe
@@ -263,9 +263,15 @@ private final class OigoInjectedShortcutRegistrar: GlobalShortcutRegistrationCli
         }
     }
 
-    func unregister() {
-        unregisterBehavior()
+    func unregister() throws {
         status = .inactive("Global shortcut is not registered")
+        do {
+            try unregisterBehavior()
+            lastError = nil
+        } catch {
+            lastError = String(describing: error)
+            throw error
+        }
     }
 }
 
@@ -470,7 +476,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         writeSettingsData: @escaping (Data) throws -> Void,
         registerShortcut: @escaping (ToggleShortcut) throws -> Void,
         probeShortcut: @escaping (ToggleShortcut) throws -> Void,
-        unregisterShortcut: @escaping () -> Void
+        unregisterShortcut: @escaping () throws -> Void
     ) throws -> OigoAppDelegate {
         let settingsStore = OigoSettingsStore(defaults: defaults, writeData: writeSettingsData)
         if let seed {
@@ -538,7 +544,15 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
         presentationPublicationFence.shutdown()
-        shortcutRegistration.shutdown()
+        do {
+            try shortcutRegistration.shutdown()
+        } catch {
+            let detail = "Global shortcut teardown failed: \(error)"
+            shortcutFeedbackDetail = detail
+            failureDetail = detail
+            lastFailureCode = "shortcut-teardown"
+            FileHandle.standardError.write(Data(("ERROR shortcut-teardown: \(error)\n").utf8))
+        }
         shortcutBridge.reset()
         let storageWasChecking = storageCapability.health == .checking
         storageCapability.shutdown()
