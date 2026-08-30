@@ -27,6 +27,7 @@ struct OigoIssue82ContractTests {
             ("recorder rejection", testRecorderRejection),
             ("app bridge release during startup", testAppBridgeReleaseDuringStartup),
             ("app bridge processing feedback", testAppBridgeProcessingFeedback),
+            ("production bridge", testProductionBridge),
             ("configuration atomic save", testConfigurationAtomicSave),
             ("configuration failure restoration", testConfigurationFailureRestoration),
             ("settings store persistence failure restoration", testSettingsStorePersistenceFailureRestoration),

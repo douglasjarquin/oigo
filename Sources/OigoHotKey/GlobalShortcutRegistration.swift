@@ -48,3 +48,28 @@ public protocol GlobalShortcutRegistrationBackend: AnyObject {
 
     func unregister(_ handle: any GlobalShortcutRegistrationHandle)
 }
+
+@MainActor
+public final class GlobalShortcutProductionBridge {
+    private let operations: GlobalShortcutOperationBridge
+
+    public init(operations: GlobalShortcutOperationBridge) {
+        self.operations = operations
+    }
+
+    @discardableResult
+    public func receive(_ event: GlobalShortcutEvent) -> GlobalShortcutIntentResult {
+        let edge: GlobalShortcutIntentEdge = switch event.edge {
+        case .pressed:
+            .pressed
+        case .released:
+            .released
+        }
+        return operations.receive(edge)
+    }
+
+    @discardableResult
+    public func observeState() -> GlobalShortcutIntentResult? {
+        operations.observeState()
+    }
+}

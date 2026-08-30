@@ -69,7 +69,7 @@ extension OigoIssue82ContractTests {
         try registrar.register(shortcut: second, onEvent: { event in
             events.append(event)
         })
-        backend.emit(.pressed, generation: firstGeneration)
+        backend.emitRetired(.pressed, generation: firstGeneration)
         guard events.isEmpty else {
             throw ContractFailure(message: "stale callback from a replaced generation was delivered")
         }

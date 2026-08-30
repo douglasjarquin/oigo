@@ -209,6 +209,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         stop: { [weak self] in self?.requestKeyboardStop() },
         feedback: { [weak self] result in self?.showShortcutFeedback(result) }
     )
+    private lazy var productionShortcutBridge = GlobalShortcutProductionBridge(
+        operations: shortcutBridge
+    )
     private lazy var shortcutConfiguration = ShortcutConfigurationTransaction(
         committedShortcut: settings.globalShortcut,
         registrar: shortcutRegistrar,
@@ -904,13 +907,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleGlobalShortcut(_ event: GlobalShortcutEvent) {
         performanceInstrumentation.mark(.shortcutReceived)
-        let edge: GlobalShortcutIntentEdge = switch event.edge {
-        case .pressed:
-            .pressed
-        case .released:
-            .released
-        }
-        _ = shortcutBridge.receive(edge)
+        _ = productionShortcutBridge.receive(event)
     }
 
     private func startKeyboardDictation() {
@@ -958,7 +955,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 await self.performStartDictation(handle: handle)
                 guard self.operationGate.isCurrent(handle) else { return }
                 if self.coordinator.state == .recording {
-                    _ = self.shortcutBridge.observeState()
+                    _ = self.productionShortcutBridge.observeState()
                     if self.finishRequestedAfterStart {
                         self.finishRequestedAfterStart = false
                         await self.performFinishDictation(handle: handle)

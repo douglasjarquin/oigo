@@ -20,6 +20,7 @@ final class RecordingRegistrationBackend: GlobalShortcutRegistrationBackend {
 
     private var nextID: UInt64 = 0
     private var registrations: [Registration] = []
+    private var retiredRegistrations: [Registration] = []
     private(set) var calls: [String] = []
     var failFor: ToggleShortcut?
 
@@ -51,12 +52,19 @@ final class RecordingRegistrationBackend: GlobalShortcutRegistrationBackend {
         }
         if let registration = registrations.first(where: { $0.handle.id == handle.id }) {
             calls.append("unregister:\(registration.shortcut.keyCode)/\(registration.shortcut.modifiers)")
+            retiredRegistrations.append(registration)
         }
         registrations.removeAll { $0.handle.id == handle.id }
     }
 
     func emit(_ edge: GlobalShortcutEdge, generation: UInt64) {
         for registration in registrations where registration.generation == generation {
+            registration.receive(GlobalShortcutEvent(edge: edge, generation: generation))
+        }
+    }
+
+    func emitRetired(_ edge: GlobalShortcutEdge, generation: UInt64) {
+        for registration in retiredRegistrations where registration.generation == generation {
             registration.receive(GlobalShortcutEvent(edge: edge, generation: generation))
         }
     }
