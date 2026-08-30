@@ -25,7 +25,7 @@ final class PresentationMatrixScenario: NativeUIContractScenario {
     }
 
     override class func run(arguments: ContractArguments) throws {
-        guard arguments.defaultsSuite == "com.oigo.qa.task4" else {
+        guard arguments.defaultsSuite == "com.oigo.qa.task04" else {
             throw ContractInputError(category: "invalid-defaults-suite")
         }
         let fixture = try loadFixture(from: arguments.fixtureRoot)

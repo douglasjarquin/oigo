@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import OigoCore
 
 @MainActor
@@ -15,6 +16,10 @@ private final class UnsupportedSystemAppDelegate: NSObject, NSApplicationDelegat
         alert.runModal()
         NSApp.terminate(nil)
     }
+}
+
+if ProcessInfo.processInfo.environment["OIGO_QA_MODE"] == "1" {
+    setenv("CFPREFERENCES_AVOID_DAEMON", "1", 1)
 }
 
 let application = NSApplication.shared

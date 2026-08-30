@@ -142,6 +142,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         currentLaunchAtLoginStatus = launchAtLoginStatus
         committedShortcut = settings.globalShortcut
         shortcutRecorder = ShortcutRecorderControl(shortcut: settings.globalShortcut)
+        shortcutRecorder.identifier = NSUserInterfaceItemIdentifier("oigo.settings.shortcut-recorder")
+        shortcutRecorder.setAccessibilityIdentifier("oigo.settings.shortcut-recorder")
 
         let window = OigoUtilityWindow(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 640),

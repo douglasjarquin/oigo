@@ -29,7 +29,7 @@ final class ComponentContractsScenario: NativeUIContractScenario {
     }
 
     override class func run(arguments: ContractArguments) throws {
-        guard arguments.defaultsSuite == "com.oigo.qa.task6" else {
+        guard arguments.defaultsSuite == "com.oigo.qa.task06" else {
             throw ContractInputError(category: "invalid-defaults-suite")
         }
         let fixture = try loadFixture(from: arguments.fixtureRoot)

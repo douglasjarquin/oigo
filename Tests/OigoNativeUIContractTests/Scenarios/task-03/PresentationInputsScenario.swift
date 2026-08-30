@@ -35,7 +35,7 @@ final class PresentationInputsScenario: NativeUIContractScenario {
             throw ContractInputError(category: "missing-presentation-inputs")
         }
         try validateSourceBoundary(source)
-        guard arguments.defaultsSuite == "com.oigo.qa.task3" else {
+        guard arguments.defaultsSuite == "com.oigo.qa.task03" else {
             throw ContractInputError(category: "invalid-defaults-suite")
         }
         let fixture = try loadFixture(from: arguments.fixtureRoot)

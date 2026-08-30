@@ -36,7 +36,7 @@ final class IdentityScenario: NativeUIContractScenario {
     }
 
     override class func run(arguments: ContractArguments) throws {
-        guard arguments.defaultsSuite == "com.oigo.qa.task9" else {
+        guard arguments.defaultsSuite == "com.oigo.qa.task09" else {
             throw ContractInputError(category: "invalid-defaults-suite")
         }
 
