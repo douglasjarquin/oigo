@@ -6,7 +6,8 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "check": "astro check"
+    "check": "astro check",
+    "seo-smoke": "node scripts/seo-smoke.mjs"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",

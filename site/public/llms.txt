@@ -1,0 +1,7 @@
+# Oigo
+
+> Hold a key, speak, and let Oigo put your words where your cursor is.
+
+https://douglasjarquin.github.io/oigo/
+
+https://github.com/douglasjarquin/oigo
