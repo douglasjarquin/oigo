@@ -3,6 +3,45 @@ import Foundation
 
 @MainActor
 extension OigoIssue82ContractTests {
+    static func testKeyboardStartupReadinessProviderLifecycle() throws {
+        let operationGate = AppOperationGate()
+        guard case .success(let handle) = operationGate.begin(.dictation) else {
+            throw ContractFailure(message: "keyboard readiness did not acquire the operation gate")
+        }
+        let availableInput = OigoInputDevice(
+            uid: "synthetic-input",
+            displayName: "Synthetic Input",
+            deviceID: 1,
+            inputChannelCount: 1,
+            nominalSampleRate: 48_000,
+            isAlive: true,
+            isDefault: true
+        )
+        let microphoneDenied = KeyboardStartupReadinessSnapshot(
+            microphonePermission: .denied,
+            inputSelection: .systemDefault,
+            inputDevices: [availableInput]
+        )
+        let inputUnavailable = KeyboardStartupReadinessSnapshot(
+            microphonePermission: .granted,
+            inputSelection: .systemDefault,
+            inputDevices: []
+        )
+        let coordinator = DictationCoordinator()
+        guard operationGate.isCurrent(handle),
+              KeyboardStartupReadinessPolicy.failure(using: microphoneDenied) == .microphoneDenied,
+              KeyboardStartupReadinessPolicy.failure(using: inputUnavailable) == .inputUnavailable,
+              coordinator.state == .idle,
+              !coordinator.hasActiveWork,
+              coordinator.currentSession == nil else {
+            throw ContractFailure(message: "readiness provider started coordinator or session before terminal rejection")
+        }
+        operationGate.complete(handle)
+        guard operationGate.currentHandle == nil else {
+            throw ContractFailure(message: "readiness provider leaked the operation gate")
+        }
+    }
+
     static func testKeyboardStartupCancellationCleanup() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("oigo-task05-startup-" + UUID().uuidString, isDirectory: true)

@@ -1056,12 +1056,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     generation: handle.generation
                 )
                 updateSurface()
-                try throwInjectedQAFailureIfNeeded()
-                if let readinessFailure = KeyboardStartupReadinessPolicy.failure(
+                let readiness = KeyboardStartupReadinessSnapshot(
                     microphonePermission: microphonePermissionState(),
                     inputSelection: settings.selectedInput,
                     inputDevices: currentInputDevices()
-                ) {
+                )
+                if let readinessFailure = KeyboardStartupReadinessPolicy.failure(using: readiness) {
                     statusSurface.hideHUD(generation: handle.generation)
                     hudGeneration = nil
                     shortcutBridge.reset()
@@ -1109,6 +1109,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     pendingSessionBoundary = persistedSession
                     lastSession = persistedSession
                     bindOnboardingTestSession(persistedSession.id)
+                    try throwInjectedQAFailureIfNeeded()
                     recorder.setInputSelection(
                         settings.selectedInput,
                         channel: settings.selectedInputChannel
@@ -3223,7 +3224,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func currentInputDevices() -> [OigoInputDevice] {
-        (try? deviceInventoryMonitor.currentDevices()) ?? []
+        if qaLaunchConfiguration?.failureProvider == .inputUnavailable {
+            return []
+        }
+        return (try? deviceInventoryMonitor.currentDevices()) ?? []
     }
 
     private func beginOnboardingProductionTest(generation: UInt64) {
@@ -3621,7 +3625,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .speechUnavailable:
             throw AudioRecorderError.captureFailed("qa-provider:speech-unavailable")
         case .inputUnavailable:
-            throw AudioRecorderError.inputDeviceUnavailable
+            return
         case .assetsUnavailable:
             throw AudioRecorderError.captureFailed("qa-provider:assets-unavailable")
         case .audioStartFailure:
@@ -3690,6 +3694,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static func failureReason(for error: Error) -> String {
+        if let startupFailure = error as? any DictationStartupFailureEvidence {
+            return startupFailure.dictationStartupFailureReason
+        }
         if let category = storageFailureCategory(error) {
             return "storage failure: " + category.statusDescription
         }

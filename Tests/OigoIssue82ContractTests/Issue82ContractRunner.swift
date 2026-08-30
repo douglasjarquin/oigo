@@ -27,6 +27,7 @@ struct OigoIssue82ContractTests {
             ("recorder rejection", testRecorderRejection),
             ("app bridge release during startup", testAppBridgeReleaseDuringStartup),
             ("app bridge processing feedback", testAppBridgeProcessingFeedback),
+            ("keyboard startup readiness provider lifecycle", testKeyboardStartupReadinessProviderLifecycle),
             ("keyboard startup cancellation cleanup", testKeyboardStartupCancellationCleanup),
             ("production bridge", testProductionBridge),
             ("configuration atomic save", testConfigurationAtomicSave),

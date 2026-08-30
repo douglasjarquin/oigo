@@ -9,7 +9,39 @@ public enum KeyboardStartupReadinessFailure: String, Equatable, Sendable {
     case inputUnavailable = "input-unavailable"
 }
 
+public protocol KeyboardStartupReadinessProviding: Sendable {
+    var microphonePermission: OigoPermissionState { get }
+    var inputSelection: OigoInputSelection { get }
+    var inputDevices: [OigoInputDevice] { get }
+}
+
+public struct KeyboardStartupReadinessSnapshot: KeyboardStartupReadinessProviding, Equatable, Sendable {
+    public let microphonePermission: OigoPermissionState
+    public let inputSelection: OigoInputSelection
+    public let inputDevices: [OigoInputDevice]
+
+    public init(
+        microphonePermission: OigoPermissionState,
+        inputSelection: OigoInputSelection,
+        inputDevices: [OigoInputDevice]
+    ) {
+        self.microphonePermission = microphonePermission
+        self.inputSelection = inputSelection
+        self.inputDevices = inputDevices
+    }
+}
+
 public enum KeyboardStartupReadinessPolicy {
+    public static func failure(
+        using provider: some KeyboardStartupReadinessProviding
+    ) -> KeyboardStartupReadinessFailure? {
+        failure(
+            microphonePermission: provider.microphonePermission,
+            inputSelection: provider.inputSelection,
+            inputDevices: provider.inputDevices
+        )
+    }
+
     public static func failure(
         microphonePermission: OigoPermissionState,
         inputSelection: OigoInputSelection,
