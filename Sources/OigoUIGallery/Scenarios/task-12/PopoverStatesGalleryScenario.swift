@@ -11,7 +11,7 @@ final class PopoverStatesGalleryScenario: GalleryScenario {
 
     override class func makeWindow(configuration: GalleryConfiguration) -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 580),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 700),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
