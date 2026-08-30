@@ -22,6 +22,9 @@ struct GalleryConfiguration {
         ) != nil else {
             throw GalleryInputError(category: "invalid-defaults-suite")
         }
+        let taskNumber = try taskNumber(for: defaultsSuite)
+        let taskRootIdentifier = "task-" + defaultsSuite.suffix(2)
+        let evidenceTaskIdentifier = "task-\(taskNumber)"
         guard try required("pasteboard-provider", in: values) == "synthetic" else {
             throw GalleryInputError(category: "invalid-pasteboard-provider")
         }
@@ -54,8 +57,14 @@ struct GalleryConfiguration {
 
         let sessionRoot = canonicalURL(try required("session-root", in: values))
         let fixtureRoot = canonicalURL(try required("fixture-root", in: values))
-        guard isDescendant(sessionRoot, of: taskRoot), isDescendant(fixtureRoot, of: taskRoot),
-              !containsLegacyRoot(sessionRoot), !containsLegacyRoot(fixtureRoot) else {
+        let approvedSessionRoot = taskRoot
+            .appendingPathComponent("session/\(taskRootIdentifier)", isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath()
+        let approvedFixtureRoot = taskRoot
+            .appendingPathComponent("fixtures/native/\(taskRootIdentifier)", isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath()
+        guard isWithin(sessionRoot, of: approvedSessionRoot),
+              isWithin(fixtureRoot, of: approvedFixtureRoot) else {
             throw GalleryInputError(category: "outside-task-root")
         }
 
@@ -63,13 +72,18 @@ struct GalleryConfiguration {
         let approvedEvidenceRoot = repositoryRoot
             .appendingPathComponent(".omo/evidence/oigo-shortcut-transcription-design-fidelity", isDirectory: true)
             .standardizedFileURL.resolvingSymlinksInPath()
-        guard isDescendant(evidenceRoot, of: approvedEvidenceRoot) else {
+        let approvedTaskEvidenceRoot = approvedEvidenceRoot
+            .appendingPathComponent(evidenceTaskIdentifier, isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath()
+        guard isWithin(evidenceRoot, of: approvedTaskEvidenceRoot) else {
             throw GalleryInputError(category: "outside-evidence-root")
         }
 
         try validateRunMarker(at: taskRoot, evidenceRoot: approvedEvidenceRoot)
         for directory in [homeRoot, sessionRoot, fixtureRoot, evidenceRoot] {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            guard isDirectory(directory) else {
+                throw GalleryInputError(category: "missing-owned-directory")
+            }
         }
 
         return GalleryConfiguration(
@@ -120,12 +134,20 @@ struct GalleryConfiguration {
         URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()
     }
 
-    private static func isDescendant(_ candidate: URL, of root: URL) -> Bool {
-        candidate.path.hasPrefix(root.path + "/")
+    private static func isWithin(_ candidate: URL, of root: URL) -> Bool {
+        candidate.path == root.path || candidate.path.hasPrefix(root.path + "/")
     }
 
-    private static func containsLegacyRoot(_ candidate: URL) -> Bool {
-        candidate.pathComponents.contains { $0.hasPrefix("oigo-native-ui-redesign.") }
+    private static func taskNumber(for defaultsSuite: String) throws -> Int {
+        guard let taskNumber = Int(defaultsSuite.suffix(2)) else {
+            throw GalleryInputError(category: "invalid-defaults-suite")
+        }
+        return taskNumber
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        var directory = ObjCBool(false)
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &directory) && directory.boolValue
     }
 
     private static func validateRunMarker(at qaRoot: URL, evidenceRoot: URL) throws {

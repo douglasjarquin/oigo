@@ -24,6 +24,9 @@ struct ContractArguments {
         ) != nil else {
             throw ContractInputError(category: "invalid-defaults-suite")
         }
+        let taskNumber = try taskNumber(for: defaultsSuite)
+        let taskRootIdentifier = "task-" + defaultsSuite.suffix(2)
+        let evidenceTaskIdentifier = "task-\(taskNumber)"
 
         let fixtureRoot = canonicalURL(try required("fixture-root", in: values))
         guard let qaRoot = markedQARoot(containing: fixtureRoot) else {
@@ -34,12 +37,21 @@ struct ContractArguments {
             .appendingPathComponent(".omo/evidence/oigo-shortcut-transcription-design-fidelity", isDirectory: true)
             .standardizedFileURL.resolvingSymlinksInPath()
         try validateRunMarker(at: qaRoot, evidenceRoot: approvedEvidenceRoot)
-        guard isDescendant(fixtureRoot, of: qaRoot), !containsLegacyRoot(fixtureRoot) else {
+        let approvedFixtureRoot = qaRoot
+            .appendingPathComponent("fixtures/native/\(taskRootIdentifier)", isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath()
+        guard isWithin(fixtureRoot, of: approvedFixtureRoot) else {
             throw ContractInputError(category: "invalid-fixture-root")
         }
         let evidenceRoot = canonicalURL(try required("evidence-root", in: values))
-        guard isDescendant(evidenceRoot, of: approvedEvidenceRoot) else {
+        let approvedTaskEvidenceRoot = approvedEvidenceRoot
+            .appendingPathComponent(evidenceTaskIdentifier, isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath()
+        guard isWithin(evidenceRoot, of: approvedTaskEvidenceRoot) else {
             throw ContractInputError(category: "outside-evidence-root")
+        }
+        guard isDirectory(fixtureRoot), isDirectory(evidenceRoot) else {
+            throw ContractInputError(category: "missing-owned-directory")
         }
 
         let fixtureName: String?
@@ -60,9 +72,6 @@ struct ContractArguments {
         guard ["standard", "increased"].contains(contrast) else {
             throw ContractInputError(category: "invalid-contrast")
         }
-
-        try FileManager.default.createDirectory(at: fixtureRoot, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: evidenceRoot, withIntermediateDirectories: true)
 
         return ContractArguments(
             scenario: scenario,
@@ -112,12 +121,20 @@ struct ContractArguments {
         URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()
     }
 
-    private static func isDescendant(_ candidate: URL, of root: URL) -> Bool {
-        candidate.path.hasPrefix(root.path + "/")
+    private static func isWithin(_ candidate: URL, of root: URL) -> Bool {
+        candidate.path == root.path || candidate.path.hasPrefix(root.path + "/")
     }
 
-    private static func containsLegacyRoot(_ candidate: URL) -> Bool {
-        candidate.pathComponents.contains { $0.hasPrefix("oigo-native-ui-redesign.") }
+    private static func taskNumber(for defaultsSuite: String) throws -> Int {
+        guard let taskNumber = Int(defaultsSuite.suffix(2)) else {
+            throw ContractInputError(category: "invalid-defaults-suite")
+        }
+        return taskNumber
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        var directory = ObjCBool(false)
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &directory) && directory.boolValue
     }
 
     private static func markedQARoot(containing url: URL) -> URL? {
