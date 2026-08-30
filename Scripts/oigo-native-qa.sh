@@ -75,7 +75,11 @@ trap 'cleanup; exit 130' INT TERM
     --frontmost-app "${values[frontmost-app]}" --target-field-id "${values[target-field-id]}"
 
 liveness_output="$qa_root/session/native-qa/liveness.txt"
-"$source_root/Scripts/bounded-oigo-launch.sh" "${values[app]}" > "$liveness_output" 2>&1
+HOME="$qa_root/home" CFFIXED_USER_HOME="$qa_root/home" \
+    OIGO_QA_MODE=1 OIGO_QA_SCENARIO="$scenario" \
+    OIGO_QA_FIXTURE_ROOT="$fixture_root" OIGO_QA_RUN_MARKER="$qa_root/run.json" \
+    CFPREFERENCES_AVOID_DAEMON=1 \
+    "$source_root/Scripts/bounded-oigo-launch.sh" "${values[app]}" > "$liveness_output" 2>&1
 key_binary="$qa_root/session/native-qa/oigo-native-key-event-driver"
 /usr/bin/xcrun swiftc "$source_root/Scripts/oigo-native-key-event-driver.swift" -framework ApplicationServices -o "$key_binary"
 permission_binary="$qa_root/session/native-qa/oigo-native-permission-preflight"

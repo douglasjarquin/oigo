@@ -12,12 +12,6 @@ if [[ ! -x "$executable" ]]; then
     print -u2 "FAIL: executable is missing or not executable: $executable"
     exit 1
 fi
-if [[ -z "${CFFIXED_USER_HOME-}" || "${HOME:A}" != "${CFFIXED_USER_HOME:A}" ]]; then
-    print -u2 "ERROR nonisolated-home"
-    exit 1
-fi
-export CFPREFERENCES_AVOID_DAEMON=1
-
 /usr/bin/python3 - "$executable" <<'PY'
 import os
 import signal
