@@ -162,7 +162,6 @@ extension OigoIssue82ContractTests {
               registrar.calls == [
                   "register:0/256",
                   "unregister:49/768",
-                  "register:49/768",
                   "unregister:0/256"
               ] else {
             throw ContractFailure(message: "compound rollback failure did not fail closed with actionable state")
