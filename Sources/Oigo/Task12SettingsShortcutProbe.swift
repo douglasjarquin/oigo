@@ -5,6 +5,7 @@ import OigoHotKey
 
 struct Task12SettingsShortcutRow: Codable {
     let action: String
+    let ownerIdentity: String
     let persistedShortcut: String
     let committedShortcut: String
     let recorderValue: String
@@ -181,7 +182,7 @@ enum Task12SettingsShortcutProbe {
         do {
             let harness = try Task12SettingsHarness(defaults: defaults, seed: settings(shortcut: old))
             try harness.activate()
-            harness.registrar.failProbeFor = candidate
+            harness.conflictingShortcut = candidate
             let controller = harness.makeController()
             try capture(candidate, in: controller)
             rows.append(harness.observe("conflict", controller: controller))
@@ -197,7 +198,7 @@ enum Task12SettingsShortcutProbe {
         do {
             let harness = try Task12SettingsHarness(defaults: defaults, seed: settings(shortcut: old))
             try harness.activate()
-            harness.storage.failuresRemaining = 1
+            harness.persistenceFailuresRemaining = 1
             let controller = harness.makeController()
             try capture(candidate, in: controller)
             rows.append(harness.observe("persistence-failure", controller: controller))
@@ -213,7 +214,7 @@ enum Task12SettingsShortcutProbe {
         do {
             let harness = try Task12SettingsHarness(defaults: defaults, seed: settings(shortcut: old))
             try harness.activate()
-            harness.storage.failuresRemaining = 2
+            harness.persistenceFailuresRemaining = 2
             let controller = harness.makeController()
             try capture(candidate, in: controller)
             rows.append(harness.observe("rollback-failure", controller: controller))
@@ -229,7 +230,7 @@ enum Task12SettingsShortcutProbe {
         do {
             let harness = try Task12SettingsHarness(defaults: defaults, seed: settings(shortcut: old))
             try harness.activate()
-            harness.storage.failuresRemaining = 1
+            harness.persistenceFailuresRemaining = 1
             let controller = harness.makeController()
             try click("oigo.settings.volatile-preview", in: controller)
             rows.append(harness.observe("unrelated-save-failure", controller: controller))
@@ -367,10 +368,18 @@ enum Task12SettingsShortcutProbe {
 @available(macOS 26.0, *)
 @MainActor
 private final class Task12SettingsHarness {
-    let storage: Task12StorageBoundary
-    let settingsStore: OigoSettingsStore
-    let registrar = Task12ProbeRegistrar()
+    private let externalFailures: Task12ExternalFailures
     let appDelegate: OigoAppDelegate
+
+    var persistenceFailuresRemaining: Int {
+        get { externalFailures.persistenceFailuresRemaining }
+        set { externalFailures.persistenceFailuresRemaining = newValue }
+    }
+
+    var conflictingShortcut: ToggleShortcut? {
+        get { externalFailures.conflictingShortcut }
+        set { externalFailures.conflictingShortcut = newValue }
+    }
 
     var shortcutSaveCount: Int {
         appDelegate.settingsShortcutCallbackCounts.shortcutSave
@@ -393,21 +402,28 @@ private final class Task12SettingsHarness {
     }
 
     init(defaults: UserDefaults, seed: OigoSettings?) throws {
-        storage = Task12StorageBoundary(defaults: defaults)
-        settingsStore = OigoSettingsStore(defaults: defaults, writeData: storage.write)
-        if let seed {
+        if seed != nil {
             defaults.removePersistentDomain(forName: "com.oigo.qa.task12")
-            try settingsStore.save(seed)
         }
-        let onboardingStore = OigoOnboardingStore(defaults: defaults)
-        onboardingStore.markCompleted()
-        appDelegate = OigoAppDelegate(
-            settingsStore: settingsStore,
-            onboardingStore: onboardingStore,
-            shortcutRegistrar: registrar,
-            shortcutStorageReady: { true },
-            settingsPermissionStates: { (.granted, .granted) },
-            launchAtLoginController: OigoLaunchAtLoginController(client: Task12LaunchAtLoginClient())
+        let externalFailures = Task12ExternalFailures()
+        self.externalFailures = externalFailures
+        appDelegate = try OigoAppDelegate.makeSettingsShortcutProbe(
+            defaults: defaults,
+            seed: seed,
+            writeSettingsData: { data in
+                if externalFailures.persistenceFailuresRemaining > 0 {
+                    externalFailures.persistenceFailuresRemaining -= 1
+                    throw Task12ProbeError.persistenceFailure
+                }
+                defaults.set(data, forKey: "oigo.settings.v1")
+            },
+            registerShortcut: { _ in },
+            probeShortcut: { shortcut in
+                if shortcut == externalFailures.conflictingShortcut {
+                    throw Task12ProbeError.registrationConflict
+                }
+            },
+            unregisterShortcut: {}
         )
     }
 
@@ -416,46 +432,7 @@ private final class Task12SettingsHarness {
     }
 
     func makeController() -> SettingsWindowController {
-        let session = Task12PresentationSession()
-        let shortcutCallbacks = appDelegate.settingsShortcutCallbacks()
-        let ownerState = appDelegate.settingsShortcutOwnerState
-        let controller = SettingsWindowController(
-            settings: ownerState.persistedSettings,
-            inputDevices: [],
-            supportedLocales: ["en-US"],
-            loadSupportedLocales: { ["en-US"] },
-            microphoneState: .granted,
-            accessibilityState: .granted,
-            storageHealth: .ready(.init(recoveredSessionCount: 0, historyEntryCount: 0, malformedSessionCount: 0)),
-            launchAtLoginStatus: .disabled,
-            launchAtLoginStatusProvider: { .disabled },
-            openLoginItemsSettings: {},
-            registrationStatus: { [appDelegate] in appDelegate.settingsShortcutOwnerState.registrationActive
-                ? appDelegate.shortcutRegistrationStatus
-                : .inactive("Global shortcut is not registered")
-            },
-            registrationError: { [appDelegate] in appDelegate.shortcutRegistrationError },
-            validateShortcut: shortcutCallbacks.validate,
-            saveShortcut: shortcutCallbacks.saveShortcut,
-            save: shortcutCallbacks.saveSettings,
-            checkSpeechAssets: { _ in .ready },
-            refreshPermissions: { (.granted, .granted) },
-            openMicrophoneSettings: {},
-            openAccessibilitySettings: {},
-            rerunOnboarding: {},
-            openHistory: {},
-            openDataFolder: {},
-            retryStorage: {},
-            deleteAllHistory: {},
-            exportDiagnostics: { Data() },
-            dictionaryDocument: .empty,
-            saveDictionary: { _ in nil },
-            previewDictionary: { $0 },
-            addStarterTerms: { (.empty, nil) },
-            isPresented: { session.isPresented },
-            onClose: { session.isPresented = false }
-        )
-        controller.showWindow(nil)
+        let controller = appDelegate.presentSettings(supportedLocales: ["en-US"])
         controller.window?.layoutIfNeeded()
         return controller
     }
@@ -465,7 +442,8 @@ private final class Task12SettingsHarness {
         controller: SettingsWindowController,
         ownerState: OigoSettingsShortcutOwnerState? = nil
     ) -> Task12SettingsShortcutRow {
-        let ownerState = ownerState ?? appDelegate.settingsShortcutOwnerState
+        let shortcutOwner = appDelegate.settingsShortcutOwnerBundle()
+        let ownerState = ownerState ?? shortcutOwner.state()
         let views = Task12SettingsShortcutProbe.allViews(controller.window?.contentView)
         let recorder = views.first { $0.identifier?.rawValue == "oigo.settings.shortcut-recorder" }
             as? ShortcutRecorderControl
@@ -493,6 +471,7 @@ private final class Task12SettingsHarness {
             && toolbarItems.allSatisfy { !$0.label.isEmpty && $0.image != nil && $0.action != nil }
         return Task12SettingsShortcutRow(
             action: action,
+            ownerIdentity: ownerState.ownerIdentity,
             persistedShortcut: ownerState.persistedSettings.globalShortcut.copy.displayName,
             committedShortcut: ownerState.committedShortcut.copy.displayName,
             recorderValue: recorder?.displayValue ?? "missing",
@@ -511,7 +490,7 @@ private final class Task12SettingsHarness {
     }
 
     func saveRequestedSettings(_ requested: OigoSettings) -> String? {
-        appDelegate.settingsShortcutCallbacks().saveSettings(requested)
+        appDelegate.settingsShortcutOwnerBundle().callbacks.saveSettings(requested)
     }
 
     private func text(_ identifier: String, in views: [NSView]) -> String {
@@ -530,74 +509,9 @@ private final class Task12SettingsHarness {
     }
 }
 
-@available(macOS 26.0, *)
-@MainActor
-private final class Task12PresentationSession {
-    var isPresented = true
-}
-
-private final class Task12StorageBoundary: @unchecked Sendable {
-    let defaults: UserDefaults
-    var failuresRemaining = 0
-
-    init(defaults: UserDefaults) {
-        self.defaults = defaults
-    }
-
-    func write(_ data: Data) throws {
-        if failuresRemaining > 0 {
-            failuresRemaining -= 1
-            throw Task12ProbeError.persistenceFailure
-        }
-        defaults.set(data, forKey: "oigo.settings.v1")
-    }
-}
-
-@available(macOS 26.0, *)
-@MainActor
-private final class Task12LaunchAtLoginClient: OigoLaunchAtLoginClient {
-    private(set) var status: OigoLaunchAtLoginStatus = .disabled
-
-    func register() throws {
-        status = .enabled
-    }
-
-    func unregister() throws {
-        status = .disabled
-    }
-
-    func openLoginItemsSettings() {}
-}
-
-@available(macOS 26.0, *)
-@MainActor
-private final class Task12ProbeRegistrar: GlobalShortcutRegistrationClient {
-    var status: GlobalShortcutRegistrationStatus = .inactive("Global shortcut registration is waiting for setup")
-    var lastError: String?
-    var failProbeFor: ToggleShortcut?
-    private var generation: UInt64 = 0
-
-    func register(
-        shortcut: ToggleShortcut,
-        onEvent: @escaping @MainActor (GlobalShortcutEvent) -> Void
-    ) throws {
-        _ = onEvent
-        generation &+= 1
-        status = .active(shortcut, generation: generation)
-        lastError = nil
-    }
-
-    func probe(shortcut: ToggleShortcut) throws {
-        if shortcut == failProbeFor {
-            lastError = "Shortcut conflicts with another app"
-            throw Task12ProbeError.registrationConflict
-        }
-        lastError = nil
-    }
-
-    func unregister() {
-        status = .inactive("Global shortcut is not registered")
-    }
+private final class Task12ExternalFailures: @unchecked Sendable {
+    var persistenceFailuresRemaining = 0
+    var conflictingShortcut: ToggleShortcut?
 }
 
 private enum Task12ProbeError: Error, CustomStringConvertible {

@@ -38,7 +38,8 @@ final class SettingsShortcutScenario: NativeUIContractScenario {
             from: Data(contentsOf: output)
         )
         try validate(receipt, mode: mode)
-        print("PASS settings-shortcut mode=\(mode) rows=\(receipt.rows.count) owner=app-delegate-callback-bundle")
+        let observedOwner = Set(receipt.rows.map(\.ownerIdentity)).first ?? "missing"
+        print("PASS settings-shortcut mode=\(mode) rows=\(receipt.rows.count) owner=\(observedOwner)")
     }
 
     private static func validate(_ receipt: Task12SettingsShortcutReceipt, mode: String) throws {
@@ -48,6 +49,12 @@ final class SettingsShortcutScenario: NativeUIContractScenario {
         let candidateCopy = candidate.copy
         let rows = Dictionary(uniqueKeysWithValues: receipt.rows.map { ($0.action, $0) })
         var failures: [String] = []
+        let expectedOwner = ["app", "shortcut", "controller"].joined(separator: "-")
+        if receipt.rows.contains(where: {
+            $0.ownerIdentity != expectedOwner
+        }) {
+            failures.append("production-owner-identity")
+        }
 
         if mode != "failure" {
             guard let beforeSave = rows["before-shortcut-save"],
@@ -133,7 +140,8 @@ final class SettingsShortcutScenario: NativeUIContractScenario {
         receipt: Task12SettingsShortcutReceipt
     ) throws {
         var failures = failures
-        let forbidden = ["Option-Space", "⌥ Space"]
+        let defaultShortcutCopy = OigoSettings.default.globalShortcut.copy
+        let forbidden = [defaultShortcutCopy.displayName, defaultShortcutCopy.compactDisplayName]
         if receipt.rows.flatMap(\.accessibilityText).contains(where: { text in
             forbidden.contains(where: text.contains)
         }) {
@@ -199,6 +207,7 @@ private struct Task12SettingsShortcutReceipt: Decodable {
 
 private struct Task12SettingsShortcutRow: Decodable {
     let action: String
+    let ownerIdentity: String
     let persistedShortcut: String
     let committedShortcut: String
     let recorderValue: String

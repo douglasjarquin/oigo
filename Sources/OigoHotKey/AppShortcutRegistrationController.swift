@@ -1,5 +1,9 @@
 import OigoCore
 
+public enum AppShortcutRegistrationOwner {
+    public static let identity = "app-shortcut-controller"
+}
+
 public struct AppShortcutRegistrationState: Equatable, Sendable {
     public let registrationStatus: GlobalShortcutRegistrationStatus
     public let registrationError: String?
@@ -25,6 +29,10 @@ public final class AppShortcutRegistrationController {
 
     public var committedShortcut: ToggleShortcut {
         transaction.committedShortcut
+    }
+
+    public var ownerIdentity: String {
+        AppShortcutRegistrationOwner.identity
     }
 
     public var registrationStatus: GlobalShortcutRegistrationStatus {

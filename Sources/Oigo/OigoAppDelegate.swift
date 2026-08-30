@@ -197,6 +197,12 @@ struct OigoSettingsShortcutCallbacks {
     let saveSettings: (OigoSettings) -> String?
 }
 
+struct OigoSettingsShortcutOwnerBundle {
+    let ownerIdentity: String
+    let callbacks: OigoSettingsShortcutCallbacks
+    let state: () -> OigoSettingsShortcutOwnerState
+}
+
 struct OigoSettingsShortcutCallbackCounts {
     var validation = 0
     var shortcutSave = 0
@@ -204,9 +210,78 @@ struct OigoSettingsShortcutCallbackCounts {
 }
 
 struct OigoSettingsShortcutOwnerState {
+    let ownerIdentity: String
     let persistedSettings: OigoSettings
     let committedShortcut: ToggleShortcut
     let registrationActive: Bool
+}
+
+@MainActor
+private final class OigoInjectedShortcutRegistrar: GlobalShortcutRegistrationClient {
+    private let registerBehavior: (ToggleShortcut) throws -> Void
+    private let probeBehavior: (ToggleShortcut) throws -> Void
+    private let unregisterBehavior: () -> Void
+    private var generation: UInt64 = 0
+    private(set) var status: GlobalShortcutRegistrationStatus = .inactive(
+        "Global shortcut registration is waiting for setup"
+    )
+    private(set) var lastError: String?
+
+    init(
+        register: @escaping (ToggleShortcut) throws -> Void,
+        probe: @escaping (ToggleShortcut) throws -> Void,
+        unregister: @escaping () -> Void
+    ) {
+        registerBehavior = register
+        probeBehavior = probe
+        unregisterBehavior = unregister
+    }
+
+    func register(
+        shortcut: ToggleShortcut,
+        onEvent: @escaping @MainActor (GlobalShortcutEvent) -> Void
+    ) throws {
+        _ = onEvent
+        do {
+            try registerBehavior(shortcut)
+            generation &+= 1
+            status = .active(shortcut, generation: generation)
+            lastError = nil
+        } catch {
+            lastError = String(describing: error)
+            throw error
+        }
+    }
+
+    func probe(shortcut: ToggleShortcut) throws {
+        do {
+            try probeBehavior(shortcut)
+            lastError = nil
+        } catch {
+            lastError = String(describing: error)
+            throw error
+        }
+    }
+
+    func unregister() {
+        unregisterBehavior()
+        status = .inactive("Global shortcut is not registered")
+    }
+}
+
+@MainActor
+private final class OigoInjectedLaunchAtLoginClient: OigoLaunchAtLoginClient {
+    private(set) var status: OigoLaunchAtLoginStatus = .disabled
+
+    func register() throws {
+        status = .enabled
+    }
+
+    func unregister() throws {
+        status = .disabled
+    }
+
+    func openLoginItemsSettings() {}
 }
 
 @available(macOS 26.0, *)
@@ -389,6 +464,36 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    static func makeSettingsShortcutProbe(
+        defaults: UserDefaults,
+        seed: OigoSettings?,
+        writeSettingsData: @escaping (Data) throws -> Void,
+        registerShortcut: @escaping (ToggleShortcut) throws -> Void,
+        probeShortcut: @escaping (ToggleShortcut) throws -> Void,
+        unregisterShortcut: @escaping () -> Void
+    ) throws -> OigoAppDelegate {
+        let settingsStore = OigoSettingsStore(defaults: defaults, writeData: writeSettingsData)
+        if let seed {
+            try settingsStore.save(seed)
+        }
+        let onboardingStore = OigoOnboardingStore(defaults: defaults)
+        onboardingStore.markCompleted()
+        return OigoAppDelegate(
+            settingsStore: settingsStore,
+            onboardingStore: onboardingStore,
+            shortcutRegistrar: OigoInjectedShortcutRegistrar(
+                register: registerShortcut,
+                probe: probeShortcut,
+                unregister: unregisterShortcut
+            ),
+            shortcutStorageReady: { true },
+            settingsPermissionStates: { (.granted, .granted) },
+            launchAtLoginController: OigoLaunchAtLoginController(
+                client: OigoInjectedLaunchAtLoginClient()
+            )
+        )
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
         do {
@@ -499,9 +604,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         presentSettings(supportedLocales: [])
     }
 
-    private func presentSettings(supportedLocales: [String]) {
+    @discardableResult
+    func presentSettings(supportedLocales: [String]) -> SettingsWindowController {
         let sessionID = UUID()
-        let shortcutCallbacks = settingsShortcutCallbacks()
+        let shortcutOwner = settingsShortcutOwnerBundle()
         let window = SettingsWindowController(
             settings: settings,
             inputDevices: currentInputDevices(),
@@ -527,9 +633,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             registrationError: { [weak self] in
                 self?.shortcutRegistration.lastError
             },
-            validateShortcut: shortcutCallbacks.validate,
-            saveShortcut: shortcutCallbacks.saveShortcut,
-            save: shortcutCallbacks.saveSettings,
+            validateShortcut: shortcutOwner.callbacks.validate,
+            saveShortcut: shortcutOwner.callbacks.saveShortcut,
+            save: shortcutOwner.callbacks.saveSettings,
             checkSpeechAssets: { [weak self] identifier in
                 await self?.inspectSpeechAssets(for: identifier) ?? .unavailable("Oigo is no longer available")
             },
@@ -592,6 +698,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow = window
         window.setDictionaryStatus(dictionaryLoadError)
         window.showAndFocus()
+        return window
     }
 
     private func installApplicationMenu() {
@@ -3466,8 +3573,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         return .available
     }
 
-    func settingsShortcutCallbacks() -> OigoSettingsShortcutCallbacks {
-        OigoSettingsShortcutCallbacks(
+    func settingsShortcutOwnerBundle() -> OigoSettingsShortcutOwnerBundle {
+        let callbacks = OigoSettingsShortcutCallbacks(
             validate: { [weak self] candidate in
                 guard let self else {
                     return .invalid("Oigo is no longer available")
@@ -3491,10 +3598,23 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 return self.applySettings(requestedSettings)
             }
         )
+        return OigoSettingsShortcutOwnerBundle(
+            ownerIdentity: shortcutRegistration.ownerIdentity,
+            callbacks: callbacks,
+            state: { [weak self] in
+                self?.settingsShortcutOwnerState ?? OigoSettingsShortcutOwnerState(
+                    ownerIdentity: "unavailable",
+                    persistedSettings: .default,
+                    committedShortcut: .default,
+                    registrationActive: false
+                )
+            }
+        )
     }
 
     var settingsShortcutOwnerState: OigoSettingsShortcutOwnerState {
         OigoSettingsShortcutOwnerState(
+            ownerIdentity: shortcutRegistration.ownerIdentity,
             persistedSettings: settingsStore.load(),
             committedShortcut: shortcutRegistration.committedShortcut,
             registrationActive: shortcutRegistration.registrationStatus.isActive
