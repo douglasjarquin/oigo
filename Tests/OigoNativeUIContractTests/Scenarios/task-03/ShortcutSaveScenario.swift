@@ -225,7 +225,7 @@ final class ShortcutSaveScenario: NativeUIContractScenario {
             old: old,
             errorFragment: "persistence failure"
         )
-        print("OBSERVE shortcut-save-failure conflict=named persistence=named old=committed label=⇧⌘Space keyboard=unavailable candidate=committed mouse-start=enabled")
+        print("OBSERVE shortcut-save-failure conflict=named persistence=named old=committed label=⇧⌘Space keyboard=preserved candidate=committed mouse-start=enabled")
     }
 
     @MainActor
@@ -250,7 +250,7 @@ final class ShortcutSaveScenario: NativeUIContractScenario {
               transaction.candidateShortcut == old.globalShortcut,
               store.load() == old,
               ShortcutFormatter.displayName(for: store.load().globalShortcut) == "⇧⌘Space",
-              !registrar.status.isActive,
+              registrar.status.isActive,
               mouseStart.canStartDictation else {
             throw ContractInputError(category: "failure-rollback-diverged")
         }

@@ -23,7 +23,18 @@ public final class ShortcutConfigurationTransaction {
     public private(set) var candidateShortcut: ToggleShortcut
 
     public var registrationStatus: GlobalShortcutRegistrationStatus {
-        registrar.status
+        switch registrar.status {
+        case .active(let shortcut, let generation) where shortcut == committedShortcut:
+            .active(shortcut, generation: generation)
+        case .active:
+            .inactive("Global shortcut state is inconsistent")
+        case .inactive(let reason):
+            .inactive(reason)
+        }
+    }
+
+    public var isCommittedShortcutActive: Bool {
+        registrationStatus.isActive
     }
 
     public var lastError: String? {
@@ -77,7 +88,6 @@ public final class ShortcutConfigurationTransaction {
             try registrar.register(shortcut: candidate, onEvent: onEvent)
         } catch {
             candidateShortcut = committedShortcut
-            registrar.unregister()
             let validation = OigoShortcutValidation.conflict(String(describing: error))
             configurationError = Self.message(for: validation)
             return validation
@@ -91,10 +101,26 @@ public final class ShortcutConfigurationTransaction {
                 try restore()
             } catch let restorePersistenceError {
                 failure += ". Previous settings could not be restored: \(restorePersistenceError)"
+                candidateShortcut = committedShortcut
+                registrar.unregister()
+                failure += ". Shortcut registration was disabled until a shortcut is saved again"
+                let validation = OigoShortcutValidation.conflict(failure)
+                configurationError = Self.message(for: validation)
+                return validation
+            }
+            do {
+                try registrar.register(shortcut: committedShortcut, onEvent: onEvent)
+            } catch let restoreRegistrationError {
+                failure += ". Previous shortcut registration could not be restored: \(restoreRegistrationError)"
+                candidateShortcut = committedShortcut
+                registrar.unregister()
+                failure += ". Shortcut registration was disabled until a shortcut is saved again"
+                let validation = OigoShortcutValidation.conflict(failure)
+                configurationError = Self.message(for: validation)
+                return validation
             }
             candidateShortcut = committedShortcut
-            registrar.unregister()
-            failure += ". Shortcut registration was disabled until a shortcut is saved again"
+            failure += ". Previous shortcut was restored"
             let validation = OigoShortcutValidation.conflict(failure)
             configurationError = Self.message(for: validation)
             return validation
@@ -108,6 +134,24 @@ public final class ShortcutConfigurationTransaction {
 
     public func cancel() {
         candidateShortcut = committedShortcut
+    }
+
+    public func activateCommittedShortcut() throws {
+        guard !isCommittedShortcutActive else {
+            return
+        }
+        do {
+            try registrar.register(shortcut: committedShortcut, onEvent: onEvent)
+            configurationError = nil
+        } catch {
+            let validation = OigoShortcutValidation.conflict(String(describing: error))
+            configurationError = Self.message(for: validation)
+            throw error
+        }
+    }
+
+    public func deactivateShortcut() {
+        registrar.unregister()
     }
 
     public func clear(

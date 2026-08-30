@@ -63,10 +63,10 @@ extension OigoIssue82ContractTests {
             persist: { persisted = $0 },
             restore: { persisted = oldShortcut }
         ).isConflict,
-              registrar.status == .inactive("Global shortcut is not registered"),
+              registrar.status == .active(oldShortcut, generation: 1),
               persisted == oldShortcut,
-              registrar.calls == ["register:12/256", "unregister:49/768"] else {
-            throw ContractFailure(message: "failed replacement did not preserve settings and disable keyboard registration")
+              registrar.calls == ["register:12/256"] else {
+            throw ContractFailure(message: "failed replacement did not preserve the working shortcut")
         }
 
         registrar.failFor = nil
@@ -78,14 +78,14 @@ extension OigoIssue82ContractTests {
             restore: { persisted = oldShortcut }
         )
         guard persistenceFailure.isConflict,
-              registrar.status == .inactive("Global shortcut is not registered"),
+              registrar.status == .active(oldShortcut, generation: 3),
               transaction.committedShortcut == oldShortcut,
               persisted == oldShortcut,
               registrar.calls.suffix(2) == [
-                  "register:12/256",
+                  "register:49/768",
                   "unregister:12/256"
               ] else {
-            throw ContractFailure(message: "persistence failure did not restore settings and disable keyboard registration")
+            throw ContractFailure(message: "persistence failure did not restore settings and registration")
         }
 
         transaction.setCandidate(newShortcut)
@@ -128,7 +128,7 @@ extension OigoIssue82ContractTests {
         let persistedAfterFailure = OigoSettingsStore(defaults: defaults).load()
         guard result.isConflict,
               transaction.lastError?.contains("disk full") == true,
-              registrar.status == .inactive("Global shortcut is not registered"),
+              registrar.status == .active(oldSettings.globalShortcut, generation: 3),
               transaction.committedShortcut == oldSettings.globalShortcut,
               persistedAfterFailure == oldSettings else {
             throw ContractFailure(message: "production settings persistence failure did not restore live and durable shortcut state")
