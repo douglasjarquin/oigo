@@ -92,7 +92,7 @@ final class ShortcutRecorderScenario: NativeUIContractScenario {
               harness.recorder.shortcut == expected,
               harness.target.invocationCount == 1,
               harness.target.lastSender === harness.recorder,
-              harness.recorder.accessibilityValue() as? String == "⌃⌥⇧⌘A" else {
+              harness.recorder.accessibilityValue() as? String == "⇧⌃⌥⌘A" else {
             throw ContractInputError(category: "key-code-zero-capture-failed")
         }
     }

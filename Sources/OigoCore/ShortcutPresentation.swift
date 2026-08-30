@@ -20,6 +20,14 @@ public struct OigoShortcutCopy: Equatable, Sendable {
         "Registered: " + displayName
     }
 
+    public var savedPendingActivationStatus: String {
+        "Saved: " + displayName + ". Registration activates after setup."
+    }
+
+    public func preservedMessage(_ reason: String) -> String {
+        displayName + " remains saved: " + reason
+    }
+
     public var globalTitle: String {
         "Global Shortcut: " + displayName
     }
