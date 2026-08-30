@@ -169,107 +169,138 @@ extension OigoIssue82ContractTests {
     }
 
     static func testAppDelegateShortcutReadiness() throws {
-        let repository = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let appDelegate = try String(
-            contentsOf: repository.appendingPathComponent("Sources/Oigo/OigoAppDelegate.swift"),
-            encoding: .utf8
-        )
-        guard appDelegate.components(separatedBy: "private let shortcutRegistrar").count == 2,
-              appDelegate.components(separatedBy: "ShortcutConfigurationTransaction(").count == 2,
-              appDelegate.contains("try shortcutConfiguration.setRegistrationReady(ready)"),
-              appDelegate.contains("guard shortcutConfiguration.isOperationReady else"),
-              !appDelegate.contains("shortcutRegistered") else {
-            throw ContractFailure(message: "AppDelegate retained duplicate shortcut ownership or stale callback readiness")
-        }
-
         let defaultShortcut = ToggleShortcut.default
         let customShortcut = ToggleShortcut(keyCode: 0, modifiers: ToggleShortcutModifiers.command)
-        let registrar = RecordingConfigurationRegistrationClient()
-        let transaction = ShortcutConfigurationTransaction(
+        let backend = RecordingRegistrationBackend()
+        let registrar = CarbonGlobalShortcutRegistrar(backend: backend)
+        var receivedEvents = [GlobalShortcutEvent]()
+        let controller = AppShortcutRegistrationController(
             committedShortcut: defaultShortcut,
             registrar: registrar,
-            registrationReady: false,
-            onEvent: { _ in }
+            onRegisteredEvent: { receivedEvents.append($0) }
         )
         var persisted = defaultShortcut
 
-        guard transaction.save(
+        guard controller.save(
             customShortcut,
             persist: { persisted = $0 },
             restore: { persisted = defaultShortcut }
         ).isAvailable,
               persisted == customShortcut,
-              transaction.committedShortcut == customShortcut,
-              registrar.calls.isEmpty,
-              !transaction.registrationStatus.isActive,
-              !transaction.isOperationReady else {
+              controller.committedShortcut == customShortcut,
+              backend.calls.isEmpty,
+              !controller.state(commandAvailability: commandAvailability(
+                  setupComplete: false,
+                  storageReady: true
+              )).keyboardOperationEnabled else {
             throw ContractFailure(message: "AppDelegate shortcut registered or enabled operation before readiness")
         }
 
-        try transaction.setRegistrationReady(true)
-        try transaction.setRegistrationReady(true)
-        guard registrar.calls == ["register:0/256"],
-              transaction.registrationStatus.isActive,
-              transaction.isOperationReady else {
+        try controller.synchronize(storageReady: true, onboardingComplete: false)
+        try controller.synchronize(storageReady: true, onboardingComplete: true)
+        try controller.synchronize(storageReady: true, onboardingComplete: true)
+        let ready = controller.state(commandAvailability: commandAvailability(
+            setupComplete: true,
+            storageReady: true
+        ))
+        guard backend.calls == ["register:0/256"],
+              ready.registrationStatus.isActive,
+              ready.keyboardOperationEnabled,
+              ready.mouseStartEnabled,
+              ready.applicationActive,
+              case .active(_, let generation) = ready.registrationStatus else {
             throw ContractFailure(message: "AppDelegate shortcut did not register exactly once after readiness")
         }
+        backend.emit(.pressed, generation: generation)
+        guard receivedEvents.map(\.edge) == [.pressed] else {
+            throw ContractFailure(message: "AppDelegate shortcut event did not pass the successful-registration gate")
+        }
 
-        try transaction.setRegistrationReady(false)
-        guard registrar.calls == ["register:0/256", "unregister:0/256"],
-              !transaction.registrationStatus.isActive,
-              !transaction.isOperationReady else {
+        try controller.synchronize(storageReady: false, onboardingComplete: true)
+        let disabled = controller.state(commandAvailability: commandAvailability(
+            setupComplete: true,
+            storageReady: false
+        ))
+        guard backend.calls == ["register:0/256", "unregister:0/256"],
+              !disabled.registrationStatus.isActive,
+              !disabled.keyboardOperationEnabled,
+              !disabled.mouseStartEnabled else {
             throw ContractFailure(message: "AppDelegate shortcut teardown retained stale registration readiness")
+        }
+        controller.shutdown()
+        guard !controller.state(commandAvailability: commandAvailability(
+            setupComplete: true,
+            storageReady: true
+        )).applicationActive else {
+            throw ContractFailure(message: "AppDelegate shortcut controller did not publish teardown")
         }
     }
 
     static func testAppDelegateShortcutFailure() throws {
         let defaultShortcut = ToggleShortcut.default
         let customShortcut = ToggleShortcut(keyCode: 0, modifiers: ToggleShortcutModifiers.command)
-        let launchRegistrar = RecordingConfigurationRegistrationClient()
-        launchRegistrar.failFor = defaultShortcut
-        let launch = ShortcutConfigurationTransaction(
+        let launchBackend = RecordingRegistrationBackend()
+        launchBackend.failFor = defaultShortcut
+        let launch = AppShortcutRegistrationController(
             committedShortcut: defaultShortcut,
-            registrar: launchRegistrar,
-            registrationReady: false,
-            onEvent: { _ in }
+            registrar: CarbonGlobalShortcutRegistrar(backend: launchBackend),
+            onRegisteredEvent: { _ in }
         )
 
         do {
-            try launch.setRegistrationReady(true)
+            try launch.synchronize(storageReady: true, onboardingComplete: true)
             throw ContractFailure(message: "AppDelegate shortcut launch failure unexpectedly succeeded")
         } catch is ContractFailure {
             throw ContractFailure(message: "AppDelegate shortcut launch failure unexpectedly succeeded")
         } catch {
-            guard !launch.registrationStatus.isActive,
-                  !launch.isOperationReady,
-                  launch.lastError != nil else {
+            let state = launch.state(commandAvailability: commandAvailability(
+                setupComplete: true,
+                storageReady: true
+            ))
+            guard !state.registrationStatus.isActive,
+                  !state.keyboardOperationEnabled,
+                  state.mouseStartEnabled,
+                  state.registrationError != nil,
+                  state.applicationActive else {
                 throw ContractFailure(message: "AppDelegate shortcut launch failure published stale success")
             }
         }
 
-        let replacementRegistrar = RecordingConfigurationRegistrationClient(active: defaultShortcut)
-        replacementRegistrar.failFor = customShortcut
-        let replacement = ShortcutConfigurationTransaction(
+        let replacementBackend = RecordingRegistrationBackend()
+        let replacement = AppShortcutRegistrationController(
             committedShortcut: defaultShortcut,
-            registrar: replacementRegistrar,
-            onEvent: { _ in }
+            registrar: CarbonGlobalShortcutRegistrar(backend: replacementBackend),
+            onRegisteredEvent: { _ in }
         )
+        try replacement.synchronize(storageReady: true, onboardingComplete: true)
+        replacementBackend.failFor = customShortcut
         var persisted = defaultShortcut
-        guard replacement.validate(customShortcut).isConflict,
-              replacement.save(
+        guard replacement.save(
                 customShortcut,
                 persist: { persisted = $0 },
                 restore: { persisted = defaultShortcut }
               ).isConflict,
               persisted == defaultShortcut,
               replacement.committedShortcut == defaultShortcut,
-              replacement.registrationStatus.isActive,
-              replacement.isOperationReady else {
+              replacement.state(commandAvailability: commandAvailability(
+                  setupComplete: true,
+                  storageReady: true
+              )).keyboardOperationEnabled else {
             throw ContractFailure(message: "AppDelegate shortcut conflict replaced or disabled the current registration")
         }
+    }
+
+    private static func commandAvailability(
+        setupComplete: Bool,
+        storageReady: Bool
+    ) -> AppCommandAvailability {
+        AppCommandAvailability.evaluate(
+            coordinatorState: .idle,
+            occupiedKind: nil,
+            acceptingCommands: true,
+            setupComplete: setupComplete,
+            storageReady: storageReady
+        )
     }
 
 
