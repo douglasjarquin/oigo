@@ -24,9 +24,72 @@ final class ShortcutCopyScenario: NativeUIContractScenario {
         let inactiveHint: String
         let releaseHint: String
         let popoverGlyphs: [String]
+        let popoverActive: PopoverObservation
+        let popoverConflict: PopoverObservation
+        let nativeConsumers: ConsumerReceipt
+        let gallery: GalleryReceipt
         let conflictNoticeActionable: Bool
         let mouseStartEnabled: Bool
         let keyboardAvailable: Bool
+    }
+
+    private struct PopoverObservation: Codable {
+        let shortcutAccessibilityLabel: String
+        let primaryTitle: String
+        let primaryEnabled: Bool
+        let noticeActionTitle: String?
+        let noticeActionEnabled: Bool
+    }
+
+    private struct ControlObservation: Codable {
+        let status: String
+        let hint: String
+        let recorderDisplay: String
+        let recorderAccessibilityValue: String
+    }
+
+    private struct HUDObservation: Codable {
+        let title: String
+        let detail: String
+        let accessibilityLabel: String
+        let visible: Bool
+    }
+
+    private struct StatusObservation: Codable {
+        let title: String
+        let toolTip: String
+        let menuTitle: String
+        let accessibilityLabel: String
+    }
+
+    private struct ConsumerReceipt: Codable {
+        let shortcut: ToggleShortcut
+        let hud: HUDObservation
+        let onboardingActive: ControlObservation
+        let onboardingConflict: ControlObservation
+        let settingsActive: ControlObservation
+        let settingsConflict: ControlObservation
+        let statusActive: StatusObservation
+        let statusError: StatusObservation
+        let statusConflict: StatusObservation
+    }
+
+    private struct GalleryObservation: Codable {
+        let row: String
+        let shortcutText: String
+        let shortcutAccessibilityLabel: String
+        let primaryTitle: String
+        let mouseStartEnabled: Bool
+        let keyboardAvailable: Bool
+        let noticeText: String?
+        let noticeActionTitle: String?
+        let noticeActionable: Bool
+    }
+
+    private struct GalleryReceipt: Codable {
+        let shortcut: ToggleShortcut
+        let selectedRow: String
+        let observations: [GalleryObservation]
     }
 
     override class var scenarioName: String {
@@ -38,9 +101,20 @@ final class ShortcutCopyScenario: NativeUIContractScenario {
             throw ContractInputError(category: "invalid-defaults-suite")
         }
         let fixtures = try loadFixtures(from: arguments.fixtureRoot)
+        try buildRuntimeProducts()
         var receipts: [Receipt] = []
         for (name, fixture) in fixtures {
-            let receipt = try exercise(name: name, fixture: fixture)
+            let fixtureRoot = arguments.fixtureRoot.appendingPathComponent(name, isDirectory: true)
+            let actualFixtureRoot = FileManager.default.fileExists(
+                atPath: arguments.fixtureRoot.appendingPathComponent("fixture.json").path
+            ) ? arguments.fixtureRoot : fixtureRoot
+            let receipt = try exercise(
+                name: name,
+                fixture: fixture,
+                fixtureRoot: actualFixtureRoot,
+                evidenceRoot: arguments.evidenceRoot,
+                defaultsSuite: arguments.defaultsSuite
+            )
             receipts.append(receipt)
             print(
                 "COPY fixture=\(name) display=\(receipt.displayName) compact=\(receipt.compactName) "
@@ -78,7 +152,13 @@ final class ShortcutCopyScenario: NativeUIContractScenario {
         }
     }
 
-    private static func exercise(name: String, fixture: Fixture) throws -> Receipt {
+    private static func exercise(
+        name: String,
+        fixture: Fixture,
+        fixtureRoot: URL,
+        evidenceRoot: URL,
+        defaultsSuite: String
+    ) throws -> Receipt {
         let shortcut = fixture.shortcut
         let displayName = OigoShortcutPresentation.displayName(for: shortcut)
         let compactName = ShortcutFormatter.displayName(for: shortcut)
@@ -106,10 +186,69 @@ final class ShortcutCopyScenario: NativeUIContractScenario {
               !conflict.shortcut.isAvailable else {
             throw ContractInputError(category: "shortcut-conflict-contract")
         }
-        try assertRenderedConflict(
-            conflict,
-            expectedAccessibilityLabel: fixture.expectedInactiveHint
+        let popoverActive = try renderedPopoverObservation(popover)
+        let popoverConflict = try renderedPopoverObservation(conflict)
+        let runtimeRoot = evidenceRoot.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: runtimeRoot, withIntermediateDirectories: true)
+        let nativeConsumers = try observeNativeConsumers(
+            fixtureRoot: fixtureRoot,
+            outputRoot: runtimeRoot
         )
+        let gallery = try observeGallery(
+            fixtureRoot: fixtureRoot,
+            outputRoot: runtimeRoot.appendingPathComponent("gallery", isDirectory: true),
+            defaultsSuite: defaultsSuite
+        )
+        guard nativeConsumers.shortcut == shortcut,
+              nativeConsumers.hud.visible,
+              nativeConsumers.hud.detail == fixture.expectedReleaseHint,
+              nativeConsumers.hud.accessibilityLabel.contains(fixture.expectedReleaseHint),
+              [nativeConsumers.onboardingActive, nativeConsumers.settingsActive].allSatisfy({
+                  $0.status.contains(fixture.expectedDisplayName)
+                      && $0.recorderDisplay == fixture.expectedCompactName
+                      && $0.recorderAccessibilityValue == fixture.expectedCompactName
+              }),
+              [nativeConsumers.onboardingConflict, nativeConsumers.settingsConflict].allSatisfy({
+                  $0.status.contains(fixture.expectedDisplayName)
+                      && $0.recorderAccessibilityValue == fixture.expectedCompactName
+              }),
+              nativeConsumers.settingsActive.hint.contains(fixture.expectedDisplayName),
+              nativeConsumers.statusActive.title.contains(fixture.expectedDisplayName),
+              nativeConsumers.statusActive.menuTitle.contains(fixture.expectedDisplayName),
+              nativeConsumers.statusActive.toolTip.contains(fixture.expectedDisplayName),
+              nativeConsumers.statusError.title == "Global Shortcut Active - Open Settings…",
+              nativeConsumers.statusError.menuTitle == nativeConsumers.statusError.title,
+              nativeConsumers.statusError.toolTip.contains(fixture.expectedDisplayName),
+              nativeConsumers.statusError.toolTip.contains("Synthetic registration warning"),
+              nativeConsumers.statusConflict.title == "Global Shortcut Inactive - Open Settings…",
+              nativeConsumers.statusConflict.menuTitle == nativeConsumers.statusConflict.title,
+              nativeConsumers.statusConflict.toolTip.contains(fixture.expectedDisplayName),
+              [nativeConsumers.statusActive, nativeConsumers.statusError, nativeConsumers.statusConflict]
+                .allSatisfy({ $0.accessibilityLabel.contains(fixture.expectedDisplayName) }) else {
+            throw ContractInputError(category: "native-consumer-copy-mismatch")
+        }
+        guard gallery.shortcut == shortcut,
+              let galleryActive = gallery.observations.first(where: { $0.row == "storage-ready-idle" }),
+              let galleryConflict = gallery.observations.first(where: { $0.row == "shortcut-inactive-conflict" }),
+              galleryActive.shortcutText == fixture.expectedHoldHint,
+              galleryActive.shortcutAccessibilityLabel == fixture.expectedHoldHint,
+              galleryActive.keyboardAvailable,
+              galleryConflict.shortcutText == fixture.expectedInactiveHint,
+              galleryConflict.shortcutAccessibilityLabel == fixture.expectedInactiveHint,
+              galleryConflict.noticeActionable,
+              galleryConflict.noticeActionTitle == "Open Settings",
+              galleryConflict.mouseStartEnabled,
+              !galleryConflict.keyboardAvailable else {
+            throw ContractInputError(category: "gallery-consumer-copy-mismatch")
+        }
+        guard popoverActive.shortcutAccessibilityLabel == fixture.expectedHoldHint,
+              popoverConflict.shortcutAccessibilityLabel == fixture.expectedInactiveHint,
+              popoverConflict.noticeActionTitle == "Open Settings",
+              popoverConflict.noticeActionEnabled,
+              popoverConflict.primaryEnabled,
+              popoverConflict.primaryTitle == "Start Dictation" else {
+            throw ContractInputError(category: "rendered-shortcut-conflict-contract")
+        }
         return Receipt(
             fixture: name,
             displayName: displayName,
@@ -119,16 +258,19 @@ final class ShortcutCopyScenario: NativeUIContractScenario {
             inactiveHint: conflict.shortcut.inactiveHint,
             releaseHint: releaseHint,
             popoverGlyphs: popover.shortcut.glyphs,
-            conflictNoticeActionable: true,
-            mouseStartEnabled: true,
-            keyboardAvailable: false
+            popoverActive: popoverActive,
+            popoverConflict: popoverConflict,
+            nativeConsumers: nativeConsumers,
+            gallery: gallery,
+            conflictNoticeActionable: popoverConflict.noticeActionEnabled,
+            mouseStartEnabled: popoverConflict.primaryEnabled,
+            keyboardAvailable: conflict.shortcut.isAvailable
         )
     }
 
-    private static func assertRenderedConflict(
-        _ presentation: OigoPopoverPresentation,
-        expectedAccessibilityLabel: String
-    ) throws {
+    private static func renderedPopoverObservation(
+        _ presentation: OigoPopoverPresentation
+    ) throws -> PopoverObservation {
         try MainActor.assumeIsolated {
             let controller = OigoPopoverViewController(commandHandler: { _ in })
             controller.render(presentation, generation: 8, inputOptions: [])
@@ -139,12 +281,25 @@ final class ShortcutCopyScenario: NativeUIContractScenario {
             let primaryAction = descendant(
                 identifier: "popover-primary-action",
                 in: controller.view
-            ) as? NSButton,
-            shortcutRow.accessibilityLabel() == expectedAccessibilityLabel,
-            primaryAction.isEnabled else {
+            ) as? NSButton else {
                 throw ContractInputError(category: "rendered-shortcut-conflict-contract")
             }
+            let notice = descendant(identifier: "popover-prioritized-notice", in: controller.view)
+            let noticeButton = notice.flatMap(firstButton(in:))
+            return PopoverObservation(
+                shortcutAccessibilityLabel: shortcutRow.accessibilityLabel() ?? "",
+                primaryTitle: primaryAction.title,
+                primaryEnabled: primaryAction.isEnabled,
+                noticeActionTitle: noticeButton?.title,
+                noticeActionEnabled: noticeButton?.isEnabled == true
+            )
         }
+    }
+
+    @MainActor
+    private static func firstButton(in root: NSView) -> NSButton? {
+        if let button = root as? NSButton { return button }
+        return root.subviews.lazy.compactMap(firstButton(in:)).first
     }
 
     @MainActor
@@ -232,6 +387,92 @@ final class ShortcutCopyScenario: NativeUIContractScenario {
             guard sources.first(where: { $0.0.hasSuffix(file) })?.1.contains(token) == true else {
                 throw ContractInputError(category: "unprojected-shortcut-consumer")
             }
+        }
+    }
+
+    private static func buildRuntimeProducts() throws {
+        try runProcess(executable: URL(fileURLWithPath: "/usr/bin/env"), arguments: [
+            "swift", "build", "--product", "Oigo"
+        ])
+        try runProcess(executable: URL(fileURLWithPath: "/usr/bin/env"), arguments: [
+            "swift", "build", "--product", "OigoUIGallery"
+        ])
+    }
+
+    private static func observeNativeConsumers(
+        fixtureRoot: URL,
+        outputRoot: URL
+    ) throws -> ConsumerReceipt {
+        let output = outputRoot.appendingPathComponent("oigo-consumers.json")
+        try runProcess(
+            executable: URL(fileURLWithPath: ".build/debug/Oigo"),
+            arguments: [
+                "--task-08-shortcut-probe",
+                fixtureRoot.appendingPathComponent("fixture.json").path,
+                output.path
+            ],
+            environment: ["OIGO_QA_MODE": "1"]
+        )
+        return try JSONDecoder().decode(ConsumerReceipt.self, from: Data(contentsOf: output))
+    }
+
+    private static func observeGallery(
+        fixtureRoot: URL,
+        outputRoot: URL,
+        defaultsSuite: String
+    ) throws -> GalleryReceipt {
+        try FileManager.default.createDirectory(at: outputRoot, withIntermediateDirectories: true)
+        let repositoryRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let qaRoot = repositoryRoot.appendingPathComponent("T/oigo-shortcut-transcription-design-fidelity.qa")
+        let receiptURL = outputRoot.appendingPathComponent("shortcut-gallery.json")
+        let process = Process()
+        process.executableURL = repositoryRoot.appendingPathComponent(".build/debug/OigoUIGallery")
+        process.arguments = [
+            "--scenario", "popover-states",
+            "--defaults-suite", defaultsSuite,
+            "--session-root", qaRoot.appendingPathComponent("session/task-08").path,
+            "--fixture-root", fixtureRoot.path,
+            "--evidence-root", outputRoot.path,
+            "--pasteboard-provider", "synthetic",
+            "--permission-provider", "synthetic",
+            "--appearance", "light",
+            "--contrast", "standard"
+        ]
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = qaRoot.appendingPathComponent("home").path
+        process.environment = environment
+        try process.run()
+        let deadline = Date().addingTimeInterval(8)
+        while !FileManager.default.fileExists(atPath: receiptURL.path), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        if process.isRunning { process.terminate() }
+        process.waitUntilExit()
+        guard FileManager.default.fileExists(atPath: receiptURL.path) else {
+            throw ContractInputError(category: "missing-gallery-runtime-receipt")
+        }
+        return try JSONDecoder().decode(GalleryReceipt.self, from: Data(contentsOf: receiptURL))
+    }
+
+    private static func runProcess(
+        executable: URL,
+        arguments: [String],
+        environment additions: [String: String] = [:]
+    ) throws {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        var environment = ProcessInfo.processInfo.environment
+        additions.forEach { environment[$0.key] = $0.value }
+        process.environment = environment
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            throw ContractInputError(category: "runtime-process-failed-" + String(process.terminationStatus) + "-" + text)
         }
     }
 

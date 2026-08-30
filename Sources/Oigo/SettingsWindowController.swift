@@ -740,6 +740,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         }
     }
 
+    func task8ShortcutObservation() -> Task8ControlObservation {
+        updateShortcutStatus()
+        return Task8ControlObservation(
+            status: shortcutStatus.stringValue,
+            hint: shortcutHelp.stringValue,
+            recorderDisplay: shortcutRecorder.displayValue,
+            recorderAccessibilityValue: shortcutRecorder.accessibilityValue() as? String ?? ""
+        )
+    }
+
     @objc private func refreshPermissionStates() {
         let states = refreshPermissions()
         updatePermissionLabels(microphone: states.0, accessibility: states.1)

@@ -114,6 +114,20 @@ public final class OigoHUDController {
         )
     }
 
+    func task8ShortcutObservation() -> (
+        title: String,
+        detail: String,
+        accessibilityLabel: String,
+        visible: Bool
+    ) {
+        (
+            titleLabel.stringValue,
+            detailLabel.stringValue,
+            contentView.accessibilityLabel() ?? "",
+            panel.isVisible
+        )
+    }
+
     @discardableResult
     public func present(
         _ state: OigoHUDState,

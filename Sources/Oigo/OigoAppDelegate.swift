@@ -2837,6 +2837,29 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    static func task8StatusObservation(
+        status: GlobalShortcutRegistrationStatus,
+        shortcut: ToggleShortcut,
+        error: String?
+    ) -> Task8StatusObservation {
+        let copy = presentationShortcutCopy(
+            status,
+            committedShortcutCopy: shortcut.copy,
+            error: error,
+            feedback: nil
+        )
+        let statusButton = NSButton(title: copy.title, target: nil, action: nil)
+        statusButton.toolTip = copy.toolTip
+        statusButton.setAccessibilityLabel(copy.title + ". " + copy.toolTip)
+        let menuItem = NSMenuItem(title: copy.title, action: nil, keyEquivalent: "")
+        return Task8StatusObservation(
+            title: statusButton.title,
+            toolTip: statusButton.toolTip ?? "",
+            menuTitle: menuItem.title,
+            accessibilityLabel: statusButton.accessibilityLabel() ?? ""
+        )
+    }
+
     @objc private func toggleLaunchAtLogin() {
         let status = launchAtLoginController.status
         if status == .requiresApproval {

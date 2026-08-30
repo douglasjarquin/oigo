@@ -639,6 +639,16 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    func task8ShortcutObservation() -> Task8ControlObservation {
+        render()
+        return Task8ControlObservation(
+            status: statusLabel.stringValue,
+            hint: bodyLabel.stringValue,
+            recorderDisplay: shortcutRecorder.displayValue,
+            recorderAccessibilityValue: shortcutRecorder.accessibilityValue() as? String ?? ""
+        )
+    }
+
     @objc private func skipTestAction() {
         guard currentStep == .testDictation else {
             return

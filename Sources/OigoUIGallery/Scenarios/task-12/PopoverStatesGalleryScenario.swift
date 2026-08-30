@@ -1,4 +1,6 @@
 import AppKit
+import Foundation
+import OigoCore
 import OigoPresentation
 
 @MainActor
@@ -24,6 +26,28 @@ final class PopoverStatesGalleryScenario: GalleryScenario {
 
 @MainActor
 private final class PopoverStatesGalleryViewController: NSViewController {
+    private struct Fixture: Decodable {
+        let shortcut: ToggleShortcut
+    }
+
+    private struct Observation: Codable {
+        let row: String
+        let shortcutText: String
+        let shortcutAccessibilityLabel: String
+        let primaryTitle: String
+        let mouseStartEnabled: Bool
+        let keyboardAvailable: Bool
+        let noticeText: String?
+        let noticeActionTitle: String?
+        let noticeActionable: Bool
+    }
+
+    private struct Receipt: Codable {
+        let shortcut: ToggleShortcut
+        let selectedRow: String
+        let observations: [Observation]
+    }
+
     private static let rows = [
         "storage-checking", "storage-ready-idle", "storage-unavailable",
         "shortcut-inactive-conflict", "mic-permission-unavailable",
@@ -36,6 +60,7 @@ private final class PopoverStatesGalleryViewController: NSViewController {
     ]
 
     private let configuration: GalleryConfiguration
+    private let committedShortcut: ToggleShortcut
     private let stateLabel = NSTextField(labelWithString: "")
     private let card = NSStackView()
     private var selectedRow = "storage-ready-idle"
@@ -43,6 +68,14 @@ private final class PopoverStatesGalleryViewController: NSViewController {
 
     init(configuration: GalleryConfiguration) {
         self.configuration = configuration
+        let fixtureURL = configuration.fixtureRoot.appendingPathComponent("fixture.json")
+        guard let data = try? Data(contentsOf: fixtureURL),
+              let fixture = try? JSONDecoder().decode(Fixture.self, from: data) else {
+            preconditionFailure("missing committed shortcut gallery fixture")
+        }
+        committedShortcut = fixture.shortcut
+        selectedRow = fixture.shortcut.keyCode == 255
+            ? "shortcut-inactive-conflict" : "storage-ready-idle"
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -119,7 +152,11 @@ private final class PopoverStatesGalleryViewController: NSViewController {
             content.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor)
         ])
         view = root
-        render()
+        let intendedRow = selectedRow
+        let healthy = render(rowNamed: "storage-ready-idle")
+        let conflict = render(rowNamed: "shortcut-inactive-conflict")
+        _ = render(rowNamed: intendedRow)
+        writeReceipt(observations: [healthy, conflict])
     }
 
     @objc private func selectRow(_ sender: NSButton) {
@@ -127,11 +164,13 @@ private final class PopoverStatesGalleryViewController: NSViewController {
             return
         }
         selectedRow = row
-        render()
+        _ = render(rowNamed: row)
         sender.window?.makeFirstResponder(sender)
     }
 
-    private func render() {
+    @discardableResult
+    private func render(rowNamed rowName: String) -> Observation {
+        selectedRow = rowName
         stateLabel.stringValue = "Synthetic state: " + selectedRow
         for button in stateButtons {
             button.state = button.identifier?.rawValue == selectedRow ? .on : .off
@@ -141,7 +180,10 @@ private final class PopoverStatesGalleryViewController: NSViewController {
             $0.removeFromSuperview()
         }
 
-        let presentation = Task12PopoverFixture.presentation(rowNamed: selectedRow)
+        let presentation = Task12PopoverFixture.presentation(
+            rowNamed: selectedRow,
+            committedShortcut: committedShortcut
+        )
         let header = NSStackView(views: [
             NSTextField(labelWithString: "Oigo"),
             flexibleSpace(),
@@ -156,16 +198,22 @@ private final class PopoverStatesGalleryViewController: NSViewController {
         primary.bezelStyle = .rounded
         primary.controlSize = .large
         primary.isEnabled = presentation.primaryAction.isEnabled
+        primary.setAccessibilityIdentifier("gallery-primary-action")
         primary.widthAnchor.constraint(equalToConstant: 308).isActive = true
         card.addArrangedSubview(primary)
 
         let shortcutCopy = presentation.shortcut.isAvailable
             ? presentation.shortcut.holdHint : presentation.shortcut.inactiveHint
-        let shortcut = NSTextField(labelWithString: shortcutCopy)
+        let shortcut = NSTextField(wrappingLabelWithString: shortcutCopy)
         shortcut.font = .preferredFont(forTextStyle: .caption1)
         shortcut.textColor = .secondaryLabelColor
         shortcut.alignment = .center
+        shortcut.maximumNumberOfLines = 2
         shortcut.setAccessibilityLabel(shortcutCopy)
+        shortcut.setAccessibilityIdentifier("gallery-shortcut")
+        shortcut.setAccessibilityValue(
+            presentation.shortcut.isAvailable ? "available" : "unavailable"
+        )
         shortcut.widthAnchor.constraint(equalToConstant: 308).isActive = true
         card.addArrangedSubview(shortcut)
 
@@ -180,11 +228,19 @@ private final class PopoverStatesGalleryViewController: NSViewController {
         microphone.textColor = .secondaryLabelColor
         card.addArrangedSubview(row([NSTextField(labelWithString: "Microphone"), flexibleSpace(), microphone]))
 
+        var noticeText: NSTextField?
+        var noticeAction: NSButton?
         if let notice = presentation.notice {
             let noticeView = NSTextField(wrappingLabelWithString: notice.title + ". " + notice.body)
+            noticeText = noticeView
             noticeView.textColor = .secondaryLabelColor
             noticeView.widthAnchor.constraint(equalToConstant: 308).isActive = true
             card.addArrangedSubview(noticeView)
+            let action = NSButton(title: notice.action.title, target: nil, action: nil)
+            action.isEnabled = notice.action.isEnabled && notice.action.action != nil
+            action.setAccessibilityIdentifier("gallery-notice-action")
+            noticeAction = action
+            card.addArrangedSubview(action)
         }
 
         card.addArrangedSubview(divider())
@@ -207,6 +263,39 @@ private final class PopoverStatesGalleryViewController: NSViewController {
             NSButton(title: "Quit Oigo", target: nil, action: nil)
         ])
         card.addArrangedSubview(footer)
+        card.layoutSubtreeIfNeeded()
+        return Observation(
+            row: selectedRow,
+            shortcutText: shortcut.stringValue,
+            shortcutAccessibilityLabel: shortcut.accessibilityLabel() ?? "",
+            primaryTitle: primary.title,
+            mouseStartEnabled: primary.isEnabled,
+            keyboardAvailable: shortcut.stringValue.hasPrefix("Hold "),
+            noticeText: noticeText?.stringValue,
+            noticeActionTitle: noticeAction?.title,
+            noticeActionable: noticeAction?.isEnabled == true
+        )
+    }
+
+    private func writeReceipt(observations: [Observation]) {
+        let receipt = Receipt(
+            shortcut: committedShortcut,
+            selectedRow: selectedRow,
+            observations: observations
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(receipt) else {
+            preconditionFailure("could not encode shortcut gallery receipt")
+        }
+        do {
+            try data.write(
+                to: configuration.evidenceRoot.appendingPathComponent("shortcut-gallery.json"),
+                options: .atomic
+            )
+        } catch {
+            preconditionFailure("could not write shortcut gallery receipt")
+        }
     }
 
     private func row(_ views: [NSView]) -> NSStackView {
