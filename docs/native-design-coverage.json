@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "native_surfaces": [
+    "Oigo Icon.dc.html",
+    "Popover + HUD Prototype.dc.html",
+    "State Boards.dc.html",
+    "Onboarding.dc.html",
+    "Settings.dc.html",
+    "History.dc.html"
+  ],
+  "excluded_website_artifacts": [
+    "Landing Page.dc.html",
+    "Design System.dc.html"
+  ],
+  "state_matrix_rows": [
+    "Storage checking",
+    "Storage ready / Idle",
+    "Storage unavailable",
+    "Shortcut inactive/conflict",
+    "Mic permission unavailable",
+    "Selected input unavailable",
+    "Language assets checking/installing",
+    "Language assets unavailable",
+    "Accessibility unavailable",
+    "Preparing",
+    "Recording",
+    "Finalizing / Cleaning / Inserting",
+    "Paste event attempted",
+    "Paste verified (Oigo-owned test field only)",
+    "Copied only / secure-field / changed-target",
+    "Cleanup fallback to raw/normalized",
+    "Completed with insertion failure",
+    "Live transcription degraded → retry required",
+    "Cancelled before durable raw text",
+    "Cancelled after durable raw text",
+    "Interrupted",
+    "Busy (typed reason)",
+    "Shutting down"
+  ],
+  "hud": {
+    "visible_content_frame_pt": {
+      "compact": { "width": 224, "height": 42 },
+      "expanded": { "width": 280, "height": 64 }
+    },
+    "screen_map_outer_width_pt": { "min": 210, "max": 280 },
+    "corner_radius_pt": 12,
+    "state_assignments": {
+      "preparing": "compact",
+      "recording": { "empty_preview": "compact", "non_empty_preview": "expanded" },
+      "degradedRecording": "compact",
+      "finalizing": "compact",
+      "cleaning": "compact",
+      "pasting": "compact",
+      "pasteAttempted": "expanded",
+      "copied": "expanded",
+      "copyOnly": "expanded",
+      "savedRetry": "expanded",
+      "preservedFailure": "expanded",
+      "cleanupFallback": "expanded",
+      "cancelledBeforeRaw": "expanded",
+      "cancelledAfterRaw": "expanded",
+      "interrupted": "expanded",
+      "pasteAgainDestination": "expanded",
+      "terminal": "compact",
+      "shutdown": "compact"
+    }
+  },
+  "geometry_pt": {
+    "popover": { "width": 340, "side_padding": 16 },
+    "onboarding": { "width": 640, "chrome": 38, "content_padding": [24, 32] },
+    "settings": { "width": 720 },
+    "history": { "content_width": 1000, "content_height": 640, "toolbar": 44, "main_content": 596, "list_column": 340 }
+  },
+  "design_tokens": { "spacing_increment_pt": 4, "colors": "semantic-system-colors" },
+  "shortcut": {
+    "copy_source": "committed-configuration",
+    "conflict": {
+      "mouse_start_dictation": "enabled",
+      "shortcut_notice": "actionable",
+      "keyboard_events": "unavailable"
+    }
+  }
+}
