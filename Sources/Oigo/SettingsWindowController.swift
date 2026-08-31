@@ -2,10 +2,29 @@ import AppKit
 import UniformTypeIdentifiers
 import OigoCore
 import OigoHotKey
+import MacUtilityUI
 
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSTableViewDataSource, NSTableViewDelegate {
     private static let selectedPaneKey = "oigo.settings.selected-pane"
+    private static let shellWidth: CGFloat = 720
+    private static let paneHorizontalPadding: CGFloat = 40
+    private static let paneTopPadding: CGFloat = 22
+    private static let paneBottomPadding: CGFloat = 28
+    private static let paneTransitionDuration: TimeInterval = 0.12
+
+    private static func iconName(for pane: OigoSettingsPane) -> String {
+        switch pane {
+        case .general:
+            "gearshape"
+        case .dictation:
+            "waveform"
+        case .dictionary:
+            "text.book.closed"
+        case .dataPrivacy:
+            "lock.shield"
+        }
+    }
     private let paneContainer = NSView()
     private var paneViews: [OigoSettingsPane: NSView] = [:]
     private var selectedPane: OigoSettingsPane
@@ -156,13 +175,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         shortcutRecorder.setAccessibilityIdentifier("oigo.settings.shortcut-recorder")
 
         let window = OigoUtilityWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 640),
+            contentRect: NSRect(x: 0, y: 0, width: Self.shellWidth, height: 640),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Oigo Settings"
-        window.minSize = NSSize(width: 640, height: 520)
+        window.minSize = NSSize(width: Self.shellWidth, height: 520)
         window.identifier = NSUserInterfaceItemIdentifier("com.oigo.settings.window")
         window.setFrameAutosaveName("Oigo.SettingsWindow")
         window.isRestorable = true
@@ -227,6 +246,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         toolbar.allowsUserCustomization = false
         toolbar.autosavesConfiguration = false
         toolbar.displayMode = .iconAndLabel
+        toolbar.allowsDisplayModeCustomization = false
+        toolbar.centeredItemIdentifiers = Set(toolbarAllowedItemIdentifiers(toolbar))
         toolbar.selectedItemIdentifier = NSToolbarItem.Identifier(selectedPane.rawValue)
         window?.toolbar = toolbar
         window?.toolbarStyle = .preference
@@ -260,7 +281,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         item.paletteLabel = pane.title
         item.toolTip = pane.title + " settings"
         item.image = NSImage(
-            systemSymbolName: pane == .general ? "gearshape" : pane == .dictation ? "waveform" : pane == .dictionary ? "text.book.closed" : "lock.shield",
+            systemSymbolName: Self.iconName(for: pane),
             accessibilityDescription: pane.title
         )
         item.target = self
@@ -276,16 +297,30 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     private func selectPane(_ pane: OigoSettingsPane, loadLocales: Bool = true) {
+        let previousPane = selectedPane
         if pane != .dictation {
             cancelLocaleWork()
         }
         selectedPane = pane
         UserDefaults.standard.set(pane.rawValue, forKey: Self.selectedPaneKey)
-        for (candidate, view) in paneViews {
-            view.isHidden = candidate != pane
+        let incomingView = paneViews[pane]
+        let outgoingView = paneViews[previousPane]
+        if previousPane != pane, window?.isVisible == true, let incomingView {
+            outgoingView?.isHidden = true
+            incomingView.isHidden = false
+            incomingView.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Self.paneTransitionDuration
+                incomingView.animator().alphaValue = 1
+            }
+        } else {
+            for (candidate, view) in paneViews {
+                view.isHidden = candidate != pane
+                view.alphaValue = 1
+            }
         }
         window?.toolbar?.selectedItemIdentifier = NSToolbarItem.Identifier(pane.rawValue)
-        window?.windowController?.window?.makeFirstResponder(paneViews[pane])
+        window?.makeFirstResponder(incomingView)
         if loadLocales, pane == .dictation {
             loadSupportedLocalesIfNeeded()
         }
@@ -399,7 +434,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
 
         func heading(_ text: String) -> NSTextField {
             let label = NSTextField(labelWithString: text)
-            label.font = .boldSystemFont(ofSize: 20)
+            label.font = MacUITokens.Typography.heading
             return label
         }
 
@@ -410,13 +445,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         let description = NSTextField(
             wrappingLabelWithString: "Changes apply immediately. Oigo checks permissions when this window becomes active or when you refresh them."
         )
-        description.textColor = .secondaryLabelColor
-        nextDictationNotice.textColor = .secondaryLabelColor
+        description.textColor = MacUITokens.Colors.secondaryLabel
+        nextDictationNotice.textColor = MacUITokens.Colors.secondaryLabel
         nextDictationNotice.isHidden = true
 
         let shortcutTitle = NSTextField(labelWithString: "Global shortcut")
         shortcutHelp.stringValue = committedShortcutCopy.settingsHint
-        shortcutHelp.textColor = .secondaryLabelColor
+        shortcutHelp.textColor = MacUITokens.Colors.secondaryLabel
         identify(shortcutHelp, as: "shortcut-help")
         identify(shortcutStatus, as: "shortcut-status")
         identify(messageLabel, as: "save-message")
@@ -458,31 +493,33 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         identify(deleteButton, as: "delete-all-history")
         identify(exportButton, as: "export-diagnostics")
         let helpTitle = NSTextField(labelWithString: "About")
-        helpTitle.font = .boldSystemFont(ofSize: 13)
+        helpTitle.font = MacUITokens.Typography.section
         let helpBody = NSTextField(
             wrappingLabelWithString: "Oigo is a menu-bar dictation app for macOS 26 or later on Apple silicon. Microphone and Accessibility permissions are required. Instant inserts the recognized transcript; Clean optionally rewrites it on this Mac. Recordings, transcripts, and the custom dictionary live in Application Support/Oigo. The README and privacy statement ship with the download."
         )
-        helpBody.textColor = .secondaryLabelColor
-        microphoneStatus.font = .systemFont(ofSize: 12)
-        accessibilityStatus.font = .systemFont(ofSize: 12)
-        storageStatus.font = .systemFont(ofSize: 12)
-        launchAtLoginStatusLabel.font = .systemFont(ofSize: 12)
-        launchAtLoginStatusLabel.textColor = .secondaryLabelColor
+        helpBody.textColor = MacUITokens.Colors.secondaryLabel
+        microphoneStatus.font = MacUITokens.Typography.secondary
+        accessibilityStatus.font = MacUITokens.Typography.secondary
+        storageStatus.font = MacUITokens.Typography.secondary
+        launchAtLoginStatusLabel.font = MacUITokens.Typography.secondary
+        launchAtLoginStatusLabel.textColor = MacUITokens.Colors.secondaryLabel
         launchAtLoginStatusLabel.maximumNumberOfLines = 3
         openLoginItemsButton.target = self
         openLoginItemsButton.action = #selector(openLoginItemsSettingsAction)
         openLoginItemsButton.bezelStyle = .rounded
-        messageLabel.font = .systemFont(ofSize: 12)
-        messageLabel.textColor = .secondaryLabelColor
+        messageLabel.font = MacUITokens.Typography.secondary
+        messageLabel.textColor = MacUITokens.Colors.secondaryLabel
         messageLabel.maximumNumberOfLines = 4
-        dictationMessage.font = .systemFont(ofSize: 12)
+        dictationMessage.font = MacUITokens.Typography.secondary
         dictationMessage.textColor = .systemOrange
         dictationMessage.maximumNumberOfLines = 3
 
         let shortcutRow = NSStackView(views: [shortcutTitle, shortcutRecorder])
         shortcutRow.orientation = .horizontal
         shortcutRow.alignment = .centerY
-        shortcutRow.spacing = 12
+        shortcutRow.spacing = MacUITokens.Spacing.controlGroup
+        shortcutTitle.alignment = .right
+        shortcutTitle.widthAnchor.constraint(equalToConstant: 180).isActive = true
         shortcutRow.translatesAutoresizingMaskIntoConstraints = false
         shortcutRecorder.widthAnchor.constraint(equalToConstant: 280).isActive = true
 
@@ -596,16 +633,26 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         paneContainer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(paneContainer)
         NSLayoutConstraint.activate([
-            paneContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 32),
-            paneContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -32),
-            paneContainer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
-            paneContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -24)
+            paneContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Self.paneHorizontalPadding),
+            paneContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Self.paneHorizontalPadding),
+            paneContainer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.paneTopPadding),
+            paneContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Self.paneBottomPadding)
         ])
+        paneContainer.identifier = NSUserInterfaceItemIdentifier("oigo.settings.content")
+        paneContainer.setAccessibilityIdentifier("oigo.settings.content")
+        paneContainer.setAccessibilityElement(true)
+        paneContainer.setAccessibilityRole(.group)
+        paneContainer.setAccessibilityLabel("Settings content")
         paneViews = Dictionary(uniqueKeysWithValues: paneStacks.map { ($0.0, $0.1) })
-        for stack in paneViews.values.compactMap({ $0 as? NSStackView }) {
+        for (pane, stack) in paneStacks {
             stack.orientation = .vertical
             stack.alignment = .leading
-            stack.spacing = 14
+            stack.spacing = MacUITokens.Spacing.section
+            stack.identifier = NSUserInterfaceItemIdentifier("oigo.settings.pane." + pane.rawValue)
+            stack.setAccessibilityIdentifier("oigo.settings.pane." + pane.rawValue)
+            stack.setAccessibilityElement(true)
+            stack.setAccessibilityRole(.group)
+            stack.setAccessibilityLabel(pane.title)
             stack.translatesAutoresizingMaskIntoConstraints = false
             paneContainer.addSubview(stack)
             NSLayoutConstraint.activate([
@@ -728,7 +775,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         let row = NSStackView(views: [label, control])
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 12
+        row.spacing = MacUITokens.Spacing.controlGroup
+        label.alignment = .right
+        label.widthAnchor.constraint(equalToConstant: 180).isActive = true
         label.setContentHuggingPriority(.required, for: .horizontal)
         return row
     }
