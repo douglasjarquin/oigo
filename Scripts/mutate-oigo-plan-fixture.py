@@ -74,23 +74,27 @@ def main() -> int:
         records = [json.loads(line) for line in text.splitlines() if line.strip()]
     except json.JSONDecodeError:
         return fail("malformed-ledger")
-    matches = [index for index, record in enumerate(records) if str(record.get("task")) == args.task and str(record.get("event")) in {"task-complete", "task-completed", "final-verifier-completed"}]
-    if len(matches) != 1:
-        return fail("expected-record-missing-or-duplicate")
-    index = matches[0]
     if args.mode == "drop-task-completion":
-        records.pop(index)
-    elif args.mode in {"replace-task-sha", "replace-integrated-sha"}:
-        if args.sha is None or len(args.sha) != 40 or any(character not in "0123456789abcdef" for character in args.sha):
-            return fail("invalid-sha")
-        records[index]["task_sha" if args.mode == "replace-task-sha" else "integrated_sha"] = args.sha
-    elif args.mode == "duplicate-substantive-completion":
-        records.append(dict(records[index]))
+        matches = [index for index, record in enumerate(records) if str(record.get("task")) == args.task and str(record.get("event")) in {"task-complete", "task-completed", "final-verifier-completed", "task-complete-corrected", "task-custody-corrected", "task-custody-hash-resealed", "task-provenance-corrected"}]
+        if not matches:
+            return fail("expected-record-missing-or-duplicate")
+        records = [record for index, record in enumerate(records) if index not in matches]
     else:
-        template = dict(records[index])
-        template["task"] = "17"
-        template["verdict"] = "PASS"
-        records.append(template)
+        matches = [index for index, record in enumerate(records) if str(record.get("task")) == args.task and str(record.get("event")) in {"task-complete", "task-completed", "final-verifier-completed"}]
+        if len(matches) != 1:
+            return fail("expected-record-missing-or-duplicate")
+        index = matches[0]
+        if args.mode in {"replace-task-sha", "replace-integrated-sha"}:
+            if args.sha is None or len(args.sha) != 40 or any(character not in "0123456789abcdef" for character in args.sha):
+                return fail("invalid-sha")
+            records[index]["task_sha" if args.mode == "replace-task-sha" else "integrated_sha"] = args.sha
+        elif args.mode == "duplicate-substantive-completion":
+            records.append(dict(records[index]))
+        else:
+            template = dict(records[index])
+            template["task"] = "17"
+            template["verdict"] = "PASS"
+            records.append(template)
     atomic_write(args.output, "".join(json.dumps(record, sort_keys=True) + "\n" for record in records))
     print("PASS mutated-fixture")
     return 0
