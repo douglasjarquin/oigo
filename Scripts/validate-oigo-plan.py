@@ -44,7 +44,7 @@ REQUIRED_LEDGER_FIELDS = {
     "cleanup",
     "limitations",
 }
-PASS_VERDICTS = {"PASS", "complete", "completed", "confirmed", "PASS_CONTRACT_ONLY", "PASS_WITH_NATIVE_INCONCLUSIVE"}
+PASS_VERDICTS = {"PASS", "complete", "completed", "confirmed", "inconclusive", "PASS_CONTRACT_ONLY", "PASS_WITH_NATIVE_INCONCLUSIVE"}
 
 
 class ValidationFailure(Exception):
@@ -126,6 +126,7 @@ def completion_for(task: str, entries: list[dict[str, object]]) -> dict[str, obj
         if str(entry.get("task")) == task
         and str(entry.get("event")) in {"task-complete", "task-completed", "final-verifier-completed"}
         and str(entry.get("verdict")) in PASS_VERDICTS
+        and "verdict_note" not in entry
     ]
     if len(matches) != 1:
         raise ValidationFailure("missing-or-duplicate-completion")
@@ -142,7 +143,13 @@ def completion_for(task: str, entries: list[dict[str, object]]) -> dict[str, obj
         raise ValidationFailure("missing-command-receipt")
     if not isinstance(adversarial, dict) or not adversarial:
         raise ValidationFailure("missing-adversarial-receipt")
-    if not isinstance(cleanup, str) or not cleanup:
+    if isinstance(cleanup, str):
+        cleanup_valid = bool(cleanup)
+    elif isinstance(cleanup, list):
+        cleanup_valid = bool(cleanup) and all(isinstance(item, str) and bool(item) for item in cleanup)
+    else:
+        cleanup_valid = False
+    if not cleanup_valid:
         raise ValidationFailure("missing-cleanup-receipt")
     return completion
 
