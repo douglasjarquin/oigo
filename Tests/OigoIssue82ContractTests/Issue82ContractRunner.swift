@@ -28,6 +28,7 @@ struct OigoIssue82ContractTests {
             ("app bridge release during startup", testAppBridgeReleaseDuringStartup),
             ("keyboard release lifecycle", testKeyboardReleaseLifecycle),
             ("native QA permission mechanism", testNativeQAPermissionMechanism),
+            ("native QA target field classification", testNativeQATargetFieldClassification),
             ("app bridge processing feedback", testAppBridgeProcessingFeedback),
             ("keyboard startup production bridge sequence", testKeyboardStartupProductionSequence),
             ("keyboard startup AppDelegate recovery and locale binding", testKeyboardStartupLocaleGenerationRejection),

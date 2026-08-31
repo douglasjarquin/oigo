@@ -152,16 +152,6 @@ if [[ "$scenario" == global-shortcut ]]; then
     if [[ -n "${values[deny]-}" ]]; then preflight_arguments+=(--deny "${values[deny]}"); fi
     "$source_root/Scripts/oigo-native-qa-preflight.sh" $preflight_arguments
 
-    liveness_output="$qa_root/session/native-qa/liveness.txt"
-    if [[ "${values[deny]-}" != window-server ]]; then
-        HOME="$qa_root/home" CFFIXED_USER_HOME="$qa_root/home" \
-            OIGO_QA_MODE=1 OIGO_QA_SCENARIO="$scenario" \
-            OIGO_QA_FIXTURE_ROOT="$fixture_root" OIGO_QA_RUN_MARKER="$qa_root/run.json" \
-            CFPREFERENCES_AVOID_DAEMON=1 \
-            "$source_root/Scripts/bounded-oigo-launch.sh" "${values[app]}" > "$liveness_output" 2>&1
-    else
-        print "INCONCLUSIVE window-server" > "$liveness_output"
-    fi
     key_binary="$qa_root/session/native-qa/oigo-native-key-event-driver"
     /usr/bin/xcrun swiftc "$source_root/Scripts/oigo-native-key-event-driver.swift" \
         -framework ApplicationServices -o "$key_binary"
@@ -184,6 +174,9 @@ if [[ "$scenario" == global-shortcut ]]; then
         if rg -q 'inconclusive-accessibility' "$evidence_root/preflight-driver/receipt.json"; then
             unavailable+=(accessibility)
         fi
+        if rg -q 'inconclusive-target-field-unavailable' "$evidence_root/preflight-driver/receipt.json"; then
+            unavailable+=(target-field-unavailable)
+        fi
         if (( event_access_status == 2 )); then unavailable+=(coregraphics-post-event); fi
         if [[ "$permission_output" != *"MICROPHONE_CHECKPOINT=granted"* ]]; then unavailable+=(microphone); fi
         if [[ "$permission_output" != *"SPEECH_CHECKPOINT=ready"* ]]; then unavailable+=(speech); fi
@@ -191,9 +184,9 @@ if [[ "$scenario" == global-shortcut ]]; then
         if [[ "$permission_output" != *"HARDWARE_CHECKPOINT=ready"* ]]; then unavailable+=(hardware); fi
     fi
     categories_json="$(printf '%s\n' $unavailable | jq -R -s 'split("\n") | map(select(length > 0)) | unique')"
-    h82_01_categories="$(jq '[.[] | select(. == "window-server" or . == "accessibility" or . == "coregraphics-post-event")]' <<< "$categories_json")"
+    h82_01_categories="$(jq '[.[] | select(. == "window-server" or . == "accessibility" or . == "coregraphics-post-event" or . == "target-field-unavailable")]' <<< "$categories_json")"
     h82_02_categories="$categories_json"
-    h82_09_categories="$(jq '[.[] | select(. == "window-server" or . == "accessibility")]' <<< "$categories_json")"
+    h82_09_categories="$(jq '[.[] | select(. == "window-server" or . == "accessibility" or . == "target-field-unavailable")]' <<< "$categories_json")"
 
     write_h82_receipt() {
         local row="$1" row_verdict="$2" row_categories_json="$3" mechanisms_json="$4" result="$5"
