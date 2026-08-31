@@ -249,21 +249,21 @@ final class HUDRendererScenario: NativeUIContractScenario {
             print("PREVIEW_THROTTLE PASS rejected=true render-unchanged=true resources-unchanged=true")
 
             let screenshotRoot = URL(fileURLWithPath: CommandLine.arguments[2])
-            let appearances: [(String, String)] = [
-                ("NSAppearanceNameAqua", "hud-controller-light.png"),
+            let appearances: [(String?, String)] = [
+                (nil, "hud-controller-light.png"),
                 ("NSAppearanceNameDarkAqua", "hud-controller-dark.png"),
                 ("NSAppearanceNameAccessibilityHighContrastAqua", "hud-controller-increased-contrast.png")
             ]
             for (appearanceName, fileName) in appearances {
-                NSApp.appearance = NSAppearance(named: NSAppearance.Name(appearanceName))
+                NSApp.appearance = appearanceName.flatMap { NSAppearance(named: NSAppearance.Name($0)) }
                 guard controller.present(
                     .recording,
                     generation: fixture.currentGeneration,
                     startedAt: Date(),
                     shortcutReleaseHint: fixture.shortcutReleaseHint
                 ),
-                controller.updatePreview("appearance preview", generation: fixture.currentGeneration, at: 20),
-                controller.captureRenderedSurface(
+                controller.updatePreview("appearance preview", generation: fixture.currentGeneration, at: 20) else { exit(17) }
+                guard controller.captureRenderedSurface(
                     to: screenshotRoot.appendingPathComponent(fileName)
                 ) else { exit(17) }
             }
