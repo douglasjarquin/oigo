@@ -4,10 +4,11 @@ import Foundation
 let raw = Array(CommandLine.arguments.dropFirst())
 if raw == ["--check-only"] {
     guard CGPreflightPostEventAccess() else {
-        print("INCONCLUSIVE input-monitoring")
+        print("COREGRAPHICS_POST_EVENT_CHECKPOINT=denied")
+        print("INCONCLUSIVE coregraphics-post-event")
         exit(2)
     }
-    print("EVENT_ACCESS_CHECKPOINT granted=true")
+    print("COREGRAPHICS_POST_EVENT_CHECKPOINT=granted")
     exit(0)
 }
 guard raw.count == 6, raw[0] == "--key-code", raw[2] == "--modifiers", raw[4] == "--edge",
@@ -32,7 +33,8 @@ if !raw[3].isEmpty {
     }
 }
 guard CGPreflightPostEventAccess() else {
-    print("INCONCLUSIVE input-monitoring")
+    print("COREGRAPHICS_POST_EVENT_CHECKPOINT=denied")
+    print("INCONCLUSIVE coregraphics-post-event")
     exit(2)
 }
 
@@ -45,5 +47,11 @@ func post(_ isDown: Bool) {
     event.post(tap: .cghidEventTap)
 }
 
-if raw[5] != "up" { post(true); print("KEY_CHECKPOINT edge=down") }
-if raw[5] != "down" { post(false); print("KEY_CHECKPOINT edge=up") }
+if raw[5] != "up" {
+    post(true)
+    print("KEY_CHECKPOINT edge=down key_code=\(keyCode) modifiers=\(raw[3])")
+}
+if raw[5] != "down" {
+    post(false)
+    print("KEY_CHECKPOINT edge=up key_code=\(keyCode) modifiers=\(raw[3])")
+}

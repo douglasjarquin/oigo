@@ -76,7 +76,32 @@ private struct OigoQALaunchConfiguration {
     }
 
     func prepareIsolatedDefaults() {
-        OigoOnboardingStore().markCompleted()
+        if caseName == "seed-onboarding" {
+            OigoOnboardingStore().markCompleted()
+        }
+    }
+
+    func record(_ checkpoint: String, details: [String: Any] = [:]) {
+        guard scenario == "global-shortcut" else { return }
+        let output = qaRoot.appendingPathComponent("session/native-qa/oigo-checkpoints.jsonl")
+        do {
+            try FileManager.default.createDirectory(
+                at: output.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            var object = details
+            object["checkpoint"] = checkpoint
+            let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+            if !FileManager.default.fileExists(atPath: output.path) {
+                FileManager.default.createFile(atPath: output.path, contents: nil)
+            }
+            let handle = try FileHandle(forWritingTo: output)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: data + Data([0x0a]))
+            try handle.close()
+        } catch {
+            FileHandle.standardError.write(Data("ERROR qa-checkpoint-write\n".utf8))
+        }
     }
 
     @MainActor
@@ -571,6 +596,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 environment: ProcessInfo.processInfo.environment
             )
             qaLaunchConfiguration?.prepareIsolatedDefaults()
+            qaLaunchConfiguration?.record("app-launch")
         } catch {
             FileHandle.standardError.write(Data("ERROR invalid-qa-launch-contract\n".utf8))
             Darwin.exit(64)
@@ -1126,6 +1152,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         performanceInstrumentation.mark(.shortcutReceived)
         if event.edge == .pressed {
             keyboardStartupBoundaries?.observe(.globalPressed)
+            qaLaunchConfiguration?.record("key-down-received")
+        } else {
+            qaLaunchConfiguration?.record("key-up-received")
         }
         let result = productionShortcutBridge.receive(event)
         if result == .releaseLatched,
@@ -1344,6 +1373,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     lastSession = persistedSession
                     bindOnboardingTestSession(persistedSession.id)
                     keyboardStartupBoundaries?.observe(.durableSession)
+                    qaLaunchConfiguration?.record("durable-session")
                     try throwInjectedQAFailureIfNeeded()
                     let speech = keyboardStartupSpeechBoundary()
                     let requestedLocaleIdentifier = settings.localeIdentifier.isEmpty
@@ -1400,6 +1430,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     )
                     recordingStartedAt = Date()
                     keyboardStartupBoundaries?.observe(.recording)
+                    qaLaunchConfiguration?.record("recording")
                     return startedSession
                 }
                 pendingSessionBoundary = nil
@@ -1601,6 +1632,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 insertionSource: decision.insertionSource,
                 cleanupFallbackReason: decision.fallbackReason?.description
             )
+            qaLaunchConfiguration?.record(
+                "durable-raw-persistence",
+                details: ["nonempty": (lastSession?.metadata.rawTextByteCount ?? 0) > 0]
+            )
+            qaLaunchConfiguration?.record(
+                "dispatch-acknowledgement",
+                details: ["acknowledged": result.outcome == .dispatched || result.outcome == .pasted]
+            )
             reportOnboardingTest(
                 session: lastSession,
                 store: store,
@@ -1619,6 +1658,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 refreshHistory()
             }
             scheduleIdleMaintenance(.sessionTerminal)
+            qaLaunchConfiguration?.record("terminalization")
             updateSurface()
         } catch is CancellationError {
             await coordinator.cancelActiveWork()
@@ -3563,6 +3603,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         shortcutFeedbackDetail = copy
         historyWindow?.showMessage(copy)
         observeKeyboardTerminalization(generation: generation ?? lastKeyboardStartupGeneration)
+        qaLaunchConfiguration?.record("terminalization", details: ["category": category])
         updateSurface()
     }
 
@@ -3768,6 +3809,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             return validation
         }
         settings = previousSettings.with(globalShortcut: candidate)
+        qaLaunchConfiguration?.record(
+            "settings-save",
+            details: ["key_code": candidate.keyCode, "modifiers": candidate.modifiers]
+        )
         updateSurface()
         return .available
     }

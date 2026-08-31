@@ -2,7 +2,7 @@
 set -euo pipefail
 path=(/usr/bin /bin /usr/sbin /sbin $path)
 
-source_root="" app="" app_source_sha="" app_sha="" qa_root="" evidence_root="" frontmost_app="" target_field_id=""
+source_root="" app="" app_source_sha="" app_sha="" qa_root="" evidence_root="" frontmost_app="" target_field_id="" deny=""
 while (( $# > 0 )); do
     [[ $# -ge 2 ]] || { print -u2 "ERROR malformed-arguments"; exit 64; }
     case "$1" in
@@ -14,12 +14,17 @@ while (( $# > 0 )); do
         --evidence-root) evidence_root="$2" ;;
         --frontmost-app) frontmost_app="$2" ;;
         --target-field-id) target_field_id="$2" ;;
+        --deny) deny="$2" ;;
         *) print -u2 "ERROR unknown-argument"; exit 64 ;;
     esac
     shift 2
 done
 if [[ -z "$source_root" || -z "$app" || -z "$app_source_sha" || -z "$app_sha" || -z "$qa_root" || -z "$evidence_root" || -z "$frontmost_app" || -z "$target_field_id" ]]; then
     print -u2 "ERROR missing-argument"
+    exit 64
+fi
+if [[ -n "$deny" && "$deny" != accessibility && "$deny" != window-server ]]; then
+    print -u2 "ERROR invalid-failure-provider"
     exit 64
 fi
 if [[ ! -d "$app" ]]; then print -u2 "ERROR missing-bundle"; exit 1; fi
@@ -63,20 +68,32 @@ mkdir -p "$evidence_root" "$qa_root/session/task-1"
 ax_binary="$qa_root/session/task-1/oigo-qa-ax-driver"
 /usr/bin/xcrun swiftc "$source_root/Scripts/oigo-qa-ax-driver.swift" -framework AppKit -framework ApplicationServices -o "$ax_binary"
 ax_output="$qa_root/session/task-1/preflight-ax.txt"
-set +e
-"$ax_binary" --app "$frontmost_app" --field-id "$target_field_id" > "$ax_output" 2>&1
-ax_status=$?
-set -e
-if (( ax_status != 0 && ax_status != 2 )); then
-    tail -1 "$ax_output" >&2
-    exit 1
-fi
 window_server="false"
-if pgrep -qx WindowServer; then window_server="true"; fi
-ax_gate="ready"
-if (( ax_status == 2 )); then ax_gate="inconclusive-accessibility"; fi
+ax_gate="inconclusive-window-server"
+if [[ "$deny" == window-server ]]; then
+    ax_gate="inconclusive-window-server-injected"
+    print "INCONCLUSIVE window-server" > "$ax_output"
+elif [[ "$deny" == accessibility ]]; then
+    if pgrep -qx WindowServer; then window_server="true"; fi
+    ax_gate="inconclusive-accessibility-injected"
+    print "INCONCLUSIVE accessibility" > "$ax_output"
+elif pgrep -qx WindowServer; then
+    window_server="true"
+    set +e
+    "$ax_binary" --app "$frontmost_app" --field-id "$target_field_id" > "$ax_output" 2>&1
+    ax_status=$?
+    set -e
+    if (( ax_status != 0 && ax_status != 2 )); then
+        tail -1 "$ax_output" >&2
+        exit 1
+    fi
+    ax_gate="ready"
+    if (( ax_status == 2 )); then ax_gate="inconclusive-accessibility"; fi
+else
+    print "INCONCLUSIVE window-server" > "$ax_output"
+fi
 payload="$qa_root/session/task-1/preflight-payload.json"
 xcode_version="$(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -version | tr '\n' ';')"
-jq -n --arg target_bundle_id "$target_bundle_id" --arg target_field_id "$target_field_id" --arg ax_gate "$ax_gate" --argjson window_server "$window_server" --arg xcode_version "$xcode_version" --arg macos_version "$(sw_vers -productVersion)" --arg architecture "$(uname -m)" --arg app_path "<qa-root>/${app#$qa_root/}" '{bundle:"validated",app_path:$app_path,target_bundle_id:$target_bundle_id,target_field_id:$target_field_id,window_server:$window_server,ax_gate:$ax_gate,xcode_version:$xcode_version,macos_version:$macos_version,architecture:$architecture,appearance:"system",home:"<qa-root>/home",cfix_home:"<qa-root>/home",screen_recording:"not-required-no-request",capture_policy:"oigo-owned-in-process-only"}' > "$payload"
+jq -n --arg target_bundle_id "$target_bundle_id" --arg target_field_id "$target_field_id" --arg ax_gate "$ax_gate" --arg deny "$deny" --argjson window_server "$window_server" --arg xcode_version "$xcode_version" --arg macos_version "$(sw_vers -productVersion)" --arg architecture "$(uname -m)" --arg app_path "<qa-root>/${app#$qa_root/}" '{bundle:"validated",app_path:$app_path,target_bundle_id:$target_bundle_id,target_field_id:$target_field_id,window_server:$window_server,ax_gate:$ax_gate,failure_provider:(if $deny == "" then null else $deny end),xcode_version:$xcode_version,macos_version:$macos_version,architecture:$architecture,appearance:"system",home:"<qa-root>/home",cfix_home:"<qa-root>/home",screen_recording:"not-required-no-request",capture_policy:"oigo-owned-in-process-only"}' > "$payload"
 "$source_root/Scripts/oigo-qa-write-evidence.sh" --run-marker "$qa_root/run.json" --output "$evidence_root/receipt.json" --verdict "PREFLIGHT_READY" --source-sha "$app_source_sha" --app-sha "$app_sha" --scenario preflight --payload-file "$payload"
 print "PREFLIGHT_READY ax=$ax_gate frontmost=$target_bundle_id"
