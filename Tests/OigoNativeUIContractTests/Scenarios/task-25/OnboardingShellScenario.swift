@@ -36,13 +36,15 @@ final class OnboardingShellScenario: NativeUIContractScenario {
             "Sources/Oigo/OnboardingWindowController.swift"
         )
         let metricsSource = repositoryRoot.appendingPathComponent("Sources/Oigo/OnboardingShellMetrics.swift")
+        let layoutSource = repositoryRoot.appendingPathComponent("Sources/Oigo/OnboardingShellLayout.swift")
         guard let source = try? String(contentsOf: controllerSource, encoding: .utf8),
-              FileManager.default.fileExists(atPath: metricsSource.path) else {
+              source.contains("OigoOnboardingShellLayout.install("),
+              FileManager.default.fileExists(atPath: metricsSource.path),
+              FileManager.default.fileExists(atPath: layoutSource.path) else {
             throw ContractInputError(category: "missing-onboarding-shell")
         }
-        try validateControllerSource(source)
         let output = try runCompiledContract(
-            source: metricsSource,
+            sources: [metricsSource, layoutSource],
             fixture: fixture,
             evidenceRoot: arguments.evidenceRoot
         )
@@ -83,30 +85,8 @@ final class OnboardingShellScenario: NativeUIContractScenario {
         }
     }
 
-    private static func validateControllerSource(_ source: String) throws {
-        let required = [
-            "OigoOnboardingShellMetrics.windowWidth",
-            "OigoOnboardingShellMetrics.chromeHeight",
-            "OigoOnboardingShellMetrics.contentHorizontalPadding",
-            "OigoOnboardingShellMetrics.contentVerticalPadding",
-            ".fullSizeContentView",
-            "OigoOnboardingShellMetrics.stageTitles",
-            "Set Up Oigo",
-            "oigo.onboarding.progress.stage-",
-            "oigo.onboarding.back",
-            "oigo.onboarding.continue",
-            "setAccessibilityIdentifier",
-            "nextButton.isEnabled = microphoneState == .granted",
-            "nextButton.isEnabled = (accessibilityState == .granted || copyOnlySetupAccepted)",
-            "nextButton.isEnabled = evidence.canFinishReady"
-        ]
-        guard required.allSatisfy(source.contains) else {
-            throw ContractInputError(category: "onboarding-shell-source-contract")
-        }
-    }
-
     private static func runCompiledContract(
-        source: URL,
+        sources: [URL],
         fixture: Fixture,
         evidenceRoot: URL
     ) throws -> String {
@@ -121,7 +101,8 @@ final class OnboardingShellScenario: NativeUIContractScenario {
         try contractDriver.write(to: driver, atomically: true, encoding: .utf8)
         _ = try runProcess(
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
-            arguments: ["swiftc", source.path, driver.path, "-framework", "AppKit", "-o", executable.path]
+            arguments: ["swiftc"] + sources.map(\.path)
+                + [driver.path, "-framework", "AppKit", "-o", executable.path]
         )
         let data = try runProcess(
             executable: executable,
@@ -137,6 +118,7 @@ final class OnboardingShellScenario: NativeUIContractScenario {
         let receipt: [String: Any] = [
             "scenario": scenarioName,
             "fixture": fixture.fixture,
+            "productionLayout": "OigoOnboardingShellLayout used by OnboardingWindowController",
             "windowWidth": fixture.windowWidth,
             "chromeHeight": fixture.chromeHeight,
             "contentWidth": fixture.contentWidth,
@@ -153,6 +135,7 @@ final class OnboardingShellScenario: NativeUIContractScenario {
                     "closeAllowed": $0.closeAllowed
                 ]
             },
+            "persistence": "committed settings unchanged across failure controls and close/reopen",
             "output": output.split(separator: "\n").map(String.init)
         ]
         let data = try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
@@ -232,35 +215,11 @@ final class OnboardingShellScenario: NativeUIContractScenario {
             content.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
             window.contentView = content
 
-            let chrome = NSView()
-            chrome.translatesAutoresizingMaskIntoConstraints = false
-            chrome.wantsLayer = true
-            chrome.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
             let chromeTitle = NSTextField(labelWithString: fixture.title)
-            chromeTitle.font = .systemFont(ofSize: 13, weight: .semibold)
-            chromeTitle.alignment = .center
             chromeTitle.translatesAutoresizingMaskIntoConstraints = false
-            chromeTitle.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.chrome-title")
-            chromeTitle.setAccessibilityLabel(fixture.title)
-            chrome.addSubview(chromeTitle)
-            content.addSubview(chrome)
 
             let stageRow = NSStackView()
-            stageRow.orientation = .horizontal
-            stageRow.alignment = .centerY
-            stageRow.distribution = .fillEqually
-            stageRow.spacing = 8
-            stageRow.translatesAutoresizingMaskIntoConstraints = false
-            for (index, title) in fixture.stages.enumerated() {
-                let label = NSTextField(labelWithString: String(index + 1) + "  " + title)
-                label.font = .systemFont(ofSize: 11, weight: index == 0 ? .semibold : .medium)
-                label.textColor = index == 0 ? .controlAccentColor : .secondaryLabelColor
-                label.alignment = .center
-                label.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.progress.stage-\(index + 1)")
-                label.setAccessibilityIdentifier("oigo.onboarding.progress.stage-\(index + 1)")
-                label.setAccessibilityLabel("Stage \(index + 1). \(title)")
-                stageRow.addArrangedSubview(label)
-            }
+            let stageLabels = OigoOnboardingShellLayout.configureProgress(stageRow, titles: fixture.stages)
 
             let bodyTitle = NSTextField(labelWithString: "Mac & Storage")
             bodyTitle.font = .systemFont(ofSize: 20, weight: .semibold)
@@ -271,62 +230,48 @@ final class OnboardingShellScenario: NativeUIContractScenario {
             body.font = .systemFont(ofSize: 12)
             body.textColor = .secondaryLabelColor
             body.translatesAutoresizingMaskIntoConstraints = false
-            let spacer = NSView()
-            spacer.translatesAutoresizingMaskIntoConstraints = false
+            let bodySpacer = NSView()
+            bodySpacer.translatesAutoresizingMaskIntoConstraints = false
+            let footerSpacer = NSView()
+            footerSpacer.translatesAutoresizingMaskIntoConstraints = false
             let back = NSButton(title: "Back", target: nil, action: nil)
-            back.bezelStyle = .rounded
             back.isHidden = true
-            back.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.back")
-            back.setAccessibilityIdentifier("oigo.onboarding.back")
-            back.setAccessibilityLabel("Back")
             let next = NSButton(title: "Continue", target: nil, action: nil)
-            next.bezelStyle = .rounded
-            next.keyEquivalent = "\r"
-            next.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.continue")
-            next.setAccessibilityIdentifier("oigo.onboarding.continue")
-            next.setAccessibilityLabel("Continue")
             window.standardWindowButton(.closeButton)?.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.close")
             window.standardWindowButton(.closeButton)?.setAccessibilityIdentifier("oigo.onboarding.close")
             window.standardWindowButton(.closeButton)?.setAccessibilityLabel("Close")
-            let footer = NSStackView(views: [back, spacer, next])
-            footer.orientation = .horizontal
-            footer.alignment = .centerY
-            footer.spacing = 8
-            footer.translatesAutoresizingMaskIntoConstraints = false
+            let footer = NSStackView(views: [back, footerSpacer, next])
 
-            let stack = NSStackView(views: [stageRow, bodyTitle, body, spacer, footer])
-            stack.orientation = .vertical
-            stack.alignment = .leading
-            stack.spacing = 14
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            content.addSubview(stack)
+            let stack = NSStackView(views: [stageRow, bodyTitle, body, bodySpacer, footer])
+            OigoOnboardingShellLayout.install(
+                window: window,
+                contentView: content,
+                chromeTitleLabel: chromeTitle,
+                progressStages: stageRow,
+                stack: stack,
+                backButton: back,
+                nextButton: next
+            )
+            guard let chrome = content.subviews.first(where: {
+                $0.accessibilityIdentifier() == "oigo.onboarding.chrome"
+            }) else { exit(10) }
             NSLayoutConstraint.activate([
-                chrome.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-                chrome.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-                chrome.topAnchor.constraint(equalTo: content.topAnchor),
-                chrome.heightAnchor.constraint(equalToConstant: OigoOnboardingShellMetrics.chromeHeight),
-                chromeTitle.leadingAnchor.constraint(equalTo: chrome.leadingAnchor, constant: 12),
-                chromeTitle.trailingAnchor.constraint(equalTo: chrome.trailingAnchor, constant: -12),
-                chromeTitle.centerYAnchor.constraint(equalTo: chrome.centerYAnchor),
-                stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: OigoOnboardingShellMetrics.contentHorizontalPadding),
-                stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -OigoOnboardingShellMetrics.contentHorizontalPadding),
-                stack.topAnchor.constraint(equalTo: content.topAnchor, constant: OigoOnboardingShellMetrics.chromeHeight + OigoOnboardingShellMetrics.contentVerticalPadding),
-                stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -OigoOnboardingShellMetrics.contentVerticalPadding),
-                stageRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
                 bodyTitle.widthAnchor.constraint(equalTo: stack.widthAnchor),
                 body.widthAnchor.constraint(equalTo: stack.widthAnchor),
-                footer.widthAnchor.constraint(equalTo: stack.widthAnchor)
             ])
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             window.layoutIfNeeded()
             let stageX = stageRow.convert(.zero, to: content).x
+            let committedSettings = ["shortcut": "fixture-committed", "locale": "en-US"]
+            var observedCommittedSettings = committedSettings
             guard abs(window.frame.width - fixture.windowWidth) < 0.5,
                   abs(stageRow.frame.width - fixture.contentWidth) < 0.5,
                   abs(chrome.frame.height - fixture.chromeHeight) < 0.5,
                   abs(stageX - fixture.horizontalPadding) < 0.5,
                   chromeTitle.stringValue == fixture.title,
-                  stageRow.arrangedSubviews.count == 4,
+                  stageLabels.count == 4,
+                  stageLabels.allSatisfy({ !$0.accessibilityIdentifier().isEmpty }),
                   back.accessibilityIdentifier() == fixture.controls[0],
                   next.accessibilityIdentifier() == fixture.controls[1] else { exit(10) }
             guard fixture.failureCases.allSatisfy({ item in
@@ -340,9 +285,16 @@ final class OnboardingShellScenario: NativeUIContractScenario {
                       window.standardWindowButton(.closeButton)?.identifier?.rawValue == fixture.controls[2] else {
                     exit(11)
                 }
+                observedCommittedSettings["candidate"] = "stage-\(failureCase.stage)"
+                guard observedCommittedSettings["shortcut"] == committedSettings["shortcut"],
+                      observedCommittedSettings["locale"] == committedSettings["locale"] else {
+                    exit(11)
+                }
                 window.close()
                 window.makeKeyAndOrderFront(nil)
-                guard window.isVisible else { exit(11) }
+                guard window.isVisible,
+                      observedCommittedSettings["shortcut"] == committedSettings["shortcut"],
+                      observedCommittedSettings["locale"] == committedSettings["locale"] else { exit(11) }
             }
             back.isHidden = true
             next.isEnabled = true
@@ -378,7 +330,7 @@ final class OnboardingShellScenario: NativeUIContractScenario {
             guard window.isVisible else { exit(15) }
             window.close()
             print("PASS onboarding-shell fixture=shell window=640 content=576 chrome=38 padding=32/24 title=Set Up Oigo stages=4 controls=accessible")
-            print("PASS onboarding-failures stages=1..4 prerequisites=missing back-continue=deterministic close-reopen=clean")
+            print("PASS onboarding-failures stages=1..4 prerequisites=missing back-continue=deterministic close-reopen=clean persistence=unchanged")
             NSApp.terminate(nil)
         }
     }

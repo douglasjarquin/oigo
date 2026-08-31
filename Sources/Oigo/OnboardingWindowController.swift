@@ -338,31 +338,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         statusLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.status")
         progressLabel.textColor = .secondaryLabelColor
         titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
-        chromeTitleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        chromeTitleLabel.alignment = .center
-        chromeTitleLabel.textColor = .labelColor
-        chromeTitleLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.chrome-title")
-        chromeTitleLabel.setAccessibilityRole(.staticText)
-        chromeTitleLabel.setAccessibilityLabel("Set Up Oigo")
-        progressStages.orientation = .horizontal
-        progressStages.alignment = .centerY
-        progressStages.distribution = .fillEqually
-        progressStages.spacing = 8
-        progressStages.translatesAutoresizingMaskIntoConstraints = false
-        progressStageLabels = OigoOnboardingShellMetrics.stageTitles.enumerated().map { index, title in
-            let label = NSTextField(labelWithString: String(index + 1) + "  " + title)
-            label.font = .systemFont(ofSize: 11, weight: .medium)
-            label.textColor = .secondaryLabelColor
-            label.alignment = .center
-            label.identifier = NSUserInterfaceItemIdentifier(
-                "oigo.onboarding.progress.stage-" + String(index + 1)
-            )
-            label.setAccessibilityIdentifier("oigo.onboarding.progress.stage-" + String(index + 1))
-            label.setAccessibilityRole(.staticText)
-            label.setAccessibilityLabel("Stage " + String(index + 1) + ". " + title)
-            progressStages.addArrangedSubview(label)
-            return label
-        }
+        progressStageLabels = OigoOnboardingShellLayout.configureProgress(
+            progressStages,
+            titles: OigoOnboardingShellMetrics.stageTitles
+        )
         bodyLabel.maximumNumberOfLines = 8
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.maximumNumberOfLines = 4
@@ -463,37 +442,16 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             NSView(),
             NSStackView(views: [backButton, nextButton])
         ])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 14
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(stack)
-        let chrome = NSView()
-        chrome.translatesAutoresizingMaskIntoConstraints = false
-        chrome.wantsLayer = true
-        chrome.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        chrome.setAccessibilityRole(.group)
-        chrome.setAccessibilityIdentifier("oigo.onboarding.chrome")
-        chrome.setAccessibilityLabel("Set Up Oigo window header")
-        chrome.addSubview(chromeTitleLabel)
-        contentView.addSubview(chrome)
+        OigoOnboardingShellLayout.install(
+            window: window!,
+            contentView: contentView,
+            chromeTitleLabel: chromeTitleLabel,
+            progressStages: progressStages,
+            stack: stack,
+            backButton: backButton,
+            nextButton: nextButton
+        )
         NSLayoutConstraint.activate([
-            chrome.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            chrome.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            chrome.topAnchor.constraint(equalTo: contentView.topAnchor),
-            chrome.heightAnchor.constraint(equalToConstant: OigoOnboardingShellMetrics.chromeHeight),
-            chromeTitleLabel.leadingAnchor.constraint(equalTo: chrome.leadingAnchor, constant: 12),
-            chromeTitleLabel.trailingAnchor.constraint(equalTo: chrome.trailingAnchor, constant: -12),
-            chromeTitleLabel.centerYAnchor.constraint(equalTo: chrome.centerYAnchor)
-        ])
-        let buttons = stack.arrangedSubviews.last!
-        (buttons as? NSStackView)?.spacing = 8
-        (buttons as? NSStackView)?.alignment = .trailing
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: OigoOnboardingShellMetrics.contentHorizontalPadding),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -OigoOnboardingShellMetrics.contentHorizontalPadding),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: OigoOnboardingShellMetrics.chromeHeight + OigoOnboardingShellMetrics.contentVerticalPadding),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -OigoOnboardingShellMetrics.contentVerticalPadding),
             bodyLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             checklistStack.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -510,7 +468,6 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             testField.widthAnchor.constraint(equalTo: stack.widthAnchor),
             actionButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
             historyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140),
-            buttons.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
     }
 
