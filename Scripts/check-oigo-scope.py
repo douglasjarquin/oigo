@@ -15,7 +15,15 @@ def main() -> int:
         print("ERROR paths-file-unreadable")
         return 1
     changed = [line.strip() for line in __import__("sys").stdin if line.strip()]
-    forbidden = sorted(set(changed) & set(paths))
+    forbidden = sorted(
+        changed_path
+        for changed_path in changed
+        if any(
+            changed_path == forbidden_path
+            or changed_path.startswith(forbidden_path.rstrip("/") + "/")
+            for forbidden_path in paths
+        )
+    )
     if forbidden:
         print("ERROR forbidden-scope-path")
         return 1

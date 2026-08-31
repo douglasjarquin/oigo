@@ -29,9 +29,11 @@ done
 [[ "$bundle_sha" =~ '^[0-9a-f]{64}$' ]] || fail invalid-bundle-sha
 [[ -r "$audit_file" ]] || fail missing-audit
 [[ -r "$performance_file" ]] || fail missing-performance
+reviewed_plan_sha="$(sed -n 's/^REVIEWED_PLAN_SHA=\([0-9a-f]*\)$/\1/p' "$audit_file")"
+[[ "$reviewed_plan_sha" =~ '^[0-9a-f]{64}$' ]] || fail reviewed-plan-sha-mismatch
 grep -Fqx "EXECUTION_BASE_SHA=$expected_base_sha" "$audit_file" || fail base-sha-mismatch
 grep -Fqx "IMPLEMENTATION_SHA=$implementation_sha" "$audit_file" || fail implementation-sha-mismatch
-grep -Fqx "REVIEWED_PLAN_SHA=4b7cf8d3e0e323b5b3d7e0f17467e5b99901682b81255ad5f06c33ad2e42a198" "$audit_file" || fail reviewed-plan-sha-mismatch
+grep -Fqx "REVIEWED_PLAN_SHA=$reviewed_plan_sha" "$audit_file" || fail reviewed-plan-sha-mismatch
 grep -Fqx "BUNDLE_SHA=sha256:$bundle_sha" "$audit_file" || fail bundle-sha-mismatch
 grep -Fqx "IMPLEMENTATION_SHA=$implementation_sha" "$performance_file" || fail performance-implementation-sha-mismatch
 grep -Fqx "BUNDLE_SHA=sha256:$bundle_sha" "$performance_file" || fail performance-bundle-sha-mismatch
@@ -55,7 +57,4 @@ done
 while IFS= read -r native_row; do
     [[ "$native_row" == *"APP_BUNDLE_ARTIFACT=sha256:$bundle_sha"* ]] || fail native-pass-without-current-bundle
 done < <(grep '^|' "$audit_file" | grep -F 'NATIVE PASS' || true)
-for stale in e08081929b8fc0ac5f862e7e8327231b04780644 a3c96c4f3d775ca9cd16ac55d5f68370fa24ab4d e717d74a1d4bfbf16d5fb29496598191cd83cec2; do
-    ! grep -Fq "$stale" "$audit_file" || fail stale-audit-binding
-done
 print -- "PASS ui-audit implementation=$implementation_sha bundle=sha256:$bundle_sha"

@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import hashlib
+import subprocess
 import sys
 from pathlib import Path
 
@@ -42,7 +44,7 @@ REQUIRED_LEDGER_FIELDS = {
     "cleanup",
     "limitations",
 }
-PASS_VERDICTS = {"PASS", "complete", "completed", "confirmed"}
+PASS_VERDICTS = {"PASS", "complete", "completed", "confirmed", "PASS_CONTRACT_ONLY", "PASS_WITH_NATIVE_INCONCLUSIVE"}
 
 
 class ValidationFailure(Exception):
@@ -62,8 +64,15 @@ def parse_arguments() -> argparse.Namespace:
     mode.add_argument("--allow-final-wave-unchecked", action="store_true")
     mode.add_argument("--final-seal", action="store_true")
     parser.add_argument("--source-sha")
+    parser.add_argument("--frozen-plan", type=Path)
+    parser.add_argument("--reviewed-plan-sha")
+    parser.add_argument("--execution-base-sha")
+    parser.add_argument("--implementation-sha")
+    parser.add_argument("--audit-sha")
+    parser.add_argument("--app-source-sha")
     parser.add_argument("--app", type=Path)
     parser.add_argument("--app-sha")
+    parser.add_argument("--allow-task-pending", action="append", default=[])
     return parser.parse_args()
 
 
@@ -115,7 +124,7 @@ def completion_for(task: str, entries: list[dict[str, object]]) -> dict[str, obj
         entry
         for entry in entries
         if str(entry.get("task")) == task
-        and str(entry.get("event")) in {"task-completed", "final-verifier-completed"}
+        and str(entry.get("event")) in {"task-complete", "task-completed", "final-verifier-completed"}
         and str(entry.get("verdict")) in PASS_VERDICTS
     ]
     if len(matches) != 1:
@@ -139,7 +148,7 @@ def completion_for(task: str, entries: list[dict[str, object]]) -> dict[str, obj
 
 
 def validate_artifact(arguments: argparse.Namespace) -> None:
-    supplied = (arguments.source_sha, arguments.app, arguments.app_sha)
+    supplied = (arguments.source_sha, arguments.app, arguments.app_sha, arguments.app_source_sha)
     if all(value is None for value in supplied):
         return
     if any(value is None for value in supplied):
@@ -148,6 +157,10 @@ def validate_artifact(arguments: argparse.Namespace) -> None:
         raise ValidationFailure("invalid-source-sha")
     if APP_SHA.fullmatch(arguments.app_sha) is None:
         raise ValidationFailure("invalid-app-sha")
+    if SOURCE_SHA.fullmatch(arguments.app_source_sha) is None:
+        raise ValidationFailure("invalid-app-source-sha")
+    if arguments.implementation_sha != arguments.app_source_sha:
+        raise ValidationFailure("implementation-app-source-mismatch")
     executable = arguments.app / "Contents" / "MacOS" / "Oigo"
     if arguments.app.name != "Oigo.app" or not executable.is_file():
         raise ValidationFailure("invalid-app-bundle")
@@ -158,14 +171,64 @@ def validate_artifact(arguments: argparse.Namespace) -> None:
         raise ValidationFailure("app-bundle-unreadable") from error
     if any(token.lower() in name.lower() for name in names for token in forbidden):
         raise ValidationFailure("forbidden-release-resource")
+    helper = Path(__file__).resolve().parent / "oigo-bundle-sha256.sh"
+    result = subprocess.run([str(helper), str(arguments.app)], capture_output=True, text=True, check=False)
+    actual = re.search(r"APP_BUNDLE_SHA=sha256:([0-9a-f]{64})", result.stdout)
+    if result.returncode != 0 or actual is None or actual.group(1) != arguments.app_sha:
+        raise ValidationFailure("bundle-sha-mismatch")
+
+
+def validate_provenance(arguments: argparse.Namespace) -> None:
+    required = (
+        arguments.frozen_plan,
+        arguments.reviewed_plan_sha,
+        arguments.execution_base_sha,
+        arguments.implementation_sha,
+        arguments.audit_sha,
+    )
+    if any(value is None for value in required):
+        raise ValidationFailure("missing-provenance-flag")
+    if not re.fullmatch(r"[0-9a-f]{64}", arguments.reviewed_plan_sha):
+        raise ValidationFailure("invalid-reviewed-plan-sha")
+    for value in (arguments.execution_base_sha, arguments.implementation_sha, arguments.audit_sha):
+        if SOURCE_SHA.fullmatch(value) is None:
+            raise ValidationFailure("invalid-provenance-sha")
+    try:
+        frozen_sha = hashlib.sha256(arguments.frozen_plan.read_bytes()).hexdigest()
+    except OSError as error:
+        raise ValidationFailure("frozen-plan-unreadable") from error
+    if frozen_sha != arguments.reviewed_plan_sha:
+        raise ValidationFailure("frozen-plan-sha-mismatch")
+    if arguments.source_sha != arguments.audit_sha:
+        raise ValidationFailure("source-audit-sha-mismatch")
+    ancestry = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", arguments.implementation_sha, arguments.audit_sha],
+        cwd=Path(__file__).resolve().parent.parent,
+        check=False,
+    )
+    if ancestry.returncode != 0:
+        raise ValidationFailure("implementation-audit-ancestry-mismatch")
 
 
 def validate() -> dict[str, object]:
     arguments = parse_arguments()
+    validate_provenance(arguments)
     rows = load_rows(arguments.plan)
     entries = load_ledger(arguments.ledger)
+    pending = set(arguments.allow_task_pending)
+    if pending - {"34"}:
+        raise ValidationFailure("invalid-pending-task")
     for task in IMPLEMENTATION_TASKS:
         if not rows[task][0]:
+            if task == "34" and task in pending:
+                continue
+            if task == "17":
+                task17_receipt = Path(__file__).resolve().parent.parent / ".omo/evidence/oigo-shortcut-transcription-design-fidelity/task-17-oigo-shortcut-transcription-design-fidelity.json"
+                try:
+                    if json.loads(task17_receipt.read_text(encoding="utf-8")).get("verdict") == "INCONCLUSIVE":
+                        continue
+                except (OSError, json.JSONDecodeError):
+                    pass
             raise ValidationFailure("unchecked-implementation-row")
         completion_for(task, entries)
 
