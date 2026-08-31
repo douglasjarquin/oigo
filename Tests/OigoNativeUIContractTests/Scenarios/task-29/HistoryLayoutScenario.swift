@@ -144,6 +144,7 @@ final class HistoryLayoutScenario: NativeUIContractScenario {
 
     private static let contractDriver = #"""
     import AppKit
+    import CryptoKit
     import Foundation
     import OigoCore
 
@@ -348,12 +349,14 @@ final class HistoryLayoutScenario: NativeUIContractScenario {
             try assert(controller.task29DetailSnapshotForTesting().transcript == "current transcript", "current transcript accepted")
 
             var screenshots: [String] = []
+            var screenshotHashes: [String: String] = [:]
             for (name, appearanceName) in [("light", "NSAppearanceNameAqua"), ("dark", "NSAppearanceNameDarkAqua"), ("increased", "NSAppearanceNameAccessibilityHighContrastAqua")] {
                 window.appearance = NSAppearance(named: NSAppearance.Name(appearanceName))
                 content.appearance = window.appearance
                 let url = evidenceRoot.appendingPathComponent("history-\(name).png")
                 try capture(content, to: url)
                 screenshots.append(url.lastPathComponent)
+                screenshotHashes[url.lastPathComponent] = try sha256(url)
             }
 
             if success {
@@ -364,7 +367,7 @@ final class HistoryLayoutScenario: NativeUIContractScenario {
                     "moreItems": fixture.moreItems, "rowCount": table.numberOfRows,
                     "sourceSelection": ["raw": true, "normalized": true, "clean": true],
                     "states": ["empty": true, "loading": true, "staleGenerationRejected": true],
-                    "callbacks": state.counts, "screenshots": screenshots,
+                    "callbacks": state.counts, "screenshots": screenshots, "screenshotHashes": screenshotHashes,
                     "cleanup": "production window closed; temporary synthetic sessions removed"
                 ]
                 try writeReceipt(receipt)
@@ -394,7 +397,7 @@ final class HistoryLayoutScenario: NativeUIContractScenario {
                     "invalidEntries": ["missing": true, "corrupt": true, "stale": true],
                     "safeDetailError": snapshot.transcript, "unsupportedActionsDisabled": true,
                     "moreActions": invalidMenu.map { ["identifier": $0.identifier, "enabled": $0.isEnabled] },
-                    "deleteConfirmationRequired": true, "maintenanceExposed": false, "screenshots": screenshots,
+                    "deleteConfirmationRequired": true, "maintenanceExposed": false, "screenshots": screenshots, "screenshotHashes": screenshotHashes,
                     "cleanup": "production window closed; temporary synthetic sessions removed"
                 ]
                 try writeReceipt(receipt)
@@ -409,6 +412,10 @@ final class HistoryLayoutScenario: NativeUIContractScenario {
             try fm.createDirectory(at: evidenceRoot, withIntermediateDirectories: true)
             let data = try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys, .prettyPrinted])
             try data.write(to: evidenceRoot.appendingPathComponent("history-layout.json"), options: .atomic)
+        }
+
+        func sha256(_ url: URL) throws -> String {
+            SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }.joined()
         }
 
         func capture(_ view: NSView, to url: URL) throws {
