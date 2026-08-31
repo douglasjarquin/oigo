@@ -166,9 +166,10 @@ enum SettingsPanesRuntimeContract {
             mode.selectItem(withTitle: OigoProcessingMode.instant.displayName); _ = NSApp.sendAction(mode.action!, to: mode.target, from: mode)
             guard factory.store.load().defaultMode == .clean else { throw NSError(domain: "settings", code: 21) }
             let table = try view("oigo.settings.dictionary-table", in: content) as! NSTableView
+            let dictionaryBefore = controller.task28DictionaryEntriesForTesting()
             table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false); factory.state.failDictionary = true
             (try view("oigo.settings.dictionary-toggle", in: content) as! NSButton).performClick(nil)
-            guard factory.state.dictionaryCalls == 1 else { throw NSError(domain: "settings", code: 22) }
+            guard factory.state.dictionaryCalls == 1, controller.task28DictionaryEntriesForTesting() == dictionaryBefore else { throw NSError(domain: "settings", code: 22) }
             table.deselectAll(nil); (try view("oigo.settings.dictionary-toggle", in: content) as! NSButton).performClick(nil)
             guard factory.state.dictionaryCalls == 1 else { throw NSError(domain: "settings", code: 23) }
             guard (try view("oigo.settings.delete-all-history", in: content) as! NSButton).hasDestructiveAction else { throw NSError(domain: "settings", code: 24) }
@@ -193,14 +194,12 @@ enum SettingsPanesRuntimeContract {
                 let controller = factory.make(); controller.showAndFocus(); let content = controller.window!.contentView!; try select("dictation", in: controller); RunLoop.main.run(until: Date().addingTimeInterval(0.16)); let popup = try view("oigo.settings.dictation-language", in: content) as! NSPopUpButton
                 heldControllers.append(controller)
                 guard popup.numberOfItems == 2 else { throw NSError(domain: "settings", code: 32) }
-                guard controller.task28SelectLocaleForTesting("es-MX") else { throw NSError(domain: "settings", code: 39) }; RunLoop.main.run(until: Date().addingTimeInterval(0.05)); controller.task28SelectLocaleForTesting("en-US"); RunLoop.main.run(until: Date().addingTimeInterval(0.35))
-                var readiness = OigoLocaleSelectionState(committedIdentifier: "en-US", role: .settings)
-                readiness.loadSupported(["en-US", "es-MX"])
-                readiness.select("es-MX")
-                guard let stale = readiness.beginAssetRequest(status: .installing) else { throw NSError(domain: "settings", code: 33) }
-                readiness.select("en-US")
-                guard !readiness.applyAssetResult(localeIdentifier: stale.localeIdentifier, generation: stale.generation, status: .ready), factory.store.load().localeIdentifier == "en-US" else { throw NSError(domain: "settings", code: 34) }
-                try capture(content, to: root.appendingPathComponent("h105-08-dictation-light.png")); close(controller); receipt(name, ["result": "stale readiness rejected and current locale preserved", "generationFence": true, "settingsMutatedByStaleResult": false]); lines.append("PASS H105-08 locale-generation-fence=verified stale-readiness=rejected current-locale=preserved")
+                guard let staleRequest = controller.task28BeginLocaleSaveForTesting("es-MX"), let currentRequest = controller.task28BeginLocaleSaveForTesting("en-US") else { throw NSError(domain: "settings", code: 39) }
+                guard !controller.task28CompleteLocaleSaveForTesting(staleRequest, status: .ready), controller.task28CompleteLocaleSaveForTesting(currentRequest, status: .ready), factory.store.load().localeIdentifier == "en-US" else { throw NSError(domain: "settings", code: 41) }
+                let failedBefore = factory.store.load()
+                let failedController = factory.make(); failedController.showAndFocus(); heldControllers.append(failedController)
+                guard let failedRequest = failedController.task28BeginLocaleSaveForTesting("es-MX"), !failedController.task28CompleteLocaleSaveForTesting(failedRequest, status: .failed("assets unavailable")), factory.store.load() == failedBefore else { throw NSError(domain: "settings", code: 43) }
+                try capture(content, to: root.appendingPathComponent("h105-08-dictation-light.png")); close(controller); close(failedController); receipt(name, ["result": "production stale callback rejected; failed locale persistence restored complete settings", "productionCallback": true, "generationFence": true, "failedLocaleRollback": true, "settingsMutatedByStaleResult": false, "completeSettingsEquality": true]); lines.append("PASS H105-08 locale-generation-fence=verified production-callback=observed failed-locale-rollback=complete")
             default: throw NSError(domain: "settings", code: 34)
             }
         }

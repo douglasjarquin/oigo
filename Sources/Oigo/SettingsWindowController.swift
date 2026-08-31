@@ -852,8 +852,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         )
     }
 
-    @discardableResult
-    func task28SelectLocaleForTesting(_ identifier: String) -> Bool {
+    func task28BeginLocaleSaveForTesting(_ identifier: String) -> OigoLocaleAssetReadiness? {
         if !localeSelection.hasLoadedSupported {
             localeSelection.loadSupported(["en-US", "es-MX"])
         }
@@ -861,30 +860,44 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         syncLocalePopup()
         dictationMessage.stringValue = localeSelection.statusMessage
         guard let request = localeSelection.beginAssetRequest(status: .installing) else {
-            return false
+            return nil
         }
         isCheckingLocale = true
-        let inspectAssets = checkSpeechAssets
-        saveTask = Task { @MainActor [weak self] in
-            let status = await inspectAssets(request.localeIdentifier)
-            guard let self else { return }
-            defer { self.saveTask = nil }
-            guard !Task.isCancelled, !isDismissed, isPresented() else { return }
-            let applied = localeSelection.applyAssetResult(
-                localeIdentifier: request.localeIdentifier,
-                generation: request.generation,
-                status: status
+        return request
+    }
+
+    @discardableResult
+    func task28CompleteLocaleSaveForTesting(
+        _ request: OigoLocaleAssetReadiness,
+        status: OigoLocaleAssetStatus
+    ) -> Bool {
+        let applied = localeSelection.applyAssetResult(
+            localeIdentifier: request.localeIdentifier,
+            generation: request.generation,
+            status: status
+        )
+        isCheckingLocale = false
+        guard applied, localeSelection.canConfirm,
+              let locale = localeSelection.selectedIdentifier else {
+            if applied {
+                localeSelection.abandonUncommitted()
+                syncLocalePopup()
+            }
+            _ = finishSave(
+                committedSettings,
+                languageUnappliedMessage: "Settings saved. Dictation language was not changed."
             )
-            isCheckingLocale = false
-            guard applied, localeSelection.canConfirm,
-                  let locale = localeSelection.selectedIdentifier else {
-                return
-            }
-            if finishSave(committedSettings.with(localeIdentifier: locale), languageUnappliedMessage: nil) {
-                _ = localeSelection.confirm()
-            }
+            return false
         }
+        guard finishSave(committedSettings.with(localeIdentifier: locale), languageUnappliedMessage: nil) else {
+            return false
+        }
+        _ = localeSelection.confirm()
         return true
+    }
+
+    func task28DictionaryEntriesForTesting() -> [DictionaryEntry] {
+        dictionaryEntries
     }
 
     @objc private func refreshPermissionStates() {
