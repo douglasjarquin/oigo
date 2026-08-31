@@ -250,6 +250,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        focusCurrentStage()
         if currentStep == .language, microphoneState == .granted, !evidence.probeActive {
             restartSourceProbe()
         }
@@ -518,6 +519,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             )
         }
         bodyLabel.stringValue = isSupported ? body(for: stage) : support.reason
+        titleLabel.setAccessibilityLabel(titleLabel.stringValue)
+        bodyLabel.setAccessibilityLabel(bodyLabel.stringValue)
+        progressLabel.setAccessibilityLabel(progressLabel.stringValue)
         languageRow.isHidden = currentStep != .language
         shortcutRecorder.isHidden = currentStep != .shortcut
         inputRow.isHidden = currentStep != .language
@@ -539,6 +543,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             ? accessibilityState == .granted || copyOnlySetupAccepted
             : currentStep != .testDictation || !evidence.canAcceptCopyOnly
         statusLabel.stringValue = status(for: stage)
+        statusLabel.setAccessibilityLabel(statusLabel.stringValue)
         renderChecklist()
         storageStatusLabel.stringValue = storageHealth.statusMessage
         storageStatusLabel.textColor = storageHealth.isReady ? .secondaryLabelColor : .systemOrange
@@ -834,6 +839,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
               let identifier = selectedLocaleFromMenu() else {
             return
         }
+        languageLoadGeneration &+= 1
         localeSelection.select(identifier)
         statusLabel.stringValue = localeSelection.statusMessage
         renderButtons()
@@ -928,9 +934,14 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             statusLabel.stringValue = localeSelection.statusMessage
             actionButton.isEnabled = false
             renderButtons()
+            let requestGeneration = languageLoadGeneration
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let status = await checkSpeechAssets(request.localeIdentifier)
+                guard self.currentStep == .language,
+                      self.languageLoadGeneration == requestGeneration else {
+                    return
+                }
                 _ = localeSelection.applyAssetResult(
                     localeIdentifier: request.localeIdentifier,
                     generation: request.generation,
@@ -1131,6 +1142,23 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         }
         saveStep(step, copyOnlySetupAccepted)
         render()
+        focusCurrentStage()
+    }
+
+    private func focusCurrentStage() {
+        guard let window else { return }
+        let target: NSView
+        switch currentStep {
+        case .system, .complete, .microphone, .insertion, .recovery:
+            target = nextButton
+        case .language:
+            target = languagePopup
+        case .shortcut:
+            target = shortcutRecorder
+        case .testDictation:
+            target = testField
+        }
+        _ = window.makeFirstResponder(target)
     }
 
     private func applyCurrentSourceSelection(unavailable: Bool? = nil) {

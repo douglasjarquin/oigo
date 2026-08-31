@@ -40,7 +40,9 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             "Sources/Oigo/OigoUtilityWindow.swift",
             "Sources/Oigo/Task8ControlObservation.swift",
             "Sources/Oigo/OnboardingWindowController.swift",
-            "Sources/Oigo/OnboardingShellContractFactory.swift"
+            "Sources/Oigo/OnboardingShellContractFactory.swift",
+            "Sources/OigoHotKey/ShortcutFormatter.swift",
+            "Sources/OigoHotKey/ShortcutRecorderControl.swift"
         ].map { repositoryRoot.appendingPathComponent($0) }
         guard sourcePaths.allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else {
             throw ContractInputError(category: "missing-onboarding-state-production-sources")
@@ -253,8 +255,7 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             controller.showAndFocus()
             guard let window = controller.window,
                   let content = window.contentView else { throw ProbeError.missingWindow }
-            try assertStage(controller, key: "system")
-            try assertControls(content, expected: [fixture.controls.continue, fixture.controls.close])
+            try assertStage(controller, window: window, key: "system")
             try captureStage(controller, key: "system")
             try sendReturn(to: window)
             try wait(until: { factory.sourceProbeGenerations.count == 1 })
@@ -272,8 +273,7 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
                 signalHealth: .usable,
                 meterLevel: 0.5
             ))
-            try assertStage(controller, key: "language")
-            try assertControls(content, expected: [fixture.controls.back, fixture.controls.continue, fixture.controls.close])
+            try assertStage(controller, window: window, key: "language")
             try captureStage(controller, key: "language")
             guard let languageAction = findButton(in: content, identifier: fixture.controls.stageAction),
                   languageAction.title == "Check speech assets" else { throw ProbeError.missingControl }
@@ -282,15 +282,43 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
                 self.findButton(in: content, identifier: fixture.controls.continue)?.isEnabled == true
             })
             try sendClick(in: content, identifier: fixture.controls.continue)
-            try assertStage(controller, key: "shortcut")
+            try assertStage(controller, window: window, key: "shortcut")
             try captureStage(controller, key: "shortcut")
             let shortcutLabel = factory.settingsStore.load().globalShortcut.copy.displayName
+            guard let recorder = findRecorder(in: content),
+                  recorder.accessibilityLabel() == "Dictation shortcut",
+                  recorder.accessibilityValue() as? String == recorder.displayValue else {
+                throw ProbeError.missingAccessibilityValue
+            }
+            let candidate = ToggleShortcut(keyCode: 0, modifiers: ToggleShortcutModifiers.command)
+            recorder.beginRecording()
+            guard let candidateEvent = NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [.command],
+                timestamp: 0,
+                windowNumber: window.windowNumber,
+                context: nil,
+                characters: "a",
+                charactersIgnoringModifiers: "a",
+                isARepeat: false,
+                keyCode: 0
+            ) else { throw ProbeError.keyboardMismatch }
+            recorder.keyDown(with: candidateEvent)
+            guard recorder.shortcut == candidate,
+                  recorder.accessibilityValue() as? String == recorder.displayValue else {
+                throw ProbeError.candidatePersistenceMismatch
+            }
             guard visibleText(in: content, identifier: "oigo.onboarding.status").contains(shortcutLabel),
                   findButton(in: content, identifier: fixture.controls.copyOnly)?.accessibilityLabel() != nil else {
                 throw ProbeError.missingAccessibilityValue
             }
             try sendClick(in: content, identifier: fixture.controls.continue)
-            try assertStage(controller, key: "tryIt")
+            let candidateSettings = factory.settingsStore.load()
+            guard settingsOnlyChangedShortcut(from: committed, to: candidateSettings, candidate: candidate) else {
+                throw ProbeError.candidatePersistenceMismatch
+            }
+            try assertStage(controller, window: window, key: "tryIt")
             try captureStage(controller, key: "tryIt")
             guard let testAction = findButton(in: content, identifier: fixture.controls.stageAction),
                   let testField = findField(in: content, identifier: fixture.controls.testField) else {
@@ -306,14 +334,26 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             }
             let sessionID = UUID()
             guard let generation = factory.testGenerations.last else { throw ProbeError.missingGeneration }
-            testField.stringValue = "Task26 verified dictation"
-            controller.bindTestSession(sessionID)
+            let staleObservation = controller.task8ShortcutObservation()
+            let staleSettings = factory.settingsStore.load()
             controller.applyTestCompletion(
                 generation: generation &+ 1,
                 sessionID: sessionID,
                 report: productionReport(sessionID: sessionID),
-                selectedInsertionText: testField.stringValue
+                selectedInsertionText: "stale completion"
             )
+            let afterStaleObservation = controller.task8ShortcutObservation()
+            guard afterStaleObservation.status == staleObservation.status,
+                  afterStaleObservation.hint == staleObservation.hint,
+                  afterStaleObservation.recorderDisplay == staleObservation.recorderDisplay,
+                  afterStaleObservation.recorderAccessibilityValue == staleObservation.recorderAccessibilityValue,
+                  factory.settingsStore.load() == staleSettings,
+                  testField.stringValue.isEmpty,
+                  window.firstResponder === testField || testField.currentEditor() === window.firstResponder else {
+                throw ProbeError.staleCompletionMutation
+            }
+            testField.stringValue = "Task26 verified dictation"
+            controller.bindTestSession(sessionID)
             controller.applyTestCompletion(
                 generation: generation,
                 sessionID: sessionID,
@@ -321,7 +361,7 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
                 selectedInsertionText: testField.stringValue
             )
             try sendClick(in: content, identifier: fixture.controls.continue)
-            try assertStage(controller, key: "done")
+            try assertStage(controller, window: window, key: "done")
             guard visibleText(in: content, identifier: "oigo.onboarding.body").hasPrefix(
                 fixture.stages["done"]!.body
             ) else { throw ProbeError.copyMismatch }
@@ -329,36 +369,59 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             try sendClick(in: content, identifier: fixture.controls.continue)
             try wait(until: { factory.completeCallbackCount == 1 })
             guard factory.onboardingStore.load().isComplete,
-                  factory.settingsStore.load() == committed else { throw ProbeError.persistenceMismatch }
+                  settingsOnlyChangedShortcut(
+                      from: committed,
+                      to: factory.settingsStore.load(),
+                      candidate: candidate
+                  ) else { throw ProbeError.persistenceMismatch }
             let reopened = factory.makeController(initialStep: .complete)
             reopened.showAndFocus()
-            try assertStage(reopened, key: "done")
-            guard factory.settingsStore.load() == committed else { throw ProbeError.persistenceMismatch }
+            guard let reopenedWindow = reopened.window else { throw ProbeError.missingWindow }
+            try assertStage(reopened, window: reopenedWindow, key: "done")
+            guard settingsOnlyChangedShortcut(
+                from: committed,
+                to: factory.settingsStore.load(),
+                candidate: candidate
+            ) else { throw ProbeError.persistenceMismatch }
             reopened.window?.close()
             print("PASS onboarding-happy stages=5 screenshots=15 focus=test-field keyboard=return mouse=continue,action completion=verified")
         }
 
         func runFailures() throws {
             guard fixture.h105.count == 5 else { throw ProbeError.h105Mismatch }
-            if caseName.isEmpty || caseName == "H105-01" { try runLocaleRace(label: "H105-01") }
-            if caseName.isEmpty || caseName == "H105-02" { try runLocaleRace(label: "H105-02") }
-            if caseName.isEmpty || caseName == "H105-03" { try runLocaleRace(label: "H105-03") }
-            if !caseName.isEmpty && !fixture.h105.contains(caseName) {
+            if caseName.isEmpty || caseName == "H105-01" { try runH10501() }
+            if caseName.isEmpty || caseName == "H105-02" { try runH10502() }
+            if caseName.isEmpty || caseName == "H105-03" { try runH10503() }
+            if !caseName.isEmpty && !fixture.h105.contains(caseName) && caseName != "accessibility-copy-only" {
                 throw ProbeError.h105Mismatch
             }
             if caseName.isEmpty || caseName == "H105-04" {
             let backFactory = try OnboardingShellContractFactory(defaultsSuite: "com.oigo.qa.task26")
-            let backController = backFactory.makeController(initialStep: .language)
+            let backController = backFactory.makeController(
+                initialStep: .language,
+                checkSpeechAssets: { _ in
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    return .ready
+                }
+            )
             backController.showAndFocus()
             guard let backContent = backController.window?.contentView else { throw ProbeError.missingWindow }
             try wait(until: { self.findPopup(in: backContent, identifier: "oigo.onboarding.language")?.numberOfItems == 2 })
+            let backSettings = backFactory.settingsStore.load()
             try sendClick(in: backContent, identifier: fixture.controls.stageAction)
             try sendClick(in: backContent, identifier: fixture.controls.back)
             try sendClick(in: backContent, identifier: fixture.controls.continue)
             try wait(until: { self.findButton(in: backContent, identifier: fixture.controls.continue)?.isEnabled == false })
-            guard backFactory.settingsStore.load().globalShortcut == ToggleShortcut(keyCode: 13, modifiers: ToggleShortcutModifiers.command) else { throw ProbeError.persistenceMismatch }
+            guard backSettings == backFactory.settingsStore.load() else { throw ProbeError.persistenceMismatch }
             backController.window?.close()
             print("PASS H105-04 back-during-install recheck=required generation-fenced=true")
+            try writeCaseReceipt(
+                name: "H105-04",
+                setup: "production language controller with delayed asset installation",
+                trigger: "start asset installation, press Back, then Forward",
+                expected: "language readiness is revalidated and Continue remains disabled",
+                failure: "no stale install success and committed settings unchanged"
+            )
             }
 
             if caseName.isEmpty {
@@ -388,12 +451,14 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             if caseName.isEmpty || caseName == "H105-05" {
             let tryFactory = try OnboardingShellContractFactory(defaultsSuite: "com.oigo.qa.task26")
             let tryController = tryFactory.makeController(initialStep: .testDictation)
+            let trySettings = tryFactory.settingsStore.load()
             tryController.showAndFocus()
             guard let tryContent = tryController.window?.contentView else { throw ProbeError.missingWindow }
             try sendClick(in: tryContent, identifier: fixture.controls.stageAction)
             try wait(until: { tryFactory.testGenerations.count == 1 })
             tryController.window?.close()
-            guard tryFactory.testCancelCount >= 1 else { throw ProbeError.cleanupMismatch }
+            guard tryFactory.testCancelCount >= 1,
+                  tryFactory.settingsStore.load() == trySettings else { throw ProbeError.cleanupMismatch }
             let reopened = tryFactory.makeController(initialStep: .testDictation)
             reopened.showAndFocus()
             guard let reopenedContent = reopened.window?.contentView,
@@ -401,6 +466,13 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
                   reopenedField.stringValue.isEmpty else { throw ProbeError.staleSuccess }
             reopened.window?.close()
             print("PASS H105-05 close-during-try cancel=observed reopen=clean stale-success=absent")
+            try writeCaseReceipt(
+                name: "H105-05",
+                setup: "production Try It controller with active test generation",
+                trigger: "start test, close, reopen the same stage",
+                expected: "cancel callback runs and test field is empty on reopen",
+                failure: "stale completion cannot produce success after close"
+            )
             }
 
             if caseName.isEmpty || caseName == "accessibility-copy-only" {
@@ -419,13 +491,65 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             }
         }
 
-        func runLocaleRace(label: String) throws {
+        func runH10501() throws {
             let factory = try OnboardingShellContractFactory(defaultsSuite: "com.oigo.qa.task26")
             let controller = factory.makeController(
                 initialStep: .language,
                 loadSupportedLanguages: { ["en-US", "es-MX"] },
                 checkSpeechAssets: { _ in
-                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    return .unavailable("assets not installed")
+                }
+            )
+            let committed = factory.settingsStore.load()
+            controller.showAndFocus()
+            guard let content = controller.window?.contentView else { throw ProbeError.missingWindow }
+            try wait(until: { self.findPopup(in: content, identifier: "oigo.onboarding.language")?.numberOfItems == 2 })
+            try wait(until: { factory.sourceProbeGenerations.count == 1 })
+            guard let sourceGeneration = factory.sourceProbeGenerations.last else {
+                throw ProbeError.missingGeneration
+            }
+            controller.applySourceProbeUpdate(OigoOnboardingSourceProbeUpdate(
+                generation: sourceGeneration,
+                usedInput: .systemDefault,
+                usedChannel: 0,
+                acceptedCanonicalBuffer: true,
+                signalHealth: .usable,
+                meterLevel: 0.5
+            ))
+            guard let popup = findPopup(in: content, identifier: "oigo.onboarding.language") else { throw ProbeError.missingControl }
+            popup.selectItem(at: 1)
+            popup.sendAction(popup.action, to: popup.target)
+            guard findButton(in: content, identifier: fixture.controls.continue)?.isEnabled == false else {
+                throw ProbeError.generationMismatch
+            }
+            try sendClick(in: content, identifier: fixture.controls.stageAction)
+            try wait(until: { factory.assetRequestLocales.count == 1 })
+            try wait(until: { factory.assetCompletionCount == 1 })
+            let continueEnabled = findButton(in: content, identifier: fixture.controls.continue)?.isEnabled
+            let status = visibleText(in: content, identifier: "oigo.onboarding.status")
+            guard continueEnabled == false,
+                  status.contains("Speech assets: unavailable"),
+                  factory.settingsStore.load() == committed else {
+                throw ProbeError.generationMismatch
+            }
+            controller.window?.close()
+            print("PASS H105-01 readiness-locale-switch=observed unavailable=actionable persistence=unchanged")
+            try writeCaseReceipt(
+                name: "H105-01",
+                setup: "production language controller with en-US committed and es-MX supported",
+                trigger: "select es-MX before speech readiness, then check assets",
+                expected: "unavailable result is attached to es-MX and Continue stays disabled",
+                failure: "no locale or other setting is committed"
+            )
+        }
+
+        func runH10502() throws {
+            let factory = try OnboardingShellContractFactory(defaultsSuite: "com.oigo.qa.task26")
+            let controller = factory.makeController(
+                initialStep: .language,
+                loadSupportedLanguages: { ["en-US", "es-MX"] },
+                checkSpeechAssets: { _ in
+                    try? await Task.sleep(nanoseconds: 100_000_000)
                     return .ready
                 }
             )
@@ -437,32 +561,147 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             guard let popup = findPopup(in: content, identifier: "oigo.onboarding.language") else { throw ProbeError.missingControl }
             popup.selectItem(at: 1)
             popup.sendAction(popup.action, to: popup.target)
-            try wait(until: { factory.assetRequestLocales.count == 1 })
+            guard findButton(in: content, identifier: fixture.controls.continue)?.isEnabled == false else {
+                throw ProbeError.generationMismatch
+            }
             try wait(until: { factory.assetCompletionCount == 1 })
-            try wait(until: { factory.settingsStore.load() == committed })
-            let continueEnabled = findButton(in: content, identifier: fixture.controls.continue)?.isEnabled
             let status = visibleText(in: content, identifier: "oigo.onboarding.status")
-            guard continueEnabled == false, !status.contains("Speech assets: ready") else {
+            guard findButton(in: content, identifier: fixture.controls.continue)?.isEnabled == false,
+                  !status.contains("Speech assets: ready"),
+                  factory.settingsStore.load() == committed else {
                 throw ProbeError.generationMismatch
             }
             controller.window?.close()
-            print("PASS \(label) locale-switch=observed late-result=ignored persistence=unchanged")
+            print("PASS H105-02 install-locale-switch=observed late-result=ignored persistence=unchanged")
+            try writeCaseReceipt(
+                name: "H105-02",
+                setup: "production language controller with delayed en-US asset installation",
+                trigger: "start installation, switch to es-MX while installing",
+                expected: "the en-US result is rejected as stale and Continue remains disabled",
+                failure: "no stale readiness and no settings mutation"
+            )
         }
 
-        func assertStage(_ controller: OnboardingWindowController, key: String) throws {
-            guard let content = controller.window?.contentView,
+        func runH10503() throws {
+            let factory = try OnboardingShellContractFactory(defaultsSuite: "com.oigo.qa.task26")
+            let controller = factory.makeController(
+                initialStep: .language,
+                loadSupportedLanguages: { ["en-US", "es-MX"] },
+                checkSpeechAssets: { _ in
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    return .ready
+                }
+            )
+            let committed = factory.settingsStore.load()
+            controller.showAndFocus()
+            guard let content = controller.window?.contentView else { throw ProbeError.missingWindow }
+            try wait(until: { self.findPopup(in: content, identifier: "oigo.onboarding.language")?.numberOfItems == 2 })
+            try sendClick(in: content, identifier: fixture.controls.stageAction)
+            try wait(until: { factory.assetRequestLocales.count == 1 })
+            controller.window?.close()
+            try wait(until: { factory.assetCompletionCount == 1 })
+            guard controller.window?.isVisible == false,
+                  factory.settingsStore.load() == committed else {
+                throw ProbeError.generationMismatch
+            }
+            print("PASS H105-03 close-late-locale-result=ignored window=closed persistence=unchanged")
+            try writeCaseReceipt(
+                name: "H105-03",
+                setup: "production language controller with delayed asset result",
+                trigger: "start asset check, close before provider completion",
+                expected: "late result is ignored after close and window remains closed",
+                failure: "no stale success and committed settings unchanged"
+            )
+        }
+
+        func assertStage(
+            _ controller: OnboardingWindowController,
+            window: NSWindow,
+            key: String
+        ) throws {
+            guard let content = window.contentView,
                   let stage = fixture.stages[key],
                   visibleText(in: content, identifier: "oigo.onboarding.title") == stage.title,
-                  visibleText(in: content, identifier: "oigo.onboarding.body").hasPrefix(stage.body) else {
-                throw ProbeError.copyMismatch
+                  visibleText(in: content, identifier: "oigo.onboarding.body").hasPrefix(stage.body),
+                  accessibilityLabel(in: content, identifier: "oigo.onboarding.title") == stage.title,
+                  accessibilityLabel(in: content, identifier: "oigo.onboarding.body") != "",
+                  accessibilityLabel(in: content, identifier: "oigo.onboarding.progress") != "",
+                  let close = window.standardWindowButton(.closeButton),
+                  close.accessibilityIdentifier() == fixture.controls.close,
+                  close.accessibilityLabel() == "Close",
+                  let back = findButton(in: content, identifier: fixture.controls.back),
+                  let next = findButton(in: content, identifier: fixture.controls.continue),
+                  next.accessibilityLabel() as? String == (key == "done" ? "Finish setup" : "Continue") else {
+                throw ProbeError.stageSemanticsMismatch
+            }
+            guard back.accessibilityLabel() as? String == "Back",
+                  !next.isHidden,
+                  !close.isHidden else { throw ProbeError.missingControl }
+            switch key {
+            case "system":
+                guard back.isHidden, next.isEnabled, next.keyEquivalent == "\r",
+                      findButton(in: content, identifier: fixture.controls.stageAction)?.isHidden == true,
+                      findField(in: content, identifier: fixture.controls.testField)?.isHidden == true else {
+                    throw ProbeError.stageSemanticsMismatch
+                }
+                try assertFocus(window, target: next)
+            case "language":
+                guard !back.isHidden,
+                      back.isEnabled,
+                      !next.isEnabled,
+                      let popup = findPopup(in: content, identifier: "oigo.onboarding.language"),
+                      popup.accessibilityLabel() as? String == "Transcription language",
+                      popup.titleOfSelectedItem?.isEmpty == false,
+                      findButton(in: content, identifier: fixture.controls.stageAction)?.title == "Check speech assets" else {
+                    throw ProbeError.stageSemanticsMismatch
+                }
+                try assertFocus(window, target: popup)
+            case "shortcut":
+                guard !back.isHidden,
+                      back.isEnabled,
+                      next.isEnabled,
+                      let recorder = findRecorder(in: content),
+                      recorder.accessibilityLabel() == "Dictation shortcut",
+                      recorder.accessibilityValue() as? String != "",
+                      findButton(in: content, identifier: fixture.controls.copyOnly)?.isHidden == true else {
+                    throw ProbeError.stageSemanticsMismatch
+                }
+                try assertFocus(window, target: recorder)
+            case "tryIt":
+                guard !back.isHidden,
+                      back.isEnabled,
+                      !next.isEnabled,
+                      let field = findField(in: content, identifier: fixture.controls.testField),
+                      field.accessibilityLabel() as? String == "Dictation test field",
+                      field.isEditable,
+                      findButton(in: content, identifier: fixture.controls.stageAction)?.isEnabled == true else {
+                    throw ProbeError.stageSemanticsMismatch
+                }
+                try assertFocus(window, target: field)
+            case "done":
+                guard !back.isHidden, back.isEnabled, next.isEnabled else {
+                    throw ProbeError.stageSemanticsMismatch
+                }
+                try assertFocus(window, target: next)
+            default:
+                throw ProbeError.stageSemanticsMismatch
             }
         }
 
-        func assertControls(_ content: NSView, expected: [String]) throws {
-            guard expected.allSatisfy({ id in
-                if id == fixture.controls.close { return true }
-                return allViews(content).contains { $0.accessibilityIdentifier() == id }
-            }) else { throw ProbeError.missingControl }
+        func assertFocus(_ window: NSWindow, target: NSView) throws {
+            if let field = target as? NSTextField {
+                guard window.firstResponder === field || field.currentEditor() === window.firstResponder else {
+                    throw ProbeError.focusMismatch
+                }
+                return
+            }
+            guard window.firstResponder === target else {
+                throw ProbeError.focusMismatch
+            }
+        }
+
+        func accessibilityLabel(in root: NSView, identifier: String) -> String {
+            (allViews(root).first { $0.accessibilityIdentifier() == identifier }?.accessibilityLabel() as? String) ?? ""
         }
 
         func sendClick(in content: NSView, identifier: String) throws {
@@ -547,6 +786,51 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             allViews(root).first { $0.accessibilityIdentifier() == identifier } as? NSPopUpButton
         }
 
+        func findRecorder(in root: NSView) -> ShortcutRecorderControl? {
+            allViews(root).first { $0.accessibilityIdentifier() == fixture.controls.shortcut }
+                as? ShortcutRecorderControl
+        }
+
+        func settingsOnlyChangedShortcut(
+            from original: OigoSettings,
+            to updated: OigoSettings,
+            candidate: ToggleShortcut
+        ) -> Bool {
+            updated.globalShortcut == candidate
+                && updated.localeIdentifier == original.localeIdentifier
+                && updated.defaultMode == original.defaultMode
+                && updated.showVolatilePreview == original.showVolatilePreview
+                && updated.audioRetention == original.audioRetention
+                && updated.keepSuccessfulAudioIndefinitely == original.keepSuccessfulAudioIndefinitely
+                && updated.launchAtLogin == original.launchAtLogin
+                && updated.selectedInput == original.selectedInput
+                && updated.selectedInputChannel == original.selectedInputChannel
+        }
+
+        func writeCaseReceipt(
+            name: String,
+            setup: String,
+            trigger: String,
+            expected: String,
+            failure: String
+        ) throws {
+            let receipt: [String: Any] = [
+                "scenario": "onboarding-states",
+                "case": name,
+                "productionController": true,
+                "setup": setup,
+                "trigger": trigger,
+                "expected": expected,
+                "failureAssertion": failure,
+                "result": "PASS"
+            ]
+            let data = try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
+            try data.write(
+                to: evidenceRoot.appendingPathComponent(name.lowercased() + ".json"),
+                options: .atomic
+            )
+        }
+
         func wait(until condition: () -> Bool) throws {
             let deadline = Date().addingTimeInterval(1)
             while !condition() && Date() < deadline { pumpEvents() }
@@ -563,6 +847,7 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
         case copyMismatch, focusMismatch, persistenceMismatch, generationMismatch
         case h105Mismatch, cleanupMismatch, staleSuccess, copyOnlyMismatch
         case keyboardMismatch, captureFailure, timeout, microphoneRecoveryMismatch
+        case stageSemanticsMismatch, candidatePersistenceMismatch, staleCompletionMutation
     }
 
     func capture(_ view: NSView, to url: URL) -> Bool {
