@@ -95,7 +95,7 @@ struct ContractArguments {
 
         let caseName: String?
         if let requestedCase = values["case"] {
-            guard requestedCase.range(of: #"^[a-z][a-z0-9-]*$"#, options: .regularExpression) != nil else {
+            guard requestedCase.range(of: #"^[A-Za-z][A-Za-z0-9-]*$"#, options: .regularExpression) != nil else {
                 throw ContractInputError(category: "invalid-case")
             }
             caseName = requestedCase

@@ -16,6 +16,10 @@ final class OnboardingShellContractFactory {
     var sourceProbeStopCount: Int { callbackState.sourceProbeStopCount }
     var testStopCount: Int { callbackState.testStopCount }
     var testCancelCount: Int { callbackState.testCancelCount }
+    var completeCallbackCount: Int { callbackState.completeCallbackCount }
+    var assetRequestLocales: [String] { callbackState.assetRequestLocales }
+    var assetCompletionCount: Int { callbackState.assetCompletionCount }
+    var microphoneSettingsCount: Int { callbackState.microphoneSettingsCount }
 
     private final class CallbackState {
         var closeCallbackCount = 0
@@ -24,6 +28,10 @@ final class OnboardingShellContractFactory {
         var sourceProbeStopCount = 0
         var testStopCount = 0
         var testCancelCount = 0
+        var completeCallbackCount = 0
+        var assetRequestLocales: [String] = []
+        var assetCompletionCount = 0
+        var microphoneSettingsCount = 0
     }
 
     init(defaultsSuite: String) throws {
@@ -61,7 +69,9 @@ final class OnboardingShellContractFactory {
             )),
             settingsStore: settingsStore,
             onboardingStore: onboardingStore,
-            callbacks: callbacks
+            callbacks: callbacks,
+            loadSupportedLanguages: { ["en-US", "es-MX"] },
+            checkSpeechAssets: { _ in .ready }
         )
     }
 
@@ -69,7 +79,9 @@ final class OnboardingShellContractFactory {
         initialStep: OigoOnboardingStep,
         microphoneState: OigoPermissionState = .granted,
         accessibilityState: OigoPermissionState = .granted,
-        storageHealth: DurableSessionHealth? = nil
+        storageHealth: DurableSessionHealth? = nil,
+        loadSupportedLanguages: @escaping () async -> [String] = { ["en-US", "es-MX"] },
+        checkSpeechAssets: @escaping (String) async -> OigoLocaleAssetStatus = { _ in .ready }
     ) -> OnboardingWindowController {
         Self.buildController(
             support: .init(isSupported: true, reason: "This Mac is supported"),
@@ -89,7 +101,9 @@ final class OnboardingShellContractFactory {
             )),
             settingsStore: settingsStore,
             onboardingStore: onboardingStore,
-            callbacks: callbackState
+            callbacks: callbackState,
+            loadSupportedLanguages: loadSupportedLanguages,
+            checkSpeechAssets: checkSpeechAssets
         )
     }
 
@@ -107,7 +121,9 @@ final class OnboardingShellContractFactory {
         storageHealth: DurableSessionHealth,
         settingsStore: OigoSettingsStore,
         onboardingStore: OigoOnboardingStore,
-        callbacks: CallbackState
+        callbacks: CallbackState,
+        loadSupportedLanguages: @escaping () async -> [String],
+        checkSpeechAssets: @escaping (String) async -> OigoLocaleAssetStatus
     ) -> OnboardingWindowController {
         OnboardingWindowController(
             support: support,
@@ -121,9 +137,16 @@ final class OnboardingShellContractFactory {
             microphoneState: microphoneState,
             accessibilityState: accessibilityState,
             storageHealth: storageHealth,
-            loadSupportedLanguages: { ["en-US"] },
-            checkSpeechAssets: { _ in .ready },
-            saveLanguage: { _ in },
+            loadSupportedLanguages: loadSupportedLanguages,
+            checkSpeechAssets: { identifier in
+                callbacks.assetRequestLocales.append(identifier)
+                let result = await checkSpeechAssets(identifier)
+                callbacks.assetCompletionCount += 1
+                return result
+            },
+            saveLanguage: { [settingsStore] identifier in
+                try? settingsStore.save(settingsStore.load().with(localeIdentifier: identifier))
+            },
             saveStep: { [onboardingStore] step, copyOnlyAccepted in
                 onboardingStore.save(OigoOnboardingState(
                     step: step,
@@ -138,7 +161,9 @@ final class OnboardingShellContractFactory {
                 try? settingsStore.save(settings)
             },
             requestMicrophone: { microphoneState },
-            openMicrophoneSettings: {},
+            openMicrophoneSettings: {
+                callbacks.microphoneSettingsCount += 1
+            },
             registrationStatus: {
                 .inactive("Global shortcut registration is waiting for setup")
             },
@@ -173,7 +198,10 @@ final class OnboardingShellContractFactory {
                 callbacks.testCancelCount += 1
             },
             openHistory: {},
-            onComplete: {},
+            onComplete: {
+                callbacks.completeCallbackCount += 1
+                onboardingStore.markCompleted()
+            },
             onClose: {
                 callbacks.closeCallbackCount += 1
             }

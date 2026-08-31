@@ -35,6 +35,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var localeSelection: OigoLocaleSelectionState
     private var localeMenuIdentifiers: [String] = []
     private var isLoadingLanguages = false
+    private var languageLoadGeneration: UInt64 = 0
     private var microphoneState: OigoPermissionState
     private var accessibilityState: OigoPermissionState
     private var accessibilityRequestAttempted = false
@@ -222,6 +223,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         _ = notification
+        languageLoadGeneration &+= 1
+        isLoadingLanguages = false
         discardShortcutCandidate()
         releaseOnboardingResources(cancelActiveTest: true)
         if support.isSupported, !completed {
@@ -341,7 +344,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         titleLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.title")
         titleLabel.setAccessibilityIdentifier("oigo.onboarding.title")
         bodyLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.body")
+        bodyLabel.setAccessibilityIdentifier("oigo.onboarding.body")
         statusLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.status")
+        statusLabel.setAccessibilityIdentifier("oigo.onboarding.status")
         progressLabel.textColor = .secondaryLabelColor
         titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
         progressStageLabels = OigoOnboardingShellLayout.configureProgress(
@@ -361,6 +366,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         testField.isSelectable = true
         testField.isEnabled = true
         testField.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.test-field")
+        testField.setAccessibilityIdentifier("oigo.onboarding.test-field")
+        testField.setAccessibilityLabel("Dictation test field")
         meter.minValue = 0
         meter.maxValue = 1
         meter.warningValue = 0.85
@@ -369,6 +376,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         meter.heightAnchor.constraint(equalToConstant: 18).isActive = true
         shortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
         shortcutRecorder.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.shortcut-recorder")
+        shortcutRecorder.setAccessibilityIdentifier("oigo.onboarding.shortcut-recorder")
+        shortcutRecorder.setAccessibilityLabel("Dictation shortcut")
+        languagePopup.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.language")
+        languagePopup.setAccessibilityIdentifier("oigo.onboarding.language")
+        languagePopup.setAccessibilityLabel("Transcription language")
         languagePopup.target = self
         languagePopup.action = #selector(languageSelectionChanged)
         inputPopup.target = self
@@ -379,16 +391,25 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         historyButton.action = #selector(openHistoryAction)
         retryStorageButton.target = self
         retryStorageButton.action = #selector(retryStorageAction)
+        retryStorageButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.retry-storage")
+        retryStorageButton.setAccessibilityIdentifier("oigo.onboarding.retry-storage")
         openDataLocationButton.target = self
         openDataLocationButton.action = #selector(openDataLocationAction)
+        openDataLocationButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.open-data-location")
+        openDataLocationButton.setAccessibilityIdentifier("oigo.onboarding.open-data-location")
         actionButton.target = self
         actionButton.action = #selector(performAction)
         actionButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.stage-action")
+        actionButton.setAccessibilityIdentifier("oigo.onboarding.stage-action")
         skipButton.target = self
         skipButton.action = #selector(skipTestAction)
+        skipButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.skip")
+        skipButton.setAccessibilityIdentifier("oigo.onboarding.skip")
         copyOnlyButton.target = self
         copyOnlyButton.action = #selector(acceptCopyOnlyAction)
         copyOnlyButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.copy-only")
+        copyOnlyButton.setAccessibilityIdentifier("oigo.onboarding.copy-only")
+        copyOnlyButton.setAccessibilityLabel(copyOnlyButton.title)
         quietOverrideButton.target = self
         quietOverrideButton.action = #selector(acceptQuietOverrideAction)
         backButton.target = self
@@ -542,6 +563,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         } else if currentStep == .testDictation {
             actionButton.title = onboardingTestAvailability.onboardingTestActionTitle
         }
+        actionButton.setAccessibilityLabel(actionButton.title)
         renderButtons()
     }
 
@@ -551,6 +573,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         }
         actionButton.isEnabled = true
         nextButton.title = currentStep == .complete ? "Finish setup" : "Continue"
+        nextButton.setAccessibilityLabel(nextButton.title)
         nextButton.isEnabled = true
         if currentStep == .system {
             nextButton.isEnabled = storageHealth.isReady
@@ -633,15 +656,15 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private func body(for stage: OigoOnboardingStage) -> String {
         switch stage {
         case .macAndStorage:
-            "Oigo needs macOS 26 or later on Apple silicon. This check runs before setup so unsupported systems fail clearly."
+            "Oigo checks that this Mac can record durably before anything else."
         case .microphoneAndLanguage:
-            "Choose the microphone, channel, and language Oigo will use. A local meter confirms the selected source produces a usable buffer, and speech assets are checked before your first valuable dictation."
+            "Choose what Oigo listens to and which language it transcribes."
         case .shortcutAndInsertion:
-            "Choose a readable global shortcut. Accessibility enables automatic paste into the field you were using; if you decline, Oigo keeps Copy and History available."
+            "Hold a global shortcut to dictate. Accessibility enables automatic paste."
         case .tryIt:
-            "Focus the editable field below, then start and stop a real dictation. Setup records each production-path checkpoint and reports only what the owned test field proves."
+            "One real dictation, end to end, into a field Oigo owns."
         case .done:
-            completionSummary()
+            "You can change any of this later in Settings.\n" + completionSummary()
         }
     }
 
@@ -778,9 +801,15 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         isLoadingLanguages = true
+        languageLoadGeneration &+= 1
+        let requestGeneration = languageLoadGeneration
         Task { @MainActor [weak self] in
             guard let self else { return }
             let languages = await loadSupportedLanguages()
+            guard self.currentStep == .language,
+                  self.languageLoadGeneration == requestGeneration else {
+                return
+            }
             isLoadingLanguages = false
             localeSelection.loadSupported(languages)
             syncLanguagePopup()
@@ -1081,6 +1110,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func moveToStep(_ step: OigoOnboardingStep) {
+        if currentStep == .language, step != .language {
+            languageLoadGeneration &+= 1
+            isLoadingLanguages = false
+        }
         let leavingMicrophone = currentStep == .language && step != .language
         let leavingTest = currentStep == .testDictation && step != .testDictation
         if leavingMicrophone || leavingTest {
