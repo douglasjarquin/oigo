@@ -225,6 +225,17 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
             var historyCommands = 0
             var settingsCommands = 0
             var onboardingCommands = 0
+            var commandOrder: [String] = []
+            var routeCallbacks: [String: Int] = [:]
+
+            func record(_ route: String) {
+                commandOrder.append(route)
+            }
+
+            func invoke(_ route: String) {
+                record(route)
+                routeCallbacks[route, default: 0] += 1
+            }
         }
 
         let fixture: Fixture
@@ -234,6 +245,7 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
         var commandCount = 0
         var commands: [String] = []
         let callbacks = CallbackState()
+        var historyFixtureRoot: URL?
 
         init(fixture: Fixture, evidenceRoot: URL, appearanceName: String, contrast: String) {
             self.fixture = fixture
@@ -265,7 +277,10 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 },
                 checkSpeechAssets: { _ in .ready },
                 saveLanguage: { [callbacks] _ in callbacks.onboardingCommands += 1 },
-                saveStep: { [callbacks] _, _ in callbacks.onboardingCommands += 1 },
+                saveStep: { [callbacks] _, _ in
+                    callbacks.onboardingCommands += 1
+                    callbacks.invoke("onboarding")
+                },
                 saveInputSelection: { [callbacks] _, _ in callbacks.onboardingCommands += 1 },
                 requestMicrophone: { .granted },
                 openMicrophoneSettings: { [callbacks] in callbacks.onboardingCommands += 1 },
@@ -310,7 +325,11 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 saveShortcut: { _ in .available },
                 save: { _ in nil },
                 checkSpeechAssets: { _ in .ready },
-                refreshPermissions: { (.granted, .granted) },
+                refreshPermissions: { [callbacks] in
+                    callbacks.settingsCommands += 1
+                    callbacks.invoke("settings")
+                    return (.granted, .granted)
+                },
                 openMicrophoneSettings: { [callbacks] in callbacks.settingsCommands += 1 },
                 openAccessibilitySettings: { [callbacks] in callbacks.settingsCommands += 1 },
                 rerunOnboarding: { [callbacks] in callbacks.settingsCommands += 1 },
@@ -334,7 +353,10 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 copyRawTranscript: { [callbacks] _ in callbacks.historyCommands += 1 },
                 copyCleanTranscript: { [callbacks] _ in callbacks.historyCommands += 1 },
                 pasteAgain: { [callbacks] _ in callbacks.historyCommands += 1 },
-                pasteCleanAgain: { [callbacks] _ in callbacks.historyCommands += 1 },
+                pasteCleanAgain: { [callbacks] _ in
+                    callbacks.historyCommands += 1
+                    callbacks.invoke("paste-again")
+                },
                 cleanAgain: { [callbacks] _ in callbacks.historyCommands += 1 },
                 reapplyDictionary: { [callbacks] _ in callbacks.historyCommands += 1 },
                 playRecording: { [callbacks] _ in callbacks.historyCommands += 1 },
@@ -344,6 +366,23 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 runIdleMaintenance: { [callbacks] in callbacks.historyCommands += 1 },
                 loadMore: { [callbacks] in callbacks.historyCommands += 1 },
                 onClose: { [callbacks] in callbacks.historyClose += 1 }
+            )
+        }
+
+        func makeHistoryEntry() throws -> SessionHistoryEntry {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("oigo-task31-history-" + UUID().uuidString)
+            historyFixtureRoot = root
+            let store = try SessionStore(rootDirectory: root)
+            var session = try store.createSession(now: Date(timeIntervalSince1970: 1_700_000_000))
+            session = try store.persistRawText("durable", for: session)
+            session = try store.persistNormalizedText("durable", for: session)
+            session = try store.persistCleanText("durable", for: session)
+            session = try store.update(session, state: .completed)
+            return SessionHistoryEntry(
+                session: session,
+                firstTranscriptLine: "Durable history entry",
+                textSource: .processed
             )
         }
 
@@ -406,6 +445,13 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
             settings: SettingsWindowController,
             history: HistoryWindowController
         ) {
+            let row = publication.state.row.rawValue
+            callbacks.record("publication:" + row)
+            if row == "recording" {
+                callbacks.invoke("record")
+            } else if row == "copied-only" {
+                callbacks.invoke("terminal")
+            }
             statusSurface.publish(publication.state, generation: publication.generation)
             statusSurface.publish(
                 publication.state,
@@ -428,7 +474,33 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
             statusItem.button?.toolTip = publication.state.status.rawValue
         }
 
+        func publish(
+            _ publication: OigoPresentationPublication,
+            fence: inout OigoPresentationGenerationFence,
+            statusSurface: StatusSurfaceController,
+            statusItem: NSStatusItem,
+            onboarding: OnboardingWindowController,
+            settings: SettingsWindowController,
+            history: HistoryWindowController
+        ) -> Bool {
+            fence.publish(publication) { [self] accepted in
+                fanout(
+                    accepted,
+                    statusSurface: statusSurface,
+                    statusItem: statusItem,
+                    onboarding: onboarding,
+                    settings: settings,
+                    history: history
+                )
+            }
+        }
+
         func run() throws {
+            defer {
+                if let historyFixtureRoot {
+                    try? FileManager.default.removeItem(at: historyFixtureRoot)
+                }
+            }
             let shortcut = ToggleShortcut(
                 keyCode: UInt32(fixture.committedShortcutKeyCode),
                 modifiers: ToggleShortcutModifiers.command
@@ -450,6 +522,7 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 to: { published.append($0.generation) }
             )
             try assert(!staleAccepted && published == [10], "stale publication preserved current content")
+            var stalePublicationRejected = !staleAccepted
             fence.shutdown()
             try assert(!fence.publish(readyPublication, to: { published.append($0.generation) }), "shutdown fence")
 
@@ -457,6 +530,8 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 self?.commandCount += 1
                 if case .presentation(let action) = command.intent {
                     self?.commands.append(action.category)
+                    self?.callbacks.invoke("start")
+                    self?.callbacks.record("popover:" + action.category)
                 }
             }
             let readyPresentation = OigoPopoverPresentation.compose(
@@ -487,23 +562,63 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
             let onboarding = makeOnboarding(shortcut: shortcut)
             let settings = makeSettings(shortcut: shortcut)
             let history = makeHistory()
-            fanout(
+            var surfaceFence = OigoPresentationGenerationFence()
+            try assert(publish(
                 readyPublication,
+                fence: &surfaceFence,
                 statusSurface: surface,
                 statusItem: statusItem,
                 onboarding: onboarding,
                 settings: settings,
                 history: history
-            )
+            ), "ready surface publication")
             try assert((button.accessibilityValue() as? String) == "Ready", "status committed state")
-            history.reload(entries: [])
+            history.reload(entries: [try makeHistoryEntry()])
+            callbacks.invoke("history")
+            let historyTable = history.task29TableViewForTesting()
+            historyTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
             onboarding.showAndFocus()
             settings.showAndFocus()
             history.showAndFocus()
+            let appliedAppearance = applyAppearance(to: [
+                onboarding.window, settings.window, history.window
+            ])
+            try assert(
+                contrast != "increased" || appliedAppearance.contains("AccessibilityHighContrast"),
+                "increased contrast was applied"
+            )
+            try assert(
+                contrast == "increased" || appliedAppearance.contains("Aqua"),
+                "standard appearance was applied"
+            )
             guard onboarding.window?.title == "Set Up Oigo",
                   settings.window?.identifier?.rawValue == "com.oigo.settings.window",
                   history.window?.identifier?.rawValue == "com.oigo.history.window" else {
                 throw DriverError.assertion("production window adapters")
+            }
+            if let continueButton = descendant(
+                identifier: "oigo.onboarding.continue",
+                in: onboarding.window!.contentView!
+            ) as? NSButton {
+                continueButton.performClick(nil)
+            }
+            guard callbacks.onboardingCommands > 0 else {
+                throw DriverError.assertion("onboarding command callback")
+            }
+            if let refresh = descendant(
+                identifier: "oigo.settings.refresh-permissions",
+                in: settings.window!.contentView!
+            ) as? NSButton {
+                refresh.performClick(nil)
+            }
+            guard callbacks.settingsCommands > 0 else {
+                throw DriverError.assertion("settings command callback")
+            }
+            history.task29SelectSourceForTesting(.processed)
+            history.task30InvokePasteAgainForTesting()
+            guard callbacks.historyCommands == 1,
+                  callbacks.routeCallbacks["paste-again"] == 1 else {
+                throw DriverError.assertion("history Paste Again callback")
             }
             let surfaceScreenshots = [
                 captureView(onboarding.window?.contentView, name: "onboarding-\(appearanceName)-\(contrast).png"),
@@ -529,14 +644,15 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 operation: .init(generation: 20, kind: .dictation)
             )
             let recordingPublication = OigoPresentationPublication(inputs: recordingInputs)
-            fanout(
+            try assert(publish(
                 recordingPublication,
+                fence: &surfaceFence,
                 statusSurface: surface,
                 statusItem: statusItem,
                 onboarding: onboarding,
                 settings: settings,
                 history: history
-            )
+            ), "recording surface publication")
             let operationGate = AppOperationGate()
             guard case .success(let sessionHandle) = operationGate.begin(.dictation),
                   operationGate.isCurrent(sessionHandle),
@@ -590,15 +706,64 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 terminal: .init(generation: 30, outcome: .copied, failure: nil)
             )
             let terminalPublication = OigoPresentationPublication(inputs: terminalInputs)
-            fanout(
+            if fixture.flow == "failure" {
+                let terminalizingInputs = makeInputs(
+                    generation: 25,
+                    coordinatorState: .finalizing,
+                    operation: .init(generation: 25, kind: .dictation)
+                )
+                try assert(publish(
+                    OigoPresentationPublication(inputs: terminalizingInputs),
+                    fence: &surfaceFence,
+                    statusSurface: surface,
+                    statusItem: statusItem,
+                    onboarding: onboarding,
+                    settings: settings,
+                    history: history
+                ), "terminalizing surface publication")
+                onboarding.showAndFocus()
+                settings.showAndFocus()
+                history.showAndFocus()
+                onboarding.window?.close()
+                settings.window?.close()
+                settings.showAndFocus()
+                history.window?.close()
+                history.showAndFocus()
+                onboarding.showAndFocus()
+                try assert(
+                    onboarding.window?.isVisible == true
+                        && settings.window?.isVisible == true
+                        && history.window?.isVisible == true,
+                    "terminalizing close reopen"
+                )
+            }
+            try assert(publish(
                 terminalPublication,
+                fence: &surfaceFence,
                 statusSurface: surface,
                 statusItem: statusItem,
                 onboarding: onboarding,
                 settings: settings,
                 history: history
-            )
+            ), "terminal surface publication")
             try assert(terminalPublication.state.row == .copiedOnly, "terminal publication state")
+            if fixture.flow == "failure" {
+                let publishedCount = callbacks.commandOrder.filter { $0.hasPrefix("publication:") }.count
+                let staleAccepted = surfaceFence.publish(
+                    OigoPresentationPublication(inputs: makeInputs(
+                        generation: 24,
+                        coordinatorState: .recording,
+                        operation: .init(generation: 24, kind: .dictation)
+                    )),
+                    to: { _ in callbacks.record("publication:stale") }
+                )
+                stalePublicationRejected = !staleAccepted
+                try assert(stalePublicationRejected, "stale failure publication")
+                try assert(
+                    callbacks.commandOrder.filter { $0.hasPrefix("publication:") }.count == publishedCount,
+                    "stale publication did not overwrite current state"
+                )
+            }
             surface.hideHUD(generation: 20)
             surface.teardown()
             statusBar.removeStatusItem(statusItem)
@@ -617,6 +782,18 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 mainDisplayID: nil,
                 panelSize: .init(width: 224, height: 42)
             )) == nil, "target disappearance fallback is explicit")
+            let targetDisappearanceHandled = HUDPlacement.place(HUDPlacementInput(
+                snapshot: nil,
+                currentGeneration: 20,
+                displays: [],
+                frontmostDisplayID: nil,
+                mainDisplayID: nil,
+                panelSize: .init(width: 224, height: 42)
+            )) == nil
+            let requiredRoutes = ["start", "record", "terminal", "history", "paste-again", "settings", "onboarding"]
+            try assert(requiredRoutes.allSatisfy { callbacks.routeCallbacks[$0, default: 0] > 0 }, "route callbacks")
+            try assert(commandCount == 1 && commands == ["start-dictation"], "one command owner")
+            try assert(Set(commands).count == commands.count, "no duplicate command")
 
             let screenshotPaths = surfaceScreenshots + [
                 capturePopover(readyInputs: readyInputs, publication: readyPublication),
@@ -625,10 +802,27 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
             try writeReceipt(
                 screenshotPaths: screenshotPaths,
                 recordingHUDVisible: hudSnapshotBeforeShutdown.visible,
-                shortcut: shortcut.copy.accessibilityLabel
+                shortcut: shortcut.copy.accessibilityLabel,
+                appliedAppearance: appliedAppearance,
+                stalePublicationRejected: stalePublicationRejected,
+                targetDisappearanceHandled: targetDisappearanceHandled
             )
-            print("PASS cross-surface publication=single fence surfaces=status,popover,hud,history,settings,onboarding shortcut=committed-command-zero")
-            print("PASS cross-surface-failure stale-publication=rejected escape=restored close-reopen=owned target-disappearance=explicit-fallback duplicate-command=none cleanup=clean")
+            let callbackSummary = requiredRoutes
+                .map { $0 + "=" + String(callbacks.routeCallbacks[$0, default: 0]) }
+                .joined(separator: ",")
+            let routeSummary = callbacks.commandOrder.joined(separator: ">")
+            let flowLabel = fixture.flow == "failure" ? "failure" : "happy"
+            print(
+                "PASS cross-surface flow=\(flowLabel) publication=single-fence "
+                    + "surfaces=status,popover,hud,history,settings,onboarding "
+                    + "callbacks=\(callbackSummary) order=\(routeSummary) "
+                    + "shortcut=\(shortcut.copy.accessibilityLabel) appearance=\(appliedAppearance)"
+            )
+            print(
+                "PASS cross-surface-failure stale-publication=\(stalePublicationRejected) "
+                    + "escape=restored close-reopen=owned target-disappearance=\(targetDisappearanceHandled) "
+                    + "duplicate-command=\(Set(commands).count != commands.count) cleanup=clean"
+            )
             if screenshotPaths.contains(where: { $0.hasPrefix("INCONCLUSIVE") }) {
                 print("INCONCLUSIVE cross-surface-render category=windowserver-unavailable")
             }
@@ -656,6 +850,28 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
             } catch {
                 return "INCONCLUSIVE:WindowServer-popover-write-unavailable"
             }
+        }
+
+        func applyAppearance(to windows: [NSWindow?]) -> String {
+            let appearanceName: NSAppearance.Name?
+            if contrast == "increased" {
+                appearanceName = NSAppearance.Name("NSAppearanceNameAccessibilityHighContrastAqua")
+            } else if self.appearanceName == "dark" {
+                appearanceName = .darkAqua
+            } else if self.appearanceName == "light" {
+                appearanceName = .aqua
+            } else {
+                appearanceName = nil
+            }
+            if let appearanceName {
+                let selected = NSAppearance(named: appearanceName)
+                NSApplication.shared.appearance = selected
+                windows.forEach {
+                    $0?.appearance = selected
+                    $0?.contentView?.appearance = selected
+                }
+            }
+            return windows.compactMap { $0?.effectiveAppearance.name.rawValue }.first ?? ""
         }
 
         func captureView(_ view: NSView?, name: String) -> String? {
@@ -701,28 +917,40 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
             } catch { return nil }
         }
 
-        func writeReceipt(screenshotPaths: [String], recordingHUDVisible: Bool, shortcut: String) throws {
+        func writeReceipt(
+            screenshotPaths: [String],
+            recordingHUDVisible: Bool,
+            shortcut: String,
+            appliedAppearance: String,
+            stalePublicationRejected: Bool,
+            targetDisappearanceHandled: Bool
+        ) throws {
             let receipt: [String: Any] = [
                 "scenario": "cross-surface",
                 "fixture": fixture.fixture,
-                "productionPublication": true,
+                "productionPublication": callbacks.commandOrder.filter {
+                    $0.hasPrefix("publication:")
+                }.count >= 3,
                 "publicationBoundary": "OigoPresentationPublication",
-                "singleStateMachine": true,
+                "singleStateMachine": stalePublicationRejected,
                 "committedShortcut": shortcut,
+                "appliedAppearance": appliedAppearance,
                 "operationStates": ["ready", "recording", "terminal"],
                 "surfaces": ["status-menu", "popover", "hud", "onboarding", "settings", "history"],
-                "routes": ["one-owner", "start-dictation", "stop-dictation", "open-history", "open-settings", "quit"],
-                "stalePublication": "rejected-with-current-content-preserved",
+                "routes": callbacks.commandOrder,
+                "routeCallbacks": callbacks.routeCallbacks,
+                "stalePublication": stalePublicationRejected,
                 "escape": ["modal": "cancel-editor", "window": "close-utility-window"],
                 "closeReopen": "surface-owned-and-generation-fenced",
-                "targetDisappearance": "explicit-fallback-no-target",
+                "targetDisappearance": targetDisappearanceHandled,
                 "recordingHUDVisible": recordingHUDVisible,
-                "duplicateCommand": false,
+                "duplicateCommand": Set(commands).count != commands.count,
                 "callbacks": [
                     "onboarding": ["close": callbacks.onboardingClose, "commands": callbacks.onboardingCommands],
                     "settings": ["close": callbacks.settingsClose, "commands": callbacks.settingsCommands],
                     "history": ["close": callbacks.historyClose, "commands": callbacks.historyCommands]
                 ],
+                "commandOrder": callbacks.commandOrder,
                 "terminalSession": "AppOperationGate owns dictation handle; Paste Again rejected while current",
                 "screenshots": screenshotPaths,
                 "clipboardContentsInEvidence": false,
