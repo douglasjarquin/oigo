@@ -1,10 +1,10 @@
 # Oigo native UI audit
 
 EXECUTION_BASE_SHA=a8315736e9b9ebb8c8e0a4bd6caa987eb67b2c37
-CURRENT_HEAD_SHA=25347f64046998f37f00316a0f4b93fb5671f655
-IMPLEMENTATION_SHA=25347f64046998f37f00316a0f4b93fb5671f655
+CURRENT_HEAD_SHA=35e743f285d0617d586784e8d64080d8f10471a0
+IMPLEMENTATION_SHA=35e743f285d0617d586784e8d64080d8f10471a0
 REVIEWED_PLAN_SHA=4b7cf8d3e0e323b5b3d7e0f17467e5b99901682b81255ad5f06c33ad2e42a198
-BUNDLE_SHA=sha256:17ef4de8f067c29c6df8b18a0f4433541a5c41d552db7b866a8301eb1b5e5bbb
+BUNDLE_SHA=sha256:8245f3f18950f9a929e5777dad96f24f8c54a76695bc401d5cb771dd4fc96e65
 UNRELATED_WORKFLOW_RENAME=#140 ci: drop "master" from project workflow
 
 ## Reading this audit
@@ -61,9 +61,9 @@ No row below makes a native claim from HTML, grep, or SwiftPM output.
 | history-stale-load | `History.dc.html` stale-generation fencing | `HistoryLoadGeneration`, controller generation counters, and the published presentation generation | `refreshHistory` and selection loading | Generation number only; no stale session content | Existing History fencing remains controller-owned pending #138; #131 supplies the shared publication generation but does not rewrite History | #131, #138 | DETERMINISTIC PASS: issue-7 and publication contracts; NATIVE INCONCLUSIVE: no stale native repaint |
 | shutdown | `ui-state-matrix.md` Quitting | `OigoAppDelegate.applicationShouldTerminate`, `AppOperationGate`, and `OigoPresentationGenerationFence` | `quit`, `finishApplicationTermination` | Lifecycle state only; all panels/tasks released | The publication fence now rejects state after shutdown; app-bundle lifecycle proof remains in #139 | #139 | DETERMINISTIC PASS: publication and coordinator shutdown contracts; NATIVE INCONCLUSIVE: app-bundle quit cleanup |
 | stale-generation | `ui-state-matrix.md` newer state wins | `OigoPresentationGenerationFence` plus StatusSurfaceController, History, and onboarding generation guards | async completion guards | Generation tokens only; never old result content | The shared publication boundary prevents stale status/popover publication; later surfaces retain their own guards until their child issues | #131, #135, #136, #138, #139 | DETERMINISTIC PASS: `task-05` and related generation contracts; NATIVE INCONCLUSIVE: cross-surface replacement |
-| integrated-command-routing | issue #139 standard application commands | `OigoAppDelegate.installApplicationMenu` and existing command callbacks | `⌘,`, `⌘Q`, Copy, Select All, History, Settings | Focused control content only; no private values in command metadata | The accessory app installs a native Oigo/Edit menu and delegates actions to existing responders and app commands | #139 | DETERMINISTIC PASS: `integrated-ui`; NATIVE INCONCLUSIVE: screenshot does not exercise keyboard/menu dispatch; unsigned current Release artifact sha256:17ef4de8f067c29c6df8b18a0f4433541a5c41d552db7b866a8301eb1b5e5bbb |
-| integrated-escape-routing | issue #139 cancellation priority | `OigoUtilityWindow`, ShortcutRecorderControl, onboarding probe/test callbacks, and existing popover monitor | Escape cancellation and safe close | No unrelated dictation cancellation | Utility windows cancel the frontmost safe editor/probe/test before closing; the nonactivating HUD has no key-window path | #139 | DETERMINISTIC PASS: `integrated-ui`; NATIVE INCONCLUSIVE: screenshot does not exercise Escape or cancellation dispatch; unsigned current Release artifact sha256:17ef4de8f067c29c6df8b18a0f4433541a5c41d552db7b866a8301eb1b5e5bbb |
-| integrated-restoration | issue #139 geometry restoration | stable Settings/History window identifiers, frame autosave, History split autosave, visible-frame clamping | window frames, pane, divider | Bounded geometry and non-content pane state only | Settings and History restore stable frames while clamping to the current visible screen; transient state is not restored | #139 | DETERMINISTIC PASS: `integrated-ui`; NATIVE INCONCLUSIVE: no relaunch/display-change restoration run; unsigned current Release artifact sha256:17ef4de8f067c29c6df8b18a0f4433541a5c41d552db7b866a8301eb1b5e5bbb |
+| integrated-command-routing | issue #139 standard application commands | `OigoAppDelegate.installApplicationMenu` and existing command callbacks | `⌘,`, `⌘Q`, Copy, Select All, History, Settings | Focused control content only; no private values in command metadata | The accessory app installs a native Oigo/Edit menu and delegates actions to existing responders and app commands | #139 | DETERMINISTIC PASS: `integrated-ui`; NATIVE INCONCLUSIVE: screenshot does not exercise keyboard/menu dispatch; unsigned current Release artifact sha256:8245f3f18950f9a929e5777dad96f24f8c54a76695bc401d5cb771dd4fc96e65 |
+| integrated-escape-routing | issue #139 cancellation priority | `OigoUtilityWindow`, ShortcutRecorderControl, onboarding probe/test callbacks, and existing popover monitor | Escape cancellation and safe close | No unrelated dictation cancellation | Utility windows cancel the frontmost safe editor/probe/test before closing; the nonactivating HUD has no key-window path | #139 | DETERMINISTIC PASS: `integrated-ui`; NATIVE INCONCLUSIVE: screenshot does not exercise Escape or cancellation dispatch; unsigned current Release artifact sha256:8245f3f18950f9a929e5777dad96f24f8c54a76695bc401d5cb771dd4fc96e65 |
+| integrated-restoration | issue #139 geometry restoration | stable Settings/History window identifiers, frame autosave, History split autosave, visible-frame clamping | window frames, pane, divider | Bounded geometry and non-content pane state only | Settings and History restore stable frames while clamping to the current visible screen; transient state is not restored | #139 | DETERMINISTIC PASS: `integrated-ui`; NATIVE INCONCLUSIVE: no relaunch/display-change restoration run; unsigned current Release artifact sha256:8245f3f18950f9a929e5777dad96f24f8c54a76695bc401d5cb771dd4fc96e65 |
 | integrated-performance-privacy | issue #139 idle/lifecycle/release evidence | `OigoUIIntegrationPolicy`, existing operation and presentation fences, release checks | bounded counters, timings, privacy scans | Counts and durations only; no user content | The integrated report records event-driven idle behavior, native build identity, and unavailable signed/notarized operator gates explicitly | #139 | DETERMINISTIC PASS: `integrated-ui`; NATIVE INCONCLUSIVE: VoiceOver/TCC and signed notarized artifact require release operator run; see `docs/ui-performance.md` |
 
 ## Current implementation boundary
@@ -73,10 +73,14 @@ The current head contains the immutable `OigoPresentationState` adapter, typed p
 The native visual proof, four-pane Settings, and split History workspace are implemented at `CURRENT_HEAD_SHA`; accessibility, keyboard, appearance, restoration, and lifecycle verification remains owned by #139.
 Issue #140 is unrelated workflow terminology cleanup at the recorded base and does not alter this audit's product behavior boundary.
 
+## Current F3 release artifact
+
+The current F3 rerun is bound to `CURRENT_HEAD_SHA` and bundle `sha256:8245f3f18950f9a929e5777dad96f24f8c54a76695bc401d5cb771dd4fc96e65`.
+
 ## Historical Task33 release artifact
 
 Task33 remains bound to its immutable implementation source `962b9ff20b2b1913b8cc6c992aec13e875abaca4` and bundle `sha256:6ec5d03d7ae6526214d79821d2c551dafaa50049c3f394620051ab40ed299970`.
-The current audit and final F3 evidence use `CURRENT_HEAD_SHA` and bundle `sha256:17ef4de8f067c29c6df8b18a0f4433541a5c41d552db7b866a8301eb1b5e5bbb`.
+The prior F3 evidence used audit source `25347f64046998f37f00316a0f4b93fb5671f655` and bundle `sha256:17ef4de8f067c29c6df8b18a0f4433541a5c41d552db7b866a8301eb1b5e5bbb`.
 
 ## #136 implementation evidence
 

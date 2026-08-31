@@ -170,6 +170,8 @@ def validate_completion_provenance(
     optional_shas = (source_sha, app_source_sha)
     if not all(isinstance(value, str) and SOURCE_SHA.fullmatch(value) for value in required_shas):
         raise ValidationFailure("task-sha-mismatch")
+    if task == "34" and (task_sha != arguments.audit_sha or integrated_sha != arguments.audit_sha):
+        raise ValidationFailure("task-sha-mismatch")
     if any(value is not None and (not isinstance(value, str) or SOURCE_SHA.fullmatch(value) is None) for value in optional_shas):
         raise ValidationFailure("task-sha-mismatch")
     if source_sha is not None and app_source_sha is not None and source_sha != app_source_sha:
