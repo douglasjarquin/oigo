@@ -45,6 +45,15 @@ REQUIRED_LEDGER_FIELDS = {
     "limitations",
 }
 PASS_VERDICTS = {"PASS", "complete", "completed", "confirmed", "inconclusive", "PASS_CONTRACT_ONLY", "PASS_WITH_NATIVE_INCONCLUSIVE"}
+COMPLETION_EVENTS = {
+    "task-complete",
+    "task-completed",
+    "task-complete-corrected",
+    "task-custody-corrected",
+    "task-custody-hash-resealed",
+    "task-provenance-corrected",
+    "final-verifier-completed",
+}
 
 
 class ValidationFailure(Exception):
@@ -120,17 +129,43 @@ def load_ledger(ledger: Path) -> list[dict[str, object]]:
 
 
 def completion_for(task: str, entries: list[dict[str, object]]) -> dict[str, object]:
-    matches = [
+    candidates = [
         entry
         for entry in entries
         if str(entry.get("task")) == task
-        and str(entry.get("event")) in {"task-complete", "task-completed", "final-verifier-completed"}
+        and str(entry.get("event")) in COMPLETION_EVENTS
         and str(entry.get("verdict")) in PASS_VERDICTS
         and "verdict_note" not in entry
     ]
-    if len(matches) != 1:
+    valid = []
+    for candidate in candidates:
+        if not REQUIRED_LEDGER_FIELDS.issubset(candidate):
+            continue
+        session = candidate.get("worker_session", candidate.get("session_id"))
+        commands = candidate.get("commands")
+        adversarial = candidate.get("adversarial_classes")
+        cleanup = candidate.get("cleanup")
+        session_valid = isinstance(session, str) and bool(session)
+        commands_valid = isinstance(commands, list) and bool(commands)
+        if isinstance(adversarial, dict):
+            adversarial_valid = bool(adversarial)
+        elif isinstance(adversarial, list):
+            adversarial_valid = bool(adversarial) and all(isinstance(item, str) and bool(item) for item in adversarial)
+        elif isinstance(adversarial, str):
+            adversarial_valid = bool(adversarial)
+        else:
+            adversarial_valid = False
+        if isinstance(cleanup, str):
+            cleanup_valid = bool(cleanup)
+        elif isinstance(cleanup, list):
+            cleanup_valid = bool(cleanup) and all(isinstance(item, str) and bool(item) for item in cleanup)
+        else:
+            cleanup_valid = False
+        if session_valid and commands_valid and adversarial_valid and cleanup_valid:
+            valid.append(candidate)
+    if not valid:
         raise ValidationFailure("missing-or-duplicate-completion")
-    completion = matches[0]
+    completion = valid[-1]
     if not REQUIRED_LEDGER_FIELDS.issubset(completion):
         raise ValidationFailure("incomplete-completion-receipt")
     session = completion.get("worker_session", completion.get("session_id"))
@@ -141,7 +176,15 @@ def completion_for(task: str, entries: list[dict[str, object]]) -> dict[str, obj
     cleanup = completion.get("cleanup")
     if not isinstance(commands, list) or not commands:
         raise ValidationFailure("missing-command-receipt")
-    if not isinstance(adversarial, dict) or not adversarial:
+    if isinstance(adversarial, dict):
+        adversarial_valid = bool(adversarial)
+    elif isinstance(adversarial, list):
+        adversarial_valid = bool(adversarial) and all(isinstance(item, str) and bool(item) for item in adversarial)
+    elif isinstance(adversarial, str):
+        adversarial_valid = bool(adversarial)
+    else:
+        adversarial_valid = False
+    if not adversarial_valid:
         raise ValidationFailure("missing-adversarial-receipt")
     if isinstance(cleanup, str):
         cleanup_valid = bool(cleanup)
