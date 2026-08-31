@@ -127,9 +127,11 @@ final class HUDStatesScenario: NativeUIContractScenario {
         let executable = root.appendingPathComponent("hud-states-contract")
         try JSONEncoder().encode(fixture).write(to: payload, options: .atomic)
         try contractDriver.write(to: driver, atomically: true, encoding: .utf8)
+        let compilerArguments = swiftcEnvironment()
         _ = try runProcess(
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
-            arguments: ["swiftc"] + sources.map(\.path) + [driver.path, "-o", executable.path]
+            arguments: ["swiftc"] + compilerArguments + sources.map(\.path)
+                + [driver.path, "-o", executable.path] + dependencyObjects()
         )
         let data = try runProcess(executable: executable, arguments: [payload.path])
         guard let output = String(data: data, encoding: .utf8) else {
@@ -168,15 +170,35 @@ final class HUDStatesScenario: NativeUIContractScenario {
         let driver = root.appendingPathComponent("main.swift")
         let executable = root.appendingPathComponent("hud-controller-contract")
         try controllerContractDriver.write(to: driver, atomically: true, encoding: .utf8)
+        let compilerArguments = swiftcEnvironment()
         _ = try runProcess(
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
-            arguments: ["swiftc"] + sources.map(\.path) + [driver.path, "-framework", "AppKit", "-o", executable.path]
+            arguments: ["swiftc"] + compilerArguments + sources.map(\.path)
+                + [driver.path, "-framework", "AppKit", "-o", executable.path]
+                + dependencyObjects()
         )
         let data = try runProcess(executable: executable, arguments: [])
         guard let output = String(data: data, encoding: .utf8) else {
             throw ContractInputError(category: "unreadable-hud-controller-output")
         }
         return output
+    }
+
+    private static func swiftcEnvironment() -> [String] {
+        let buildRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/arm64-apple-macosx/debug")
+        return ["-I", buildRoot.appendingPathComponent("Modules").path]
+    }
+
+    private static func dependencyObjects() -> [String] {
+        let buildRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/arm64-apple-macosx/debug")
+        return ["MacUtilityUI.build"].flatMap { directory in
+            (try? FileManager.default.contentsOfDirectory(
+                at: buildRoot.appendingPathComponent(directory),
+                includingPropertiesForKeys: nil
+            ))?.filter { $0.pathExtension == "o" }.map(\.path) ?? []
+        }
     }
 
     private static let contractDriver = #"""

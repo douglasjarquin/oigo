@@ -96,6 +96,9 @@ struct GalleryConfiguration {
                 .appendingPathComponent("task-24", isDirectory: true)
                 .standardizedFileURL.resolvingSymlinksInPath())
         }
+        approvedTaskEvidenceRoots.append(approvedEvidenceRoot
+            .appendingPathComponent("task-32", isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath())
         guard approvedTaskEvidenceRoots.contains(where: { isWithin(evidenceRoot, of: $0) }) else {
             throw GalleryInputError(category: "outside-evidence-root")
         }

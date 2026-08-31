@@ -73,6 +73,9 @@ struct ContractArguments {
                 .appendingPathComponent("task-28", isDirectory: true)
                 .standardizedFileURL.resolvingSymlinksInPath())
         }
+        approvedTaskEvidenceRoots.append(approvedEvidenceRoot
+            .appendingPathComponent("task-32", isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath())
         guard approvedTaskEvidenceRoots.contains(where: { isWithin(evidenceRoot, of: $0) }) else {
             throw ContractInputError(category: "outside-evidence-root")
         }

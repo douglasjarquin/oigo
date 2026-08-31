@@ -38,8 +38,9 @@ private final class GalleryApplicationDelegate: NSObject, NSApplicationDelegate,
             print("HOST_READY scenario=" + self.configuration.scenario + " windows=1")
             fflush(stdout)
         }
+        let matrixRun = ProcessInfo.processInfo.environment["OIGO_GALLERY_MATRIX"] == "1"
         terminationTimer = Timer.scheduledTimer(
-            timeInterval: configuration.scenario == "popover-states" ? 120 : 20,
+            timeInterval: matrixRun ? 10 : (configuration.scenario == "popover-states" ? 120 : 20),
             target: self,
             selector: #selector(terminateAfterBound),
             userInfo: nil,

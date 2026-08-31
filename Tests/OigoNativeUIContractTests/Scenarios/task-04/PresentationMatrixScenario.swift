@@ -160,9 +160,17 @@ final class PresentationMatrixScenario: NativeUIContractScenario {
         let driver = root.appendingPathComponent("main.swift")
         let executable = root.appendingPathComponent("presentation-matrix-contract")
         try contractDriver.write(to: driver, atomically: true, encoding: .utf8)
+        let buildRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/arm64-apple-macosx/debug")
+        let modules = buildRoot.appendingPathComponent("Modules").path
+        let coreObjects = (try? FileManager.default.contentsOfDirectory(
+            at: buildRoot.appendingPathComponent("OigoCore.build"),
+            includingPropertiesForKeys: nil
+        ))?.filter { $0.pathExtension == "o" }.map(\.path) ?? []
         try runProcess(
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
-            arguments: ["swiftc"] + sources.map(\.path) + [driver.path, "-o", executable.path]
+            arguments: ["swiftc", "-I", modules] + sources.map(\.path)
+                + [driver.path, "-o", executable.path] + coreObjects
         )
         let data = try runProcess(executable: executable, arguments: [mode])
         guard let output = String(data: data, encoding: .utf8),
