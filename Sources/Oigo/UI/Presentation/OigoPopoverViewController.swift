@@ -3,6 +3,13 @@ import MacUtilityUI
 
 @MainActor
 public final class OigoPopoverViewController: NSViewController {
+    private enum Metrics {
+        static let width: CGFloat = 340
+        static let sidePadding: CGFloat = 16
+        static let contentWidth: CGFloat = width - (sidePadding * 2)
+        static let primaryActionHeight: CGFloat = 30
+    }
+
     private let commandHandler: (OigoPopoverCommand) -> Void
     private let contentStack = NSStackView()
     private var buttonActions: [ObjectIdentifier: OigoPresentationAction] = [:]
@@ -26,14 +33,21 @@ public final class OigoPopoverViewController: NSViewController {
 
     public override func loadView() {
         let root = NSView()
+        root.wantsLayer = true
+        root.layer?.backgroundColor = MacUITokens.Colors.controlBackground.cgColor
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
-        contentStack.spacing = 10
-        contentStack.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 12, right: 16)
+        contentStack.spacing = MacUITokens.Spacing.controlGroup
+        contentStack.edgeInsets = NSEdgeInsets(
+            top: 13,
+            left: Metrics.sidePadding,
+            bottom: 12,
+            right: Metrics.sidePadding
+        )
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(contentStack)
         NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(equalToConstant: 340),
+            root.widthAnchor.constraint(equalToConstant: Metrics.width),
             contentStack.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             contentStack.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             contentStack.topAnchor.constraint(equalTo: root.topAnchor),
@@ -77,7 +91,7 @@ public final class OigoPopoverViewController: NSViewController {
         configureKeyLoop()
 
         view.layoutSubtreeIfNeeded()
-        preferredContentSize = NSSize(width: 340, height: ceil(contentStack.fittingSize.height))
+        preferredContentSize = NSSize(width: Metrics.width, height: ceil(contentStack.fittingSize.height))
         view.setAccessibilityIdentifier("oigo-popover-content")
         view.setAccessibilityValue(
             "row=" + presentation.row.rawValue
@@ -87,11 +101,15 @@ public final class OigoPopoverViewController: NSViewController {
 
     private func addHeader(_ presentation: OigoPopoverPresentation) {
         let title = NSTextField(labelWithString: "Oigo")
-        title.font = .systemFont(ofSize: 13, weight: .semibold)
+        title.font = MacUITokens.Typography.section
+        title.textColor = MacUITokens.Colors.primaryLabel
+        title.setAccessibilityIdentifier("popover-title")
+        title.setAccessibilityRole(.staticText)
+        title.setAccessibilityLabel("Oigo")
         let status = MacUIStatusBadge(content: statusContent(
             presentation.statusLabel,
             tone: presentation.statusTone
-        ))
+        ), accessibilityIdentifier: "popover-status")
         let row = horizontalRow([title, flexibleSpace(), status])
         row.setAccessibilityIdentifier("popover-header")
         contentStack.addArrangedSubview(row)
@@ -100,7 +118,8 @@ public final class OigoPopoverViewController: NSViewController {
     private func addPrimaryAction(_ action: OigoPopoverActionPresentation) {
         let button = NSButton(title: action.title, target: self, action: #selector(performAction(_:)))
         button.bezelStyle = .rounded
-        button.controlSize = .large
+        button.controlSize = .regular
+        button.font = MacUITokens.Typography.section
         button.isEnabled = action.isEnabled && action.action != nil
         if let action = action.action {
             buttonActions[ObjectIdentifier(button)] = action
@@ -113,21 +132,22 @@ public final class OigoPopoverViewController: NSViewController {
         button.setAccessibilityLabel(
             action.action.map(OigoStatusMenuIdentity.accessibilityName(for:)) ?? action.title
         )
-        button.widthAnchor.constraint(equalToConstant: 308).isActive = true
+        button.heightAnchor.constraint(equalToConstant: Metrics.primaryActionHeight).isActive = true
+        button.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
         contentStack.addArrangedSubview(button)
     }
 
     private func addShortcut(_ shortcut: OigoPopoverShortcutPresentation) {
         let hint = NSTextField(labelWithString: shortcut.isAvailable ? "Hold" : "Shortcut")
-        hint.font = .preferredFont(forTextStyle: .caption1)
-        hint.textColor = .secondaryLabelColor
+        hint.font = MacUITokens.Typography.helper
+        hint.textColor = MacUITokens.Colors.secondaryLabel
         let glyphs = MacUIShortcutPresentation(
             glyphs: shortcut.glyphs,
             accessibilityLabel: shortcut.accessibilityLabel
         )
         let suffix = NSTextField(labelWithString: shortcut.isAvailable ? "to dictate" : "inactive")
-        suffix.font = .preferredFont(forTextStyle: .caption1)
-        suffix.textColor = .secondaryLabelColor
+        suffix.font = MacUITokens.Typography.helper
+        suffix.textColor = MacUITokens.Colors.secondaryLabel
         let row = horizontalRow([flexibleSpace(), hint, glyphs, suffix, flexibleSpace()])
         row.setAccessibilityIdentifier("popover-shortcut")
         row.setAccessibilityLabel(shortcut.isAvailable ? shortcut.holdHint : shortcut.inactiveHint)
@@ -136,6 +156,8 @@ public final class OigoPopoverViewController: NSViewController {
 
     private func addMode(_ mode: OigoPopoverModePresentation) {
         let label = NSTextField(labelWithString: "Mode")
+        label.font = MacUITokens.Typography.label
+        label.textColor = MacUITokens.Colors.primaryLabel
         let control = NSSegmentedControl(labels: ["Instant", "Clean"], trackingMode: .selectOne,
                                          target: self, action: #selector(performModeAction(_:)))
         control.selectedSegment = mode.selected == .instant ? 0 : 1
@@ -144,11 +166,9 @@ public final class OigoPopoverViewController: NSViewController {
         focusableControls.append(control)
         contentStack.addArrangedSubview(horizontalRow([label, flexibleSpace(), control]))
         if mode.appliesToNextDictation {
-            let note = NSTextField(labelWithString: "Applies to the next dictation")
-            note.font = .preferredFont(forTextStyle: .caption1)
-            note.textColor = .secondaryLabelColor
+            let note = MacUIFieldHelpText("Applies to the next dictation")
             note.alignment = .right
-            note.widthAnchor.constraint(equalToConstant: 308).isActive = true
+            note.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
             contentStack.addArrangedSubview(note)
         }
     }
@@ -158,6 +178,8 @@ public final class OigoPopoverViewController: NSViewController {
         inputOptions: [OigoPopoverInputOption]
     ) {
         let label = NSTextField(labelWithString: "Microphone")
+        label.font = MacUITokens.Typography.label
+        label.textColor = MacUITokens.Colors.primaryLabel
         let value = NSButton(
             title: microphone.label + "  ›",
             target: self,
@@ -166,7 +188,7 @@ public final class OigoPopoverViewController: NSViewController {
         value.isBordered = false
         value.alignment = .right
         value.contentTintColor = microphone.tone == .critical || microphone.tone == .warning
-            ? .systemOrange : .secondaryLabelColor
+            ? MacUITokens.Colors.warning : MacUITokens.Colors.secondaryLabel
         value.isEnabled = microphone.isEnabled && !inputOptions.isEmpty
         value.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         focusableControls.append(value)
@@ -177,40 +199,83 @@ public final class OigoPopoverViewController: NSViewController {
 
     private func addControlFailure(_ message: String) {
         let label = NSTextField(wrappingLabelWithString: message)
-        label.font = .preferredFont(forTextStyle: .caption1)
-        label.textColor = .systemRed
+        label.font = MacUITokens.Typography.helper
+        label.textColor = MacUITokens.Colors.critical
         label.setAccessibilityIdentifier("popover-control-failure")
-        label.widthAnchor.constraint(equalToConstant: 308).isActive = true
+        label.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
         contentStack.addArrangedSubview(label)
     }
 
     private func addNotice(_ notice: OigoPopoverNoticePresentation) {
-        let view = MacUIInlineNotice(
-            content: statusContent(notice.title, tone: notice.tone),
-            body: notice.body,
-            actionTitle: notice.action.title,
-            action: { [weak self] in
-                guard let self, let action = notice.action.action else { return }
-                commandHandler(OigoPopoverCommand(
-                    generation: generation,
-                    intent: .presentation(action)
-                ))
-            }
+        let card = NSStackView()
+        card.orientation = .horizontal
+        card.alignment = .top
+        card.spacing = MacUITokens.Spacing.controlGroup
+        card.edgeInsets = NSEdgeInsets(
+            top: MacUITokens.Spacing.row,
+            left: MacUITokens.Spacing.row,
+            bottom: MacUITokens.Spacing.row,
+            right: MacUITokens.Spacing.row
         )
-        view.setAccessibilityIdentifier("popover-prioritized-notice")
-        view.widthAnchor.constraint(equalToConstant: 308).isActive = true
-        contentStack.addArrangedSubview(view)
+        card.wantsLayer = true
+        card.layer?.cornerRadius = MacUITokens.Radius.contained
+        card.layer?.backgroundColor = MacUITokens.Colors.controlBackground.cgColor
+        card.setAccessibilityElement(true)
+        card.setAccessibilityRole(.group)
+        card.setAccessibilityIdentifier("popover-prioritized-notice")
+        card.setAccessibilityLabel(notice.title + ". " + notice.body)
+
+        let icon = NSImageView(image: NSImage(
+            systemSymbolName: notice.tone == .critical ? "xmark.octagon.fill" : "exclamationmark.triangle.fill",
+            accessibilityDescription: notice.title
+        ) ?? NSImage())
+        icon.contentTintColor = notice.tone == .critical
+            ? MacUITokens.Colors.critical : MacUITokens.Colors.warning
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+
+        let copy = NSStackView()
+        copy.orientation = .vertical
+        copy.alignment = .leading
+        copy.spacing = MacUITokens.Spacing.tight
+        let title = NSTextField(labelWithString: notice.title)
+        title.font = MacUITokens.Typography.secondary
+        title.textColor = MacUITokens.Colors.primaryLabel
+        let body = MacUIFieldHelpText(notice.body)
+        copy.addArrangedSubview(title)
+        copy.addArrangedSubview(body)
+        copy.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let action = NSButton(title: notice.action.title, target: self, action: #selector(performAction(_:)))
+        action.bezelStyle = .rounded
+        action.controlSize = .small
+        action.font = MacUITokens.Typography.secondary
+        action.isEnabled = notice.action.isEnabled && notice.action.action != nil
+        if let mappedAction = notice.action.action {
+            buttonActions[ObjectIdentifier(action)] = mappedAction
+            action.setAccessibilityIdentifier(OigoStatusMenuIdentity.identifier(for: mappedAction))
+        } else {
+            action.setAccessibilityIdentifier("oigo.status.notice-disabled")
+        }
+        action.setAccessibilityLabel(notice.action.title)
+        action.setContentHuggingPriority(.required, for: .horizontal)
+        focusableControls.append(action)
+
+        card.addArrangedSubview(icon)
+        card.addArrangedSubview(copy)
+        card.addArrangedSubview(action)
+        card.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
+        contentStack.addArrangedSubview(card)
     }
 
     private func addLatest(_ latest: OigoPopoverLatestPresentation?) {
         let heading = NSTextField(labelWithString: "LAST DICTATION")
-        heading.font = .systemFont(ofSize: 11, weight: .semibold)
-        heading.textColor = .secondaryLabelColor
+        heading.font = MacUITokens.Typography.secondary
+        heading.textColor = MacUITokens.Colors.secondaryLabel
         heading.setAccessibilityIdentifier("popover-latest-heading")
         if let latest {
             let time = NSTextField(labelWithString: latest.relativeTime)
-            time.font = .preferredFont(forTextStyle: .caption1)
-            time.textColor = .secondaryLabelColor
+            time.font = MacUITokens.Typography.secondary
+            time.textColor = MacUITokens.Colors.secondaryLabel
             contentStack.addArrangedSubview(horizontalRow([heading, flexibleSpace(), time]))
             let summary = NSTextField(
                 labelWithString: [latest.status, latest.duration, latest.source].joined(separator: " · ")
@@ -218,7 +283,9 @@ public final class OigoPopoverViewController: NSViewController {
             summary.lineBreakMode = .byTruncatingTail
             summary.maximumNumberOfLines = 1
             summary.setAccessibilityIdentifier("popover-latest-metadata-only")
-            summary.widthAnchor.constraint(equalToConstant: 308).isActive = true
+            summary.font = MacUITokens.Typography.secondary
+            summary.textColor = MacUITokens.Colors.primaryLabel
+            summary.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
             contentStack.addArrangedSubview(summary)
             if !latest.actions.isEmpty {
                 let actions = NSStackView()
@@ -238,7 +305,8 @@ public final class OigoPopoverViewController: NSViewController {
         } else {
             contentStack.addArrangedSubview(heading)
             let empty = NSTextField(labelWithString: "No recent dictation")
-            empty.textColor = .secondaryLabelColor
+            empty.font = MacUITokens.Typography.secondary
+            empty.textColor = MacUITokens.Colors.secondaryLabel
             empty.setAccessibilityIdentifier("popover-latest-empty")
             contentStack.addArrangedSubview(empty)
         }
@@ -257,17 +325,20 @@ public final class OigoPopoverViewController: NSViewController {
     private func footerButton(_ title: String, action: OigoPresentationAction) -> NSButton {
         let button = NSButton(title: title, target: self, action: #selector(performAction(_:)))
         button.isBordered = false
+        button.font = MacUITokens.Typography.secondary
+        button.contentTintColor = MacUITokens.Colors.primaryLabel
         buttonActions[ObjectIdentifier(button)] = action
         focusableControls.append(button)
         button.setAccessibilityIdentifier(OigoStatusMenuIdentity.identifier(for: action))
         button.setAccessibilityLabel(OigoStatusMenuIdentity.accessibilityName(for: action))
+        button.setAccessibilityRole(.button)
         return button
     }
 
     private func addDivider() {
         let divider = NSBox()
         divider.boxType = .separator
-        divider.widthAnchor.constraint(equalToConstant: 308).isActive = true
+        divider.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
         contentStack.addArrangedSubview(divider)
     }
 
@@ -275,8 +346,8 @@ public final class OigoPopoverViewController: NSViewController {
         let row = NSStackView(views: views)
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 8
-        row.widthAnchor.constraint(equalToConstant: 308).isActive = true
+        row.spacing = MacUITokens.Spacing.controlGroup
+        row.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
         return row
     }
 

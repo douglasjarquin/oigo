@@ -81,6 +81,11 @@ struct GalleryConfiguration {
                 .appendingPathComponent("task-19", isDirectory: true)
                 .standardizedFileURL.resolvingSymlinksInPath())
         }
+        if scenario == "popover-states", taskNumber == 12 {
+            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
+                .appendingPathComponent("task-21", isDirectory: true)
+                .standardizedFileURL.resolvingSymlinksInPath())
+        }
         guard approvedTaskEvidenceRoots.contains(where: { isWithin(evidenceRoot, of: $0) }) else {
             throw GalleryInputError(category: "outside-evidence-root")
         }
