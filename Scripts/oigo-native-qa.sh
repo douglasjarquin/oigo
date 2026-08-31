@@ -107,7 +107,7 @@ actual_sha="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$app" | sed -n 's/^A
 
 if [[ "$scenario" == failure ]]; then
     failure_payload="$qa_root/session/native-qa/failure-payload.json"
-    jq -n --arg suite "${suites[$scenario]}" --arg fixture "$fixture_root" \
+    jq -n --arg suite "${suites[$scenario]}" --arg fixture "${fixture_root#$qa_root/}" \
         --arg failure_case "${values[case]}" --arg provider "${values[deny]-}" \
         '{suite:$suite,fixture:$fixture,failure_case:$failure_case,failure_provider:(if $provider == "" then null else $provider end),outcome:"INCONCLUSIVE",category:$failure_case,native_pass:false,state_mutated:false,shared_system_mutated:false,physical_edges:[],checkpoint_execution:"not-run-by-injected-provider",recovery:"no-PASS-emitted"}' > "$failure_payload"
     "$source_root/Scripts/oigo-qa-write-evidence.sh" --run-marker "$qa_root/run.json" \
