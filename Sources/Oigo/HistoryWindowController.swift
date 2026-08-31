@@ -311,7 +311,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     @objc private func pasteAgainAction() {
         guard let selectedEntry else { return }
-        pasteAgain(selectedEntry)
+        if selectedTranscriptSource == .processed {
+            pasteCleanAgain(selectedEntry)
+        } else {
+            pasteAgain(selectedEntry)
+        }
     }
 
     @objc private func pasteCleanAgainAction() {
@@ -428,6 +432,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
     func task29LoadingLabelForTesting() -> String { loadingLabel.stringValue }
     func task29LoadMoreButtonForTesting() -> NSButton { loadMoreButton }
+    func task30InvokePasteAgainForTesting() { pasteAgainAction() }
 
     private func configureWindow() {
         guard let contentView = window?.contentView else {
