@@ -6,6 +6,7 @@ struct ContractArguments {
     let defaultsSuite: String
     let fixtureRoot: URL
     let fixtureName: String?
+    let caseName: String?
     let evidenceRoot: URL
     let appearance: String
     let contrast: String
@@ -62,6 +63,11 @@ struct ContractArguments {
                 .appendingPathComponent("task-15", isDirectory: true)
                 .standardizedFileURL.resolvingSymlinksInPath())
         }
+        if scenario == "popover-state-matrix", taskNumber == 12 {
+            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
+                .appendingPathComponent("task-22", isDirectory: true)
+                .standardizedFileURL.resolvingSymlinksInPath())
+        }
         guard approvedTaskEvidenceRoots.contains(where: { isWithin(evidenceRoot, of: $0) }) else {
             throw ContractInputError(category: "outside-evidence-root")
         }
@@ -87,6 +93,16 @@ struct ContractArguments {
             fixtureName = nil
         }
 
+        let caseName: String?
+        if let requestedCase = values["case"] {
+            guard requestedCase.range(of: #"^[a-z][a-z0-9-]*$"#, options: .regularExpression) != nil else {
+                throw ContractInputError(category: "invalid-case")
+            }
+            caseName = requestedCase
+        } else {
+            caseName = nil
+        }
+
         let appearance = values["appearance"] ?? "system"
         guard ["light", "dark", "system"].contains(appearance) else {
             throw ContractInputError(category: "invalid-appearance")
@@ -101,6 +117,7 @@ struct ContractArguments {
             defaultsSuite: defaultsSuite,
             fixtureRoot: fixtureRoot,
             fixtureName: fixtureName,
+            caseName: caseName,
             evidenceRoot: evidenceRoot,
             appearance: appearance,
             contrast: contrast
@@ -121,7 +138,7 @@ struct ContractArguments {
             }
             let key = String(option.dropFirst(2))
             let allowed = [
-                "scenario", "defaults-suite", "fixture-root", "fixture", "evidence-root",
+                "scenario", "defaults-suite", "fixture-root", "fixture", "case", "evidence-root",
                 "appearance", "contrast"
             ]
             guard allowed.contains(key), values[key] == nil else {
