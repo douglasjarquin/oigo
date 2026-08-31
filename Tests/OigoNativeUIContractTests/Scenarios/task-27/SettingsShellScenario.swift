@@ -359,7 +359,7 @@ final class SettingsShellScenario: NativeUIContractScenario {
                           paneViews.values.filter({ !$0.isHidden }).count == 1 else { exit(11) }
                     let screenshot = evidenceRoot.appendingPathComponent("settings-\(pane.id)-\(appearance.0).png")
                     guard capture(view: content, to: screenshot) else { exit(12) }
-                    capturedScreenshots.append(screenshot.path)
+                    capturedScreenshots.append(screenshot.lastPathComponent)
                 }
             }
             guard factory.settingsStore.load() == settingsBefore,
