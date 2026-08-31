@@ -42,7 +42,11 @@ final class HUDRendererScenario: NativeUIContractScenario {
             throw ContractInputError(category: "missing-hud-renderer")
         }
 
-        let output = try runCompiledContract(sources: sources, fixture: fixture)
+        let output = try runCompiledContract(
+            sources: sources,
+            fixture: fixture,
+            evidenceRoot: arguments.evidenceRoot
+        )
         guard output.contains("PASS hud-renderer") else {
             throw ContractInputError(category: "unexpected-hud-renderer-output")
         }
@@ -82,7 +86,11 @@ final class HUDRendererScenario: NativeUIContractScenario {
         }
     }
 
-    private static func runCompiledContract(sources: [URL], fixture: Fixture) throws -> String {
+    private static func runCompiledContract(
+        sources: [URL],
+        fixture: Fixture,
+        evidenceRoot: URL
+    ) throws -> String {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("oigo-native-ui-redesign.task24." + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -96,7 +104,10 @@ final class HUDRendererScenario: NativeUIContractScenario {
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
             arguments: ["swiftc"] + sources.map(\.path) + [driver.path, "-framework", "AppKit", "-o", executable.path]
         )
-        let data = try runProcess(executable: executable, arguments: [payload.path])
+        let data = try runProcess(
+            executable: executable,
+            arguments: [payload.path, evidenceRoot.path]
+        )
         guard let output = String(data: data, encoding: .utf8) else {
             throw ContractInputError(category: "unreadable-hud-renderer-output")
         }
@@ -114,6 +125,11 @@ final class HUDRendererScenario: NativeUIContractScenario {
             "expanded": "280x64",
             "radius": fixture.radius,
             "previewItalicPointSize": 12,
+            "screenshots": [
+                "hud-controller-light.png",
+                "hud-controller-dark.png",
+                "hud-controller-increased-contrast.png"
+            ],
             "output": lines.map(String.init)
         ]
         let data = try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
@@ -207,9 +223,50 @@ final class HUDRendererScenario: NativeUIContractScenario {
                   (fixture.targetDisplayID == 2 ? targetFrame.origin.x >= 1440 : targetFrame.origin.x < 1440),
                   targetFrame.origin.y < 650,
                   controller.resourceSnapshot.recordingTimerActive else { exit(11) }
+            guard let initialInspection = controller.renderInspection,
+                  initialInspection.title == "Recording",
+                  initialInspection.detail == fixture.shortcutReleaseHint,
+                  initialInspection.titlePointSize == 12,
+                  initialInspection.detailPointSize == 12,
+                  initialInspection.previewPointSize == 12,
+                  initialInspection.iconRole == .recording,
+                  initialInspection.iconTreatment == "nine-dot",
+                  initialInspection.symbolName == "circle.grid.3x3.fill",
+                  initialInspection.semanticColor == "system-red" else { exit(15) }
             guard controller.updatePreview("preview", generation: fixture.currentGeneration, at: 10) else { exit(12) }
-            guard controller.renderedSize == HUDSize(width: 280, height: 64),
-                  controller.resourceSnapshot.previewCharacters > 0 else { exit(13) }
+            guard let previewInspection = controller.renderInspection,
+                  controller.renderedSize == HUDSize(width: 280, height: 64),
+                  controller.resourceSnapshot.previewCharacters > 0,
+                  previewInspection.preview == "preview",
+                  previewInspection.previewPointSize == 12,
+                  previewInspection.previewIsItalic,
+                  previewInspection.renderPasses > initialInspection.renderPasses else { exit(13) }
+            let beforeThrottleInspection = previewInspection
+            let beforeThrottleResources = controller.resourceSnapshot
+            guard !controller.updatePreview("too-soon", generation: fixture.currentGeneration, at: 10.1),
+                  controller.renderInspection == beforeThrottleInspection,
+                  controller.resourceSnapshot == beforeThrottleResources else { exit(16) }
+            print("PREVIEW_THROTTLE PASS rejected=true render-unchanged=true resources-unchanged=true")
+
+            let screenshotRoot = URL(fileURLWithPath: CommandLine.arguments[2])
+            let appearances: [(String, String)] = [
+                ("NSAppearanceNameAqua", "hud-controller-light.png"),
+                ("NSAppearanceNameDarkAqua", "hud-controller-dark.png"),
+                ("NSAppearanceNameAccessibilityHighContrastAqua", "hud-controller-increased-contrast.png")
+            ]
+            for (appearanceName, fileName) in appearances {
+                NSApp.appearance = NSAppearance(named: NSAppearance.Name(appearanceName))
+                guard controller.present(
+                    .recording,
+                    generation: fixture.currentGeneration,
+                    startedAt: Date(),
+                    shortcutReleaseHint: fixture.shortcutReleaseHint
+                ),
+                controller.updatePreview("appearance preview", generation: fixture.currentGeneration, at: 20),
+                controller.captureRenderedSurface(
+                    to: screenshotRoot.appendingPathComponent(fileName)
+                ) else { exit(17) }
+            }
             guard !controller.present(
                 .savedRetry,
                 generation: fixture.staleGeneration,
@@ -230,6 +287,20 @@ final class HUDRendererScenario: NativeUIContractScenario {
                           controller.resourceSnapshot.state == nil,
                           controller.resourceSnapshot.generation == nil else { exit(21) }
                 } else {
+                    let expectedContent = OigoHUDShellPolicy.content(
+                        for: state,
+                        releaseHint: fixture.shortcutReleaseHint,
+                        preview: ""
+                    )
+                    guard let inspection = controller.renderInspection,
+                          inspection.title == expectedContent.title,
+                          inspection.detail == expectedContent.detail,
+                          inspection.titlePointSize == 12,
+                          inspection.detailPointSize == 12,
+                          inspection.iconRole == expectedContent.iconRole,
+                          inspection.iconTreatment == expectedTreatment(for: expectedContent.iconRole),
+                          inspection.symbolName == expectedSymbol(for: expectedContent.iconRole),
+                          inspection.semanticColor == expectedSemanticColor(for: expectedContent.tone) else { exit(24) }
                     guard controller.renderedSize == HUDSize(width: expected.width, height: expected.height),
                           controller.resourceSnapshot.recordingTimerActive == expected.timer,
                           controller.resourceSnapshot.dismissalTaskActive == (expected.dismissal == "timed") else { exit(22) }
@@ -281,6 +352,38 @@ final class HUDRendererScenario: NativeUIContractScenario {
 
             print("PASS hud-renderer fixture=\(fixture.fixture) states=\(fixture.states.count) target-screen=\(fixture.targetDisplayID) fallback=main-screen stale=no-render dismissal=clean")
             NSApp.terminate(nil)
+        }
+
+        private func expectedTreatment(for role: OigoHUDIconRole) -> String {
+            switch role {
+            case .information: "small-spinner"
+            case .confirmation: "small-check"
+            case .recording: "nine-dot"
+            case .attention: "small-attention"
+            case .failure: "small-failure"
+            case .destination: "small-destination"
+            }
+        }
+
+        private func expectedSemanticColor(for tone: OigoHUDTone) -> String {
+            switch tone {
+            case .neutral: "secondary-label"
+            case .informational: "control-accent"
+            case .success: "system-green"
+            case .warning: "system-orange"
+            case .critical, .recording: "system-red"
+            }
+        }
+
+        private func expectedSymbol(for role: OigoHUDIconRole) -> String {
+            switch role {
+            case .information: "progress.indicator"
+            case .confirmation: "checkmark"
+            case .recording: "circle.grid.3x3.fill"
+            case .attention: "exclamationmark.triangle.fill"
+            case .failure: "xmark.octagon.fill"
+            case .destination: "cursorarrow.rays"
+            }
         }
     }
 
