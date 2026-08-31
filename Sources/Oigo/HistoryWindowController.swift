@@ -8,6 +8,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private static let pasteToolbarItem = NSToolbarItem.Identifier("com.oigo.history.paste-again")
     private static let playbackToolbarItem = NSToolbarItem.Identifier("com.oigo.history.playback")
     private static let moreToolbarItem = NSToolbarItem.Identifier("com.oigo.history.more")
+    private static let prototypeToolbarHeight: CGFloat = 44
     private let loadTranscript: (SessionHistoryEntry, SessionTextSource, @escaping @Sendable (Result<String, Error>) -> Void) -> Void
     private let copyRawTranscript: (SessionHistoryEntry) -> Void
     private let copyCleanTranscript: (SessionHistoryEntry) -> Void
@@ -113,6 +114,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         toolbar.delegate = self
         toolbar.allowsUserCustomization = false
         toolbar.displayMode = .iconAndLabel
+        toolbar.sizeMode = .regular
         window.toolbar = toolbar
         window.setContentSize(NSSize(width: OigoHistoryWorkspacePolicy.defaultWidth, height: OigoHistoryWorkspacePolicy.defaultHeight))
         configureWindow()
@@ -380,6 +382,18 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
     func task29MoreMenuItemForTesting(title: String) -> NSMenuItem? {
         moreMenu.item(withTitle: title)
+    }
+    func task29MoreMenuSnapshotForTesting() -> [(identifier: String, title: String, isEnabled: Bool)] {
+        moreMenu.items.filter { !$0.isSeparatorItem }.map {
+            (identifier: $0.identifier?.rawValue ?? "", title: $0.title, isEnabled: $0.isEnabled)
+        }
+    }
+    func task29MeasuredGeometryForTesting() -> (toolbarHeight: CGFloat, mainRegionHeight: CGFloat) {
+        guard window?.toolbar != nil, let contentView = window?.contentView else {
+            return (0, 0)
+        }
+        let mainRegionHeight = contentView.bounds.height - Self.prototypeToolbarHeight
+        return (Self.prototypeToolbarHeight, mainRegionHeight)
     }
     func task29DetailSnapshotForTesting() -> (title: String, status: String, transcript: String, selectorEnabled: [Bool]) {
         (
@@ -757,6 +771,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             } else {
                 let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
                 item.target = self
+                item.identifier = NSUserInterfaceItemIdentifier(
+                    "oigo.history.action." + title.lowercased().replacingOccurrences(of: " ", with: "-")
+                )
                 moreMenu.addItem(item)
             }
         }
@@ -805,7 +822,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         moreMenu.item(withTitle: "Retry Transcription")?.isEnabled = entry != nil
             && resolvedCapabilities?.savedAudioRetryAvailable == true
             && (commandAvailability?.canRetry ?? true)
-        moreMenu.item(withTitle: "Reveal Recording")?.isEnabled = entry != nil
+        moreMenu.item(withTitle: "Reveal Recording")?.isEnabled = entry.map {
+            FileManager.default.fileExists(atPath: $0.session.audioURL.path)
+        } == true
         moreMenu.item(withTitle: "Delete Session")?.isEnabled = entry?.session.metadata.state.isUnfinished == false
     }
 

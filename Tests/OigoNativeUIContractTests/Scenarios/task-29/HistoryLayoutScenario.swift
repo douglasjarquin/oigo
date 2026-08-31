@@ -268,7 +268,9 @@ final class HistoryLayoutScenario: NativeUIContractScenario {
             content.layoutSubtreeIfNeeded()
             try assert(content.bounds.width == fixture.windowWidth, "content width \(content.bounds.width)")
             try assert(content.bounds.height == fixture.windowHeight, "content height \(content.bounds.height) frame=\(window.frame.width)x\(window.frame.height)")
-            try assert(content.bounds.height - fixture.toolbarHeight == fixture.mainRegionHeight, "main region height")
+            let measuredGeometry = controller.task29MeasuredGeometryForTesting()
+            try assert(measuredGeometry.toolbarHeight == fixture.toolbarHeight, "toolbar height \(measuredGeometry.toolbarHeight)")
+            try assert(measuredGeometry.mainRegionHeight == fixture.mainRegionHeight, "main region height \(measuredGeometry.mainRegionHeight)")
             try assert(toolbar.identifier == fixture.toolbarIdentifier, "toolbar identifier")
             try assert(toolbar.displayMode == .iconAndLabel && !toolbar.allowsUserCustomization, "toolbar mode")
             try assert(toolbar.items.count == 4, "toolbar item count")
@@ -287,6 +289,16 @@ final class HistoryLayoutScenario: NativeUIContractScenario {
             let listWidth = views.first { $0.accessibilityIdentifier() == fixture.listIdentifier }?.bounds.width ?? 0
             try assert(abs(listWidth - fixture.listColumnWidth) < 1, "list column width \(listWidth)")
             try assert(controller.task29MoreMenuTitlesForTesting() == fixture.moreItems, "More menu excludes maintenance")
+            let menuIdentifiers = controller.task29MoreMenuSnapshotForTesting().map(\.identifier)
+            try assert(menuIdentifiers == [
+                "oigo.history.action.copy-raw-transcript",
+                "oigo.history.action.copy-clean-transcript",
+                "oigo.history.action.clean-again",
+                "oigo.history.action.reapply-dictionary",
+                "oigo.history.action.retry-transcription",
+                "oigo.history.action.reveal-recording",
+                "oigo.history.action.delete-session"
+            ], "More action identifiers")
 
             controller.reload(entries: [completed, failed], hasMore: true, isLoading: false)
             window.layoutIfNeeded()
@@ -347,7 +359,7 @@ final class HistoryLayoutScenario: NativeUIContractScenario {
             if success {
                 let receipt: [String: Any] = [
                     "scenario": "history-layout", "fixture": fixture.fixture, "productionController": true,
-                    "geometry": ["window": [fixture.windowWidth, fixture.windowHeight], "toolbar": fixture.toolbarHeight, "main": fixture.mainRegionHeight, "list": fixture.listColumnWidth],
+                    "geometry": ["window": [content.bounds.width, content.bounds.height], "toolbar": measuredGeometry.toolbarHeight, "main": measuredGeometry.mainRegionHeight, "list": listWidth],
                     "toolbar": fixture.toolbarItems.map { ["id": $0.id, "label": $0.label, "icon": $0.icon] },
                     "moreItems": fixture.moreItems, "rowCount": table.numberOfRows,
                     "sourceSelection": ["raw": true, "normalized": true, "clean": true],
@@ -364,11 +376,24 @@ final class HistoryLayoutScenario: NativeUIContractScenario {
                 let snapshot = controller.task29DetailSnapshotForTesting()
                 try assert(snapshot.transcript == "Transcript unavailable.", "invalid detail safe error")
                 try assert(snapshot.selectorEnabled == [true, false, false], "invalid source actions disabled")
+                let invalidMenu = controller.task29MoreMenuSnapshotForTesting()
+                let invalidEnabled = Dictionary(uniqueKeysWithValues: invalidMenu.map { ($0.identifier, $0.isEnabled) })
+                let expectedInvalid: [String: Bool] = [
+                    "oigo.history.action.copy-raw-transcript": false,
+                    "oigo.history.action.copy-clean-transcript": false,
+                    "oigo.history.action.clean-again": false,
+                    "oigo.history.action.reapply-dictionary": false,
+                    "oigo.history.action.retry-transcription": false,
+                    "oigo.history.action.reveal-recording": false,
+                    "oigo.history.action.delete-session": true
+                ]
+                try assert(invalidEnabled == expectedInvalid, "invalid More actions \(invalidEnabled)")
                 try assert(state.counts["delete-confirmation-request"] == 1, "delete requires confirmation boundary")
                 let receipt: [String: Any] = [
                     "scenario": "history-layout", "fixture": fixture.fixture, "productionController": true,
                     "invalidEntries": ["missing": true, "corrupt": true, "stale": true],
                     "safeDetailError": snapshot.transcript, "unsupportedActionsDisabled": true,
+                    "moreActions": invalidMenu.map { ["identifier": $0.identifier, "enabled": $0.isEnabled] },
                     "deleteConfirmationRequired": true, "maintenanceExposed": false, "screenshots": screenshots,
                     "cleanup": "production window closed; temporary synthetic sessions removed"
                 ]
