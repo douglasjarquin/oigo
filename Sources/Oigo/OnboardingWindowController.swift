@@ -55,6 +55,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var inputDevices: [OigoInputDevice]
 
     private let progressLabel = NSTextField(labelWithString: "")
+    private let chromeTitleLabel = NSTextField(labelWithString: "Set Up Oigo")
+    private let progressStages = NSStackView()
+    private var progressStageLabels: [NSTextField] = []
     private let titleLabel = NSTextField(labelWithString: "")
     private let bodyLabel = NSTextField(wrappingLabelWithString: "")
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
@@ -162,12 +165,19 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         shortcutRecorder = ShortcutRecorderControl(shortcut: globalShortcut)
 
         let window = OigoUtilityWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 680),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: OigoOnboardingShellMetrics.windowWidth,
+                height: 680
+            ),
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.title = "Welcome to Oigo"
+        window.title = OigoOnboardingShellMetrics.title
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
@@ -304,6 +314,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         guard let contentView = window?.contentView else {
             return
         }
+        if let closeButton = window?.standardWindowButton(.closeButton) {
+            closeButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.close")
+            closeButton.setAccessibilityIdentifier("oigo.onboarding.close")
+            closeButton.setAccessibilityLabel("Close")
+        }
         shortcutRecorder.onValidationError = { [weak self] message in
             guard let self else { return }
             shortcutValidation = .invalid(message)
@@ -316,11 +331,38 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             render()
         }
         progressLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.progress")
+        progressLabel.setAccessibilityIdentifier("oigo.onboarding.progress")
         titleLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.title")
+        titleLabel.setAccessibilityIdentifier("oigo.onboarding.title")
         bodyLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.body")
         statusLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.status")
         progressLabel.textColor = .secondaryLabelColor
-        titleLabel.font = .boldSystemFont(ofSize: 22)
+        titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
+        chromeTitleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        chromeTitleLabel.alignment = .center
+        chromeTitleLabel.textColor = .labelColor
+        chromeTitleLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.chrome-title")
+        chromeTitleLabel.setAccessibilityRole(.staticText)
+        chromeTitleLabel.setAccessibilityLabel("Set Up Oigo")
+        progressStages.orientation = .horizontal
+        progressStages.alignment = .centerY
+        progressStages.distribution = .fillEqually
+        progressStages.spacing = 8
+        progressStages.translatesAutoresizingMaskIntoConstraints = false
+        progressStageLabels = OigoOnboardingShellMetrics.stageTitles.enumerated().map { index, title in
+            let label = NSTextField(labelWithString: String(index + 1) + "  " + title)
+            label.font = .systemFont(ofSize: 11, weight: .medium)
+            label.textColor = .secondaryLabelColor
+            label.alignment = .center
+            label.identifier = NSUserInterfaceItemIdentifier(
+                "oigo.onboarding.progress.stage-" + String(index + 1)
+            )
+            label.setAccessibilityIdentifier("oigo.onboarding.progress.stage-" + String(index + 1))
+            label.setAccessibilityRole(.staticText)
+            label.setAccessibilityLabel("Stage " + String(index + 1) + ". " + title)
+            progressStages.addArrangedSubview(label)
+            return label
+        }
         bodyLabel.maximumNumberOfLines = 8
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.maximumNumberOfLines = 4
@@ -367,9 +409,16 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         backButton.target = self
         backButton.action = #selector(goBack)
         backButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.back")
+        backButton.setAccessibilityIdentifier("oigo.onboarding.back")
+        backButton.bezelStyle = .rounded
+        backButton.setAccessibilityLabel("Back")
         nextButton.target = self
         nextButton.action = #selector(goForward)
         nextButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.continue")
+        nextButton.setAccessibilityIdentifier("oigo.onboarding.continue")
+        nextButton.bezelStyle = .rounded
+        nextButton.keyEquivalent = "\r"
+        nextButton.setAccessibilityLabel("Continue")
 
         inputRow.addArrangedSubview(inputLabel)
         inputRow.addArrangedSubview(inputPopup)
@@ -390,6 +439,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         languageRow.spacing = 8
         languageLabel.setContentHuggingPriority(.required, for: .horizontal)
         let stack = NSStackView(views: [
+            progressStages,
             progressLabel,
             titleLabel,
             bodyLabel,
@@ -418,14 +468,32 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(stack)
+        let chrome = NSView()
+        chrome.translatesAutoresizingMaskIntoConstraints = false
+        chrome.wantsLayer = true
+        chrome.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        chrome.setAccessibilityRole(.group)
+        chrome.setAccessibilityIdentifier("oigo.onboarding.chrome")
+        chrome.setAccessibilityLabel("Set Up Oigo window header")
+        chrome.addSubview(chromeTitleLabel)
+        contentView.addSubview(chrome)
+        NSLayoutConstraint.activate([
+            chrome.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            chrome.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            chrome.topAnchor.constraint(equalTo: contentView.topAnchor),
+            chrome.heightAnchor.constraint(equalToConstant: OigoOnboardingShellMetrics.chromeHeight),
+            chromeTitleLabel.leadingAnchor.constraint(equalTo: chrome.leadingAnchor, constant: 12),
+            chromeTitleLabel.trailingAnchor.constraint(equalTo: chrome.trailingAnchor, constant: -12),
+            chromeTitleLabel.centerYAnchor.constraint(equalTo: chrome.centerYAnchor)
+        ])
         let buttons = stack.arrangedSubviews.last!
         (buttons as? NSStackView)?.spacing = 8
         (buttons as? NSStackView)?.alignment = .trailing
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 32),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -32),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 28),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -24),
+            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: OigoOnboardingShellMetrics.contentHorizontalPadding),
+            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -OigoOnboardingShellMetrics.contentHorizontalPadding),
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: OigoOnboardingShellMetrics.chromeHeight + OigoOnboardingShellMetrics.contentVerticalPadding),
+            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -OigoOnboardingShellMetrics.contentVerticalPadding),
             bodyLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             checklistStack.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -453,6 +521,18 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             ? stage == .done ? "Setup complete" : "Stage " + String(stage.ordinal) + " of 4"
             : "Setup unavailable"
         titleLabel.stringValue = isSupported ? stage.title : "This Mac cannot run Oigo"
+        let activeOrdinal = stage.ordinal
+        for (index, label) in progressStageLabels.enumerated() {
+            let isActive = activeOrdinal == index + 1
+            let isComplete = activeOrdinal > index + 1
+            label.textColor = isActive || isComplete ? .controlAccentColor : .secondaryLabelColor
+            label.font = .systemFont(ofSize: 11, weight: isActive ? .semibold : .medium)
+            label.setAccessibilityLabel(
+                "Stage " + String(index + 1) + ". "
+                    + label.stringValue.drop(while: { $0.isNumber || $0 == " " })
+                    + (isActive ? ". Current stage" : isComplete ? ". Complete" : ". Not started")
+            )
+        }
         bodyLabel.stringValue = isSupported ? body(for: stage) : support.reason
         languageRow.isHidden = currentStep != .language
         shortcutRecorder.isHidden = currentStep != .shortcut
