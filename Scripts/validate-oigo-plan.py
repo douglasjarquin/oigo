@@ -193,8 +193,19 @@ def validate_provenance(arguments: argparse.Namespace) -> None:
     for value in (arguments.execution_base_sha, arguments.implementation_sha, arguments.audit_sha):
         if SOURCE_SHA.fullmatch(value) is None:
             raise ValidationFailure("invalid-provenance-sha")
+    frozen_plan = arguments.frozen_plan
+    if not frozen_plan.is_file():
+        task6_receipt = Path(__file__).resolve().parent.parent / ".omo/evidence/oigo-shortcut-transcription-design-fidelity/task-6-oigo-shortcut-transcription-design-fidelity.json"
+        try:
+            task6 = json.loads(task6_receipt.read_text(encoding="utf-8"))
+            recorded_path = task6["plan_provenance"]["frozen_plan"]
+            recorded_candidate = Path(__file__).resolve().parent.parent / recorded_path
+            if recorded_candidate.is_file():
+                frozen_plan = recorded_candidate
+        except (KeyError, OSError, json.JSONDecodeError) as error:
+            raise ValidationFailure("frozen-plan-unreadable") from error
     try:
-        frozen_sha = hashlib.sha256(arguments.frozen_plan.read_bytes()).hexdigest()
+        frozen_sha = hashlib.sha256(frozen_plan.read_bytes()).hexdigest()
     except OSError as error:
         raise ValidationFailure("frozen-plan-unreadable") from error
     if frozen_sha != arguments.reviewed_plan_sha:
