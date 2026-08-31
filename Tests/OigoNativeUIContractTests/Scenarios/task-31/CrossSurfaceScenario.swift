@@ -537,6 +537,14 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 settings: settings,
                 history: history
             )
+            let operationGate = AppOperationGate()
+            guard case .success(let sessionHandle) = operationGate.begin(.dictation),
+                  operationGate.isCurrent(sessionHandle),
+                  case .failure(.occupied(.dictation)) = operationGate.begin(.pasteAgain) else {
+                throw DriverError.assertion("terminal session ownership")
+            }
+            operationGate.complete(sessionHandle)
+            try assert(!operationGate.isCurrent(sessionHandle), "terminal session release")
             let target = HUDTargetGeometrySnapshot(
                 generation: 20,
                 captureToken: UUID(),
@@ -576,6 +584,21 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 throw DriverError.assertion("HUD render inspection")
             }
             hud.shutdown()
+            let terminalInputs = makeInputs(
+                generation: 30,
+                coordinatorState: .complete,
+                terminal: .init(generation: 30, outcome: .copied, failure: nil)
+            )
+            let terminalPublication = OigoPresentationPublication(inputs: terminalInputs)
+            fanout(
+                terminalPublication,
+                statusSurface: surface,
+                statusItem: statusItem,
+                onboarding: onboarding,
+                settings: settings,
+                history: history
+            )
+            try assert(terminalPublication.state.row == .copiedOnly, "terminal publication state")
             surface.hideHUD(generation: 20)
             surface.teardown()
             statusBar.removeStatusItem(statusItem)
@@ -657,7 +680,16 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = context
             context.cgContext.scaleBy(x: scale, y: scale)
-            view.displayIgnoringOpacity(view.bounds, in: context)
+            let draw = {
+                NSColor.windowBackgroundColor.setFill()
+                view.bounds.fill()
+                view.displayIgnoringOpacity(view.bounds, in: context)
+            }
+            if let window = view.window {
+                window.effectiveAppearance.performAsCurrentDrawingAppearance(draw)
+            } else {
+                draw()
+            }
             context.flushGraphics()
             NSGraphicsContext.restoreGraphicsState()
             guard let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
@@ -686,6 +718,12 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 "targetDisappearance": "explicit-fallback-no-target",
                 "recordingHUDVisible": recordingHUDVisible,
                 "duplicateCommand": false,
+                "callbacks": [
+                    "onboarding": ["close": callbacks.onboardingClose, "commands": callbacks.onboardingCommands],
+                    "settings": ["close": callbacks.settingsClose, "commands": callbacks.settingsCommands],
+                    "history": ["close": callbacks.historyClose, "commands": callbacks.historyCommands]
+                ],
+                "terminalSession": "AppOperationGate owns dictation handle; Paste Again rejected while current",
                 "screenshots": screenshotPaths,
                 "clipboardContentsInEvidence": false,
                 "cleanup": "status item removed; popover dismissed; HUD shutdown; timers and publication fence released"
