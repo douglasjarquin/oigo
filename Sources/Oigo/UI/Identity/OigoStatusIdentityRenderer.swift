@@ -88,10 +88,15 @@ public final class OigoStatusIdentityRenderer {
     }
 
     private func environment(for button: NSButton) -> OigoStatusIdentityEnvironment {
-        let appearance = button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) ?? .aqua
+        let appearance = button.effectiveAppearance.bestMatch(from: [
+            .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua,
+            .aqua, .darkAqua
+        ]) ?? .aqua
         return OigoStatusIdentityEnvironment(
             appearanceName: appearance,
-            increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
+            increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+                || appearance == .accessibilityHighContrastAqua
+                || appearance == .accessibilityHighContrastDarkAqua,
             active: button.isEnabled,
             scaleFactor: button.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         )

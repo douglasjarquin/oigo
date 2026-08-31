@@ -4,6 +4,7 @@ import ApplicationServices
 import Darwin
 import Foundation
 import OigoCore
+import OigoIdentity
 import OigoCapture
 import OigoTranscription
 import OigoInsertion
@@ -808,10 +809,19 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func installApplicationMenu() {
         let mainMenu = NSMenu()
         let applicationMenu = NSMenu(title: "Oigo")
-        applicationMenu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
-        applicationMenu.addItem(NSMenuItem(title: "History", action: #selector(openHistory), keyEquivalent: ""))
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.setAccessibilityIdentifier(OigoStatusMenuIdentity.settingsIdentifier)
+        settingsItem.setAccessibilityLabel(OigoStatusMenuIdentity.accessibilityName(for: .openSettings))
+        applicationMenu.addItem(settingsItem)
+        let historyItem = NSMenuItem(title: "History", action: #selector(openHistory), keyEquivalent: "")
+        historyItem.setAccessibilityIdentifier(OigoStatusMenuIdentity.historyIdentifier)
+        historyItem.setAccessibilityLabel(OigoStatusMenuIdentity.accessibilityName(for: .openHistory))
+        applicationMenu.addItem(historyItem)
         applicationMenu.addItem(.separator())
-        applicationMenu.addItem(NSMenuItem(title: "Quit Oigo", action: #selector(quit), keyEquivalent: "q"))
+        let quitItem = NSMenuItem(title: "Quit Oigo", action: #selector(quit), keyEquivalent: "q")
+        quitItem.setAccessibilityIdentifier(OigoStatusMenuIdentity.quitIdentifier)
+        quitItem.setAccessibilityLabel(OigoStatusMenuIdentity.accessibilityName(for: .quit))
+        applicationMenu.addItem(quitItem)
         let applicationMenuItem = NSMenuItem()
         applicationMenuItem.submenu = applicationMenu
         mainMenu.addItem(applicationMenuItem)

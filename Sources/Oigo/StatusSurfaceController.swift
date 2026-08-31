@@ -36,10 +36,14 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
 
         utilityMenu.autoenablesItems = false
         utilityMenu.delegate = self
-        utilityMenu.addItem(commandItem(title: "History", action: #selector(openHistory)))
-        utilityMenu.addItem(commandItem(title: "Settings", action: #selector(openSettings)))
+        utilityMenu.addItem(commandItem(
+            title: "History", action: #selector(openHistory), command: .openHistory
+        ))
+        utilityMenu.addItem(commandItem(
+            title: "Settings", action: #selector(openSettings), command: .openSettings
+        ))
         utilityMenu.addItem(.separator())
-        utilityMenu.addItem(commandItem(title: "Quit", action: #selector(quit)))
+        utilityMenu.addItem(commandItem(title: "Quit", action: #selector(quit), command: .quit))
     }
 
     func install(statusItem: NSStatusItem) {
@@ -51,13 +55,23 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
         button.target = self
         button.action = #selector(handleStatusItemEvent)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        button.setAccessibilityElement(true)
+        button.setAccessibilityRole(.button)
+        button.setAccessibilityIdentifier(OigoStatusMenuIdentity.statusItemIdentifier)
+        button.setAccessibilityLabel("Oigo status menu")
     }
 
     func publish(_ state: OigoPresentationState, generation: UInt64) {
         guard generation > presentationGeneration else {
             return
         }
-        statusItem?.button?.toolTip = state.status.rawValue
+        guard let button = statusItem?.button else { return }
+        button.toolTip = state.status.rawValue
+        button.setAccessibilityValue(OigoStatusMenuIdentity.statusAccessibilityValue(state.status))
+        button.setAccessibilityHelp("Open Oigo status and actions")
+        for item in utilityMenu.items where item.isSeparatorItem == false {
+            item.isEnabled = state.availability.commandsEnabled
+        }
     }
 
     func publish(
@@ -209,10 +223,22 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
         )
     }
 
-    private func commandItem(title: String, action: Selector) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+    private func commandItem(
+        title: String,
+        action: Selector,
+        command: OigoPresentationAction
+    ) -> NSMenuItem {
+        let keyEquivalent: String = switch command {
+        case .openSettings: ","
+        case .quit: "q"
+        default: ""
+        }
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
         item.target = self
         item.isEnabled = true
+        item.setAccessibilityIdentifier(OigoStatusMenuIdentity.identifier(for: command))
+        item.setAccessibilityLabel(OigoStatusMenuIdentity.accessibilityName(for: command))
+        item.setAccessibilityHelp("Keyboard-owned Oigo command")
         return item
     }
 

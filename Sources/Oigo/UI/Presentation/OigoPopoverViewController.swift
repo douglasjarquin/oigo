@@ -107,7 +107,12 @@ public final class OigoPopoverViewController: NSViewController {
         }
         focusableControls.append(button)
         button.toolTip = action.disabledReason
-        button.setAccessibilityIdentifier("popover-primary-action")
+        button.setAccessibilityIdentifier(
+            action.action.map(OigoStatusMenuIdentity.identifier(for:)) ?? "oigo.status.primary-disabled"
+        )
+        button.setAccessibilityLabel(
+            action.action.map(OigoStatusMenuIdentity.accessibilityName(for:)) ?? action.title
+        )
         button.widthAnchor.constraint(equalToConstant: 308).isActive = true
         contentStack.addArrangedSubview(button)
     }
@@ -254,6 +259,8 @@ public final class OigoPopoverViewController: NSViewController {
         button.isBordered = false
         buttonActions[ObjectIdentifier(button)] = action
         focusableControls.append(button)
+        button.setAccessibilityIdentifier(OigoStatusMenuIdentity.identifier(for: action))
+        button.setAccessibilityLabel(OigoStatusMenuIdentity.accessibilityName(for: action))
         return button
     }
 
