@@ -55,8 +55,7 @@ target_info="$frontmost_app/Contents/Info.plist"
 target_bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$target_info" 2>/dev/null || true)"
 declared_field_id="$(/usr/libexec/PlistBuddy -c 'Print :OigoQATargetFieldIdentifier' "$target_info" 2>/dev/null || true)"
 if [[ -z "$target_bundle_id" ]]; then print -u2 "ERROR missing-target-bundle-identifier"; exit 1; fi
-target_field_available=true
-if [[ "$declared_field_id" != "$target_field_id" ]]; then target_field_available=false; fi
+if [[ "$declared_field_id" != "$target_field_id" ]]; then print -u2 "ERROR target-field-not-found"; exit 1; fi
 
 cleanup() {
     pgrep -f "$frontmost_app/Contents/MacOS/OigoQATarget" | while read -r process_id; do
@@ -71,10 +70,7 @@ ax_binary="$qa_root/session/task-1/oigo-qa-ax-driver"
 ax_output="$qa_root/session/task-1/preflight-ax.txt"
 window_server="false"
 ax_gate="inconclusive-window-server"
-if ! $target_field_available; then
-    ax_gate="inconclusive-target-field-unavailable"
-    print "INCONCLUSIVE target-field-unavailable" > "$ax_output"
-elif [[ "$deny" == window-server ]]; then
+if [[ "$deny" == window-server ]]; then
     ax_gate="inconclusive-window-server-injected"
     print "INCONCLUSIVE window-server" > "$ax_output"
 elif [[ "$deny" == accessibility ]]; then
@@ -92,28 +88,12 @@ elif pgrep -qx WindowServer; then
         exit 1
     fi
     ax_gate="ready"
-    if (( ax_status == 2 )); then
-        if rg -q '^INCONCLUSIVE target-field-unavailable$' "$ax_output"; then
-            ax_gate="inconclusive-target-field-unavailable"
-        else
-            ax_gate="inconclusive-accessibility"
-        fi
-    fi
+    if (( ax_status == 2 )); then ax_gate="inconclusive-accessibility"; fi
 else
     print "INCONCLUSIVE window-server" > "$ax_output"
 fi
 payload="$qa_root/session/task-1/preflight-payload.json"
 xcode_version="$(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -version | tr '\n' ';')"
-preflight_categories='[]'
-preflight_verdict="PREFLIGHT_READY"
-if [[ "$ax_gate" == inconclusive-target-field-unavailable ]]; then
-    preflight_categories='["target-field-unavailable"]'
-    preflight_verdict="PREFLIGHT_INCONCLUSIVE"
-fi
-jq -n --arg target_bundle_id "$target_bundle_id" --arg target_field_id "$target_field_id" --arg ax_gate "$ax_gate" --arg deny "$deny" --argjson categories "$preflight_categories" --argjson window_server "$window_server" --arg xcode_version "$xcode_version" --arg macos_version "$(sw_vers -productVersion)" --arg architecture "$(uname -m)" --arg app_path "<qa-root>/${app#$qa_root/}" '{bundle:"validated",app_path:$app_path,target_bundle_id:$target_bundle_id,target_field_id:$target_field_id,window_server:$window_server,ax_gate:$ax_gate,categories:$categories,failure_provider:(if $deny == "" then null else $deny end),xcode_version:$xcode_version,macos_version:$macos_version,architecture:$architecture,appearance:"system",home:"<qa-root>/home",cfix_home:"<qa-root>/home",screen_recording:"not-required-no-request",capture_policy:"oigo-owned-in-process-only",state_mutated:false}' > "$payload"
-"$source_root/Scripts/oigo-qa-write-evidence.sh" --run-marker "$qa_root/run.json" --output "$evidence_root/receipt.json" --verdict "$preflight_verdict" --source-sha "$app_source_sha" --app-sha "$app_sha" --scenario preflight --payload-file "$payload"
-if [[ "$preflight_verdict" == "PREFLIGHT_INCONCLUSIVE" ]]; then
-    print "INCONCLUSIVE target-field-unavailable"
-else
-    print "PREFLIGHT_READY ax=$ax_gate frontmost=$target_bundle_id"
-fi
+jq -n --arg target_bundle_id "$target_bundle_id" --arg target_field_id "$target_field_id" --arg ax_gate "$ax_gate" --arg deny "$deny" --argjson window_server "$window_server" --arg xcode_version "$xcode_version" --arg macos_version "$(sw_vers -productVersion)" --arg architecture "$(uname -m)" --arg app_path "<qa-root>/${app#$qa_root/}" '{bundle:"validated",app_path:$app_path,target_bundle_id:$target_bundle_id,target_field_id:$target_field_id,window_server:$window_server,ax_gate:$ax_gate,failure_provider:(if $deny == "" then null else $deny end),xcode_version:$xcode_version,macos_version:$macos_version,architecture:$architecture,appearance:"system",home:"<qa-root>/home",cfix_home:"<qa-root>/home",screen_recording:"not-required-no-request",capture_policy:"oigo-owned-in-process-only",state_mutated:false}' > "$payload"
+"$source_root/Scripts/oigo-qa-write-evidence.sh" --run-marker "$qa_root/run.json" --output "$evidence_root/receipt.json" --verdict "PREFLIGHT_READY" --source-sha "$app_source_sha" --app-sha "$app_sha" --scenario preflight --payload-file "$payload"
+print "PREFLIGHT_READY ax=$ax_gate frontmost=$target_bundle_id"

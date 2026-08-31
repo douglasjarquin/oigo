@@ -121,17 +121,12 @@ extension OigoIssue82ContractTests {
             "--target-field-id", "oigo.qa.target.text-field"
         ]
         let targetField = try runTask17Process(executable: "/bin/zsh", arguments: arguments, expectedStatus: nil, environment: environment)
-        guard targetField.status == 0,
-              targetField.output.contains("INCONCLUSIVE target-field-unavailable"),
-              !targetField.output.contains("ERROR target-field-not-found"),
+        guard targetField.status == 1,
+              targetField.output.contains("ERROR target-field-not-found"),
+              !targetField.output.contains("INCONCLUSIVE target-field-unavailable"),
               !FileManager.default.fileExists(atPath: qaRoot.appendingPathComponent("home/Library/Preferences").path),
-              let receiptData = FileManager.default.contents(atPath: evidence.appendingPathComponent("receipt.json").path),
-              let receipt = try JSONSerialization.jsonObject(with: receiptData) as? [String: Any],
-              receipt["verdict"] as? String == "PREFLIGHT_INCONCLUSIVE",
-              let details = receipt["details"] as? [String: Any],
-              details["categories"] as? [String] == ["target-field-unavailable"],
-              details["state_mutated"] as? Bool == false else {
-            throw ContractFailure(message: "missing target field was not a non-mutating explicit INCONCLUSIVE result")
+              !FileManager.default.fileExists(atPath: evidence.appendingPathComponent("receipt.json").path) else {
+            throw ContractFailure(message: "missing target field was not a non-mutating ERROR result")
         }
 
         let malformed = try runTask17Process(

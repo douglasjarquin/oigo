@@ -137,11 +137,7 @@ do {
         if match == nil { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
     } while match == nil && Date() < deadline
     guard let match else {
-        if arguments.fieldIdentifier != nil {
-            print("INCONCLUSIVE target-field-unavailable")
-            exit(2)
-        }
-        fputs("ERROR target-control-not-found\n", stderr)
+        fputs(arguments.fieldIdentifier == nil ? "ERROR target-control-not-found\n" : "ERROR target-field-not-found\n", stderr)
         exit(1)
     }
     if arguments.pressControl, AXUIElementPerformAction(match, kAXPressAction as CFString) != .success {
