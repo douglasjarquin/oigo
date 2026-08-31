@@ -27,16 +27,52 @@ done
 [[ "$contrast" == standard || "$contrast" == increased ]] || fail invalid-contrast
 source_root=$(cd "$source_root" 2>/dev/null && pwd) || fail invalid-source-root
 qa_root=$(cd "$qa_root" 2>/dev/null && pwd) || fail invalid-qa-root
-repo_root=$(cd "$qa_root/../.." 2>/dev/null && pwd) || fail invalid-qa-root
+marker_root=$qa_root
+while [[ "$marker_root" != "/" && ! -f "$marker_root/run.json" ]]; do
+    marker_root=$(dirname "$marker_root")
+done
+[[ -f "$marker_root/run.json" ]] || fail invalid-qa-root
+repo_root=$(python3 - "$marker_root/run.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    marker = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    print(Path(marker["repository"]).resolve())
+except (KeyError, OSError, json.JSONDecodeError):
+    raise SystemExit(1)
+PY
+) || fail invalid-qa-root
+[[ "$repo_root" == "$(git -C "$repo_root" rev-parse --show-toplevel 2>/dev/null)" ]] || fail invalid-qa-root
+attempt_dir=$(python3 - "$marker_root/run.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    marker = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    print(Path(marker["attempt_dir"]).resolve())
+except (KeyError, OSError, json.JSONDecodeError):
+    raise SystemExit(1)
+PY
+) || fail invalid-qa-root
+marker_root=$(cd "$marker_root" 2>/dev/null && pwd) || fail invalid-qa-root
+attempt_dir=$(cd "$attempt_dir" 2>/dev/null && pwd) || fail invalid-qa-root
+case "$qa_root" in
+    "$marker_root"|"$marker_root"/final/*) ;;
+    *) fail outside-qa-root ;;
+esac
 if [[ ! -d "$evidence_root" ]]; then
     ((read_only)) && fail missing-evidence-root
     mkdir -p "$evidence_root" || fail invalid-evidence-root
 fi
 evidence_root=$(cd "$evidence_root" 2>/dev/null && pwd) || fail invalid-evidence-root
 [[ -f "$source_root/Package.swift" ]] || fail invalid-source-root
-[[ -d "$qa_root/home" && -f "$qa_root/run.json" ]] || fail invalid-qa-root
+[[ -d "$marker_root/home" && -f "$marker_root/run.json" ]] || fail invalid-qa-root
 case "$evidence_root" in
-    "$repo_root/.omo/evidence/oigo-shortcut-transcription-design-fidelity/task-32"/*|"$repo_root/.omo/evidence/oigo-shortcut-transcription-design-fidelity/task-32") ;;
+    "$attempt_dir/task-32"/*|"$attempt_dir/task-32") ;;
+    "$attempt_dir/final"/*) ;;
     *) fail outside-evidence-root ;;
 esac
 

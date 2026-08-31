@@ -54,6 +54,11 @@ COMPLETION_EVENTS = {
     "task-provenance-corrected",
     "final-verifier-completed",
 }
+SUBSTANTIVE_COMPLETION_EVENTS = {
+    "task-complete",
+    "task-completed",
+    "final-verifier-completed",
+}
 
 
 class ValidationFailure(Exception):
@@ -128,7 +133,95 @@ def load_ledger(ledger: Path) -> list[dict[str, object]]:
     return entries
 
 
-def completion_for(task: str, entries: list[dict[str, object]]) -> dict[str, object]:
+def is_nonempty_string_list(value: object) -> bool:
+    return isinstance(value, list) and bool(value) and all(isinstance(item, str) and bool(item) for item in value)
+
+
+def valid_completion_shape(candidate: dict[str, object]) -> bool:
+    if not REQUIRED_LEDGER_FIELDS.issubset(candidate):
+        return False
+    session = candidate.get("worker_session", candidate.get("session_id"))
+    commands = candidate.get("commands")
+    adversarial = candidate.get("adversarial_classes")
+    cleanup = candidate.get("cleanup")
+    session_valid = isinstance(session, str) and bool(session)
+    commands_valid = is_nonempty_string_list(commands)
+    adversarial_valid = bool(adversarial) and (
+        isinstance(adversarial, dict)
+        or isinstance(adversarial, str)
+        or is_nonempty_string_list(adversarial)
+    )
+    cleanup_valid = (
+        isinstance(cleanup, str) and bool(cleanup)
+    ) or is_nonempty_string_list(cleanup)
+    return session_valid and commands_valid and adversarial_valid and cleanup_valid
+
+
+def validate_completion_provenance(
+    task: str,
+    completion: dict[str, object],
+    arguments: argparse.Namespace,
+) -> None:
+    task_sha = completion.get("task_sha")
+    integrated_sha = completion.get("integrated_sha")
+    source_sha = completion.get("source_sha")
+    app_source_sha = completion.get("app_source_sha")
+    required_shas = (task_sha, integrated_sha)
+    optional_shas = (source_sha, app_source_sha)
+    if not all(isinstance(value, str) and SOURCE_SHA.fullmatch(value) for value in required_shas):
+        raise ValidationFailure("task-sha-mismatch")
+    if any(value is not None and (not isinstance(value, str) or SOURCE_SHA.fullmatch(value) is None) for value in optional_shas):
+        raise ValidationFailure("task-sha-mismatch")
+    if source_sha is not None and app_source_sha is not None and source_sha != app_source_sha:
+        raise ValidationFailure("task-sha-mismatch")
+    for recorded_sha in (task_sha, integrated_sha, source_sha, app_source_sha):
+        if recorded_sha is None:
+            continue
+        ancestry = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", recorded_sha, arguments.audit_sha],
+            cwd=Path(__file__).resolve().parent.parent,
+            check=False,
+        )
+        if ancestry.returncode != 0:
+            raise ValidationFailure("task-sha-mismatch")
+    if task != "34":
+        ancestry = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", task_sha, arguments.implementation_sha],
+            cwd=Path(__file__).resolve().parent.parent,
+            check=False,
+        )
+        if ancestry.returncode != 0:
+            raise ValidationFailure("task-sha-mismatch")
+
+
+def reject_forged_task17(entries: list[dict[str, object]]) -> None:
+    for entry in entries:
+        if str(entry.get("task")) != "17" or "verdict_note" in entry:
+            continue
+        if str(entry.get("event")) in COMPLETION_EVENTS and str(entry.get("verdict")) in PASS_VERDICTS and str(entry.get("verdict")) != "inconclusive":
+            raise ValidationFailure("task17-native-pass-forged")
+
+
+def is_historical_custody_copy(entry: dict[str, object]) -> bool:
+    return entry.get("artifact_sha") == "verified-by-gate-reviewer" and str(entry.get("artifact", "")).startswith(".omo/evidence/")
+
+
+def reject_duplicate_substantive(task: str, candidates: list[dict[str, object]]) -> None:
+    substantive = [entry for entry in candidates if str(entry.get("event")) in SUBSTANTIVE_COMPLETION_EVENTS]
+    if len(substantive) <= 1:
+        return
+    authoritative = [entry for entry in substantive if not is_historical_custody_copy(entry)]
+    if len(authoritative) != 1:
+        raise ValidationFailure("duplicate-substantive-completion")
+    source = authoritative[0]
+    for copy in substantive:
+        if copy is source:
+            continue
+        if copy.get("task_sha") != source.get("task_sha") or copy.get("integrated_sha") != source.get("integrated_sha"):
+            raise ValidationFailure("duplicate-substantive-completion")
+
+
+def completion_for(task: str, entries: list[dict[str, object]], arguments: argparse.Namespace) -> dict[str, object]:
     candidates = [
         entry
         for entry in entries
@@ -137,35 +230,12 @@ def completion_for(task: str, entries: list[dict[str, object]]) -> dict[str, obj
         and str(entry.get("verdict")) in PASS_VERDICTS
         and "verdict_note" not in entry
     ]
-    valid = []
-    for candidate in candidates:
-        if not REQUIRED_LEDGER_FIELDS.issubset(candidate):
-            continue
-        session = candidate.get("worker_session", candidate.get("session_id"))
-        commands = candidate.get("commands")
-        adversarial = candidate.get("adversarial_classes")
-        cleanup = candidate.get("cleanup")
-        session_valid = isinstance(session, str) and bool(session)
-        commands_valid = isinstance(commands, list) and bool(commands)
-        if isinstance(adversarial, dict):
-            adversarial_valid = bool(adversarial)
-        elif isinstance(adversarial, list):
-            adversarial_valid = bool(adversarial) and all(isinstance(item, str) and bool(item) for item in adversarial)
-        elif isinstance(adversarial, str):
-            adversarial_valid = bool(adversarial)
-        else:
-            adversarial_valid = False
-        if isinstance(cleanup, str):
-            cleanup_valid = bool(cleanup)
-        elif isinstance(cleanup, list):
-            cleanup_valid = bool(cleanup) and all(isinstance(item, str) and bool(item) for item in cleanup)
-        else:
-            cleanup_valid = False
-        if session_valid and commands_valid and adversarial_valid and cleanup_valid:
-            valid.append(candidate)
+    reject_duplicate_substantive(task, candidates)
+    valid = [candidate for candidate in candidates if valid_completion_shape(candidate)]
     if not valid:
         raise ValidationFailure("missing-or-duplicate-completion")
     completion = valid[-1]
+    validate_completion_provenance(task, completion, arguments)
     if not REQUIRED_LEDGER_FIELDS.issubset(completion):
         raise ValidationFailure("incomplete-completion-receipt")
     session = completion.get("worker_session", completion.get("session_id"))
@@ -174,12 +244,12 @@ def completion_for(task: str, entries: list[dict[str, object]]) -> dict[str, obj
     commands = completion.get("commands")
     adversarial = completion.get("adversarial_classes")
     cleanup = completion.get("cleanup")
-    if not isinstance(commands, list) or not commands:
+    if not is_nonempty_string_list(commands):
         raise ValidationFailure("missing-command-receipt")
     if isinstance(adversarial, dict):
         adversarial_valid = bool(adversarial)
-    elif isinstance(adversarial, list):
-        adversarial_valid = bool(adversarial) and all(isinstance(item, str) and bool(item) for item in adversarial)
+    elif is_nonempty_string_list(adversarial):
+        adversarial_valid = True
     elif isinstance(adversarial, str):
         adversarial_valid = bool(adversarial)
     else:
@@ -188,8 +258,8 @@ def completion_for(task: str, entries: list[dict[str, object]]) -> dict[str, obj
         raise ValidationFailure("missing-adversarial-receipt")
     if isinstance(cleanup, str):
         cleanup_valid = bool(cleanup)
-    elif isinstance(cleanup, list):
-        cleanup_valid = bool(cleanup) and all(isinstance(item, str) and bool(item) for item in cleanup)
+    elif is_nonempty_string_list(cleanup):
+        cleanup_valid = True
     else:
         cleanup_valid = False
     if not cleanup_valid:
@@ -276,6 +346,7 @@ def validate() -> dict[str, object]:
     validate_provenance(arguments)
     rows = load_rows(arguments.plan)
     entries = load_ledger(arguments.ledger)
+    reject_forged_task17(entries)
     pending = set(arguments.allow_task_pending)
     if pending - {"34"}:
         raise ValidationFailure("invalid-pending-task")
@@ -291,14 +362,14 @@ def validate() -> dict[str, object]:
                 except (OSError, json.JSONDecodeError):
                     pass
             raise ValidationFailure("unchecked-implementation-row")
-        completion_for(task, entries)
+        completion_for(task, entries, arguments)
 
     allow_unchecked = arguments.implementation_only or arguments.allow_final_wave_unchecked
     if arguments.final_seal:
         for task in FINAL_TASKS:
             if not rows[task][0]:
                 raise ValidationFailure("unchecked-final-verifier-row")
-            completion_for(task, entries)
+            completion_for(task, entries, arguments)
     elif not allow_unchecked and any(not rows[task][0] for task in FINAL_TASKS):
         raise ValidationFailure("unchecked-final-verifier-row")
 
