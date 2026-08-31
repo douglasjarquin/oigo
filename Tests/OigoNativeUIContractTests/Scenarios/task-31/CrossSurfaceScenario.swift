@@ -142,7 +142,14 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
             "Sources/Oigo/UI/Presentation/OigoPopoverCommand.swift",
             "Sources/Oigo/UI/Presentation/OigoPopoverPresentation.swift",
             "Sources/Oigo/UI/Presentation/OigoPopoverViewController.swift",
-            "Sources/Oigo/StatusSurfaceController.swift"
+            "Sources/Oigo/StatusSurfaceController.swift",
+            "Sources/Oigo/OigoUtilityWindow.swift",
+            "Sources/Oigo/Task8ControlObservation.swift",
+            "Sources/Oigo/OnboardingShellMetrics.swift",
+            "Sources/Oigo/OnboardingShellLayout.swift",
+            "Sources/Oigo/OnboardingWindowController.swift",
+            "Sources/Oigo/SettingsWindowController.swift",
+            "Sources/Oigo/HistoryWindowController.swift"
         ].map { repositoryRoot.appendingPathComponent($0).path }
         let modules = repositoryRoot.appendingPathComponent(".build/arm64-apple-macosx/debug/Modules").path
         _ = try runProcess(
@@ -163,7 +170,7 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
     }
 
     private static func dependencyObjects(_ repositoryRoot: URL) -> [String] {
-        ["MacUtilityUI.build", "OigoCore.build"].flatMap { directory in
+        ["MacUtilityUI.build", "OigoCore.build", "OigoHotKey.build"].flatMap { directory in
             let root = repositoryRoot.appendingPathComponent(".build/arm64-apple-macosx/debug/" + directory)
             return (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil))?
                 .filter { $0.pathExtension == "o" }
@@ -210,18 +217,134 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
 
     @MainActor
     final class Driver {
+        final class CallbackState {
+            var onboardingComplete = 0
+            var onboardingClose = 0
+            var settingsClose = 0
+            var historyClose = 0
+            var historyCommands = 0
+            var settingsCommands = 0
+            var onboardingCommands = 0
+        }
+
         let fixture: Fixture
         let evidenceRoot: URL
         let appearanceName: String
         let contrast: String
         var commandCount = 0
         var commands: [String] = []
+        let callbacks = CallbackState()
 
         init(fixture: Fixture, evidenceRoot: URL, appearanceName: String, contrast: String) {
             self.fixture = fixture
             self.evidenceRoot = evidenceRoot
             self.appearanceName = appearanceName
             self.contrast = contrast
+        }
+
+        func makeOnboarding(shortcut: ToggleShortcut) -> OnboardingWindowController {
+            OnboardingWindowController(
+                support: .init(isSupported: true, reason: "supported"),
+                initialStep: .system,
+                processingMode: .clean,
+                globalShortcut: shortcut,
+                inputDevices: [],
+                selectedInput: .systemDefault,
+                selectedInputChannel: 0,
+                committedLocaleIdentifier: "en-US",
+                microphoneState: .granted,
+                accessibilityState: .granted,
+                storageHealth: .ready(.init(
+                    recoveredSessionCount: 0,
+                    historyEntryCount: 0,
+                    malformedSessionCount: 0
+                )),
+                loadSupportedLanguages: { [weak callbacks] in
+                    _ = callbacks
+                    return ["en-US"]
+                },
+                checkSpeechAssets: { _ in .ready },
+                saveLanguage: { [callbacks] _ in callbacks.onboardingCommands += 1 },
+                saveStep: { [callbacks] _, _ in callbacks.onboardingCommands += 1 },
+                saveInputSelection: { [callbacks] _, _ in callbacks.onboardingCommands += 1 },
+                requestMicrophone: { .granted },
+                openMicrophoneSettings: { [callbacks] in callbacks.onboardingCommands += 1 },
+                registrationStatus: { .inactive("setup") },
+                registrationError: { nil },
+                validateShortcut: { _ in .available },
+                saveShortcut: { _ in .available },
+                requestAccessibility: { .granted },
+                openAccessibilitySettings: { [callbacks] in callbacks.onboardingCommands += 1 },
+                retryStorage: { [callbacks] in callbacks.onboardingCommands += 1 },
+                openDataLocation: { [callbacks] in callbacks.onboardingCommands += 1 },
+                startSourceProbe: { [callbacks] _, _, _ in callbacks.onboardingCommands += 1 },
+                stopSourceProbe: { [callbacks] in callbacks.onboardingCommands += 1 },
+                startTest: { [callbacks] _ in callbacks.onboardingCommands += 1 },
+                stopTest: { [callbacks] in callbacks.onboardingCommands += 1 },
+                cancelTest: { [callbacks] in callbacks.onboardingCommands += 1 },
+                openHistory: { [callbacks] in callbacks.onboardingCommands += 1 },
+                onComplete: { [callbacks] in callbacks.onboardingComplete += 1 },
+                onClose: { [callbacks] in callbacks.onboardingClose += 1 }
+            )
+        }
+
+        func makeSettings(shortcut: ToggleShortcut) -> SettingsWindowController {
+            SettingsWindowController(
+                settings: .default.with(globalShortcut: shortcut, localeIdentifier: "en-US"),
+                inputDevices: [],
+                supportedLocales: ["en-US"],
+                loadSupportedLocales: { [callbacks] in callbacks.settingsCommands += 1; return ["en-US"] },
+                microphoneState: .granted,
+                accessibilityState: .granted,
+                storageHealth: .ready(.init(
+                    recoveredSessionCount: 0,
+                    historyEntryCount: 0,
+                    malformedSessionCount: 0
+                )),
+                launchAtLoginStatus: .disabled,
+                launchAtLoginStatusProvider: { .disabled },
+                openLoginItemsSettings: { [callbacks] in callbacks.settingsCommands += 1 },
+                registrationStatus: { .active(shortcut, generation: 1) },
+                registrationError: { nil },
+                validateShortcut: { _ in .available },
+                saveShortcut: { _ in .available },
+                save: { _ in nil },
+                checkSpeechAssets: { _ in .ready },
+                refreshPermissions: { (.granted, .granted) },
+                openMicrophoneSettings: { [callbacks] in callbacks.settingsCommands += 1 },
+                openAccessibilitySettings: { [callbacks] in callbacks.settingsCommands += 1 },
+                rerunOnboarding: { [callbacks] in callbacks.settingsCommands += 1 },
+                openHistory: { [callbacks] in callbacks.settingsCommands += 1 },
+                openDataFolder: { [callbacks] in callbacks.settingsCommands += 1 },
+                retryStorage: { [callbacks] in callbacks.settingsCommands += 1 },
+                deleteAllHistory: { [callbacks] in callbacks.settingsCommands += 1 },
+                exportDiagnostics: { Data("cross-surface".utf8) },
+                dictionaryDocument: .empty,
+                saveDictionary: { _ in nil },
+                previewDictionary: { $0 },
+                addStarterTerms: { (.empty, nil) },
+                isPresented: { true },
+                onClose: { [callbacks] in callbacks.settingsClose += 1 }
+            )
+        }
+
+        func makeHistory() -> HistoryWindowController {
+            HistoryWindowController(
+                loadTranscript: { _, _, completion in completion(.success("metadata")) },
+                copyRawTranscript: { [callbacks] _ in callbacks.historyCommands += 1 },
+                copyCleanTranscript: { [callbacks] _ in callbacks.historyCommands += 1 },
+                pasteAgain: { [callbacks] _ in callbacks.historyCommands += 1 },
+                pasteCleanAgain: { [callbacks] _ in callbacks.historyCommands += 1 },
+                cleanAgain: { [callbacks] _ in callbacks.historyCommands += 1 },
+                reapplyDictionary: { [callbacks] _ in callbacks.historyCommands += 1 },
+                playRecording: { [callbacks] _ in callbacks.historyCommands += 1 },
+                retryTranscription: { [callbacks] _ in callbacks.historyCommands += 1 },
+                revealRecording: { [callbacks] _ in callbacks.historyCommands += 1 },
+                deleteSession: { [callbacks] _ in callbacks.historyCommands += 1 },
+                runIdleMaintenance: { [callbacks] in callbacks.historyCommands += 1 },
+                loadMore: { [callbacks] in callbacks.historyCommands += 1 },
+                onClose: { [callbacks] in callbacks.historyClose += 1 }
+            )
         }
 
         func assert(_ condition: @autoclosure () -> Bool, _ message: String) throws {
@@ -273,6 +396,36 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 shutdown: .init(status: .inactive, fencedOperationCount: 0),
                 presentationDate: Date(timeIntervalSince1970: 1_700_000_120)
             )
+        }
+
+        func fanout(
+            _ publication: OigoPresentationPublication,
+            statusSurface: StatusSurfaceController,
+            statusItem: NSStatusItem,
+            onboarding: OnboardingWindowController,
+            settings: SettingsWindowController,
+            history: HistoryWindowController
+        ) {
+            statusSurface.publish(publication.state, generation: publication.generation)
+            statusSurface.publish(
+                publication.state,
+                inputs: publication.inputs,
+                inputOptions: [],
+                generation: publication.generation
+            )
+            settings.setAppliesToNextDictation(
+                publication.adapters.settingsApplyToNextDictation
+            )
+            let availability = AppCommandAvailability.evaluate(
+                coordinatorState: .idle,
+                occupiedKind: nil,
+                acceptingCommands: true,
+                setupComplete: true,
+                storageReady: true
+            )
+            history.setCommandAvailability(availability)
+            onboarding.setCommandAvailability(availability)
+            statusItem.button?.toolTip = publication.state.status.rawValue
         }
 
         func run() throws {
@@ -329,11 +482,46 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 }
             }
             surface.install(statusItem: statusItem)
-            surface.publish(readyPublication.state, generation: 10)
-            surface.publish(readyPublication.state, inputs: readyInputs, inputOptions: [], generation: 10)
             guard let button = statusItem.button else { throw DriverError.assertion("status button") }
             try assert(button.accessibilityIdentifier() == OigoStatusMenuIdentity.statusItemIdentifier, "status identity")
+            let onboarding = makeOnboarding(shortcut: shortcut)
+            let settings = makeSettings(shortcut: shortcut)
+            let history = makeHistory()
+            fanout(
+                readyPublication,
+                statusSurface: surface,
+                statusItem: statusItem,
+                onboarding: onboarding,
+                settings: settings,
+                history: history
+            )
             try assert((button.accessibilityValue() as? String) == "Ready", "status committed state")
+            history.reload(entries: [])
+            onboarding.showAndFocus()
+            settings.showAndFocus()
+            history.showAndFocus()
+            guard onboarding.window?.title == "Set Up Oigo",
+                  settings.window?.identifier?.rawValue == "com.oigo.settings.window",
+                  history.window?.identifier?.rawValue == "com.oigo.history.window" else {
+                throw DriverError.assertion("production window adapters")
+            }
+            let surfaceScreenshots = [
+                captureView(onboarding.window?.contentView, name: "onboarding-\(appearanceName)-\(contrast).png"),
+                captureView(settings.window?.contentView, name: "settings-\(appearanceName)-\(contrast).png"),
+                captureView(history.window?.contentView, name: "history-\(appearanceName)-\(contrast).png")
+            ].compactMap { $0 }
+            onboarding.window?.close()
+            settings.window?.close()
+            history.window?.close()
+            try assert(callbacks.onboardingClose == 1 && callbacks.settingsClose == 1 && callbacks.historyClose == 1, "surface close callbacks")
+            onboarding.showAndFocus()
+            settings.showAndFocus()
+            history.showAndFocus()
+            try assert(onboarding.window?.isVisible == true && settings.window?.isVisible == true && history.window?.isVisible == true, "surface reopen")
+            onboarding.window?.close()
+            settings.window?.close()
+            history.window?.close()
+            try assert(callbacks.onboardingClose == 2 && callbacks.settingsClose == 2 && callbacks.historyClose == 2, "surface reopen cleanup")
 
             let recordingInputs = makeInputs(
                 generation: 20,
@@ -341,7 +529,14 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 operation: .init(generation: 20, kind: .dictation)
             )
             let recordingPublication = OigoPresentationPublication(inputs: recordingInputs)
-            surface.publish(recordingPublication.state, inputs: recordingInputs, inputOptions: [], generation: 20)
+            fanout(
+                recordingPublication,
+                statusSurface: surface,
+                statusItem: statusItem,
+                onboarding: onboarding,
+                settings: settings,
+                history: history
+            )
             let target = HUDTargetGeometrySnapshot(
                 generation: 20,
                 captureToken: UUID(),
@@ -400,7 +595,7 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 panelSize: .init(width: 224, height: 42)
             )) == nil, "target disappearance fallback is explicit")
 
-            let screenshotPaths = [
+            let screenshotPaths = surfaceScreenshots + [
                 capturePopover(readyInputs: readyInputs, publication: readyPublication),
                 hudCaptured ? hudScreenshot.path : "INCONCLUSIVE:WindowServer-render-capture-unavailable"
             ]
@@ -438,6 +633,40 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
             } catch {
                 return "INCONCLUSIVE:WindowServer-popover-write-unavailable"
             }
+        }
+
+        func captureView(_ view: NSView?, name: String) -> String? {
+            guard let view else { return nil }
+            view.layoutSubtreeIfNeeded()
+            let scale = max(1, view.window?.backingScaleFactor ?? 2)
+            guard view.bounds.width > 0, view.bounds.height > 0,
+                  let bitmap = NSBitmapImageRep(
+                      bitmapDataPlanes: nil,
+                      pixelsWide: Int(view.bounds.width * scale),
+                      pixelsHigh: Int(view.bounds.height * scale),
+                      bitsPerSample: 8,
+                      samplesPerPixel: 4,
+                      hasAlpha: true,
+                      isPlanar: false,
+                      colorSpaceName: .deviceRGB,
+                      bitmapFormat: [],
+                      bytesPerRow: 0,
+                      bitsPerPixel: 0
+                  ),
+                  let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return nil }
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            context.cgContext.scaleBy(x: scale, y: scale)
+            view.displayIgnoringOpacity(view.bounds, in: context)
+            context.flushGraphics()
+            NSGraphicsContext.restoreGraphicsState()
+            guard let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
+            let url = evidenceRoot.appendingPathComponent("screenshots/" + name)
+            do {
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try png.write(to: url, options: .atomic)
+                return url.path
+            } catch { return nil }
         }
 
         func writeReceipt(screenshotPaths: [String], recordingHUDVisible: Bool, shortcut: String) throws {
