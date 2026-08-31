@@ -280,6 +280,10 @@ public final class DictationCoordinator {
     private let timeoutPolicy: TranscriptionTimeoutPolicy
     private let operationRegistry = OperationTaskRegistry()
     private var transcriptionReaperTask: Task<Void, Never>?
+    private var transcriptionCancellationTask: (
+        operationID: UUID,
+        task: Task<TranscriptionResult?, any Error>
+    )?
 
     public private(set) var transitionHistory: [DictationTransitionRecord] = []
     public private(set) var currentSession: DictationSession?
@@ -562,6 +566,7 @@ public final class DictationCoordinator {
             activeCapture = capture
             activeTranscription = transcription
             activeOperationID = operationID
+            transcriptionCancellationTask = nil
             acceptsCallbacks = true
             sessionStore = store
             currentSession = persistedSession
@@ -645,7 +650,7 @@ public final class DictationCoordinator {
                 || [.cancelled, .interrupted].contains(state)
             let cancellationRequested = Task.isCancelled
             capture.cancel()
-            await requestCancellation(
+            _ = try? await requestCancellation(
                 transcription,
                 operationID: operationID,
                 stage: .cancellation
@@ -728,6 +733,7 @@ public final class DictationCoordinator {
         currentSession = retryingSession
         let operationID = UUID()
         activeOperationID = operationID
+        transcriptionCancellationTask = nil
         acceptsCallbacks = true
         activeTranscription = transcription
         sessionStore = store
@@ -762,7 +768,7 @@ public final class DictationCoordinator {
             return completedSession
         } catch {
             let reason = Self.failureReason(for: error)
-            await requestCancellation(
+            _ = try? await requestCancellation(
                 transcription,
                 operationID: operationID,
                 stage: .cancellation
@@ -911,7 +917,7 @@ public final class DictationCoordinator {
                 }
             }, onCancel: {
                 Task { @MainActor [weak self] in
-                    await self?.requestCancellation(
+                    _ = try? await self?.requestCancellation(
                         transcription,
                         operationID: operationID,
                         stage: .cancellation
@@ -934,7 +940,7 @@ public final class DictationCoordinator {
             diagnostics.record("audio capture and transcription stopped")
             return completedSession
         } catch {
-            await requestCancellation(
+            _ = try? await requestCancellation(
                 transcription,
                 operationID: operationID,
                 stage: .cancellation
@@ -1187,14 +1193,11 @@ public final class DictationCoordinator {
            let activeTranscription,
            let operationID = activeOperationID {
             pendingTranscriptionTerminalState = isCancellation ? .cancelled : .interrupted
-            _ = try? await BoundedOperation.run(
+            _ = try? await requestCancellation(
+                activeTranscription,
                 operationID: operationID,
-                stage: .cancellation,
-                timeout: timeoutPolicy.budget(for: .cancellation),
-                registry: operationRegistry
-            ) {
-                try await activeTranscription.cancel()
-            }
+                stage: .cancellation
+            )
             return
         }
         if activeTranscription != nil {
@@ -1304,14 +1307,11 @@ public final class DictationCoordinator {
         let result: TranscriptionResult?
         do {
             let stage: TranscriptionStage = state == .interrupted ? .interruption : .cancellation
-            result = try await BoundedOperation.run(
+            result = try await requestCancellation(
+                transcription,
                 operationID: operationID,
-                stage: stage,
-                timeout: timeoutPolicy.budget(for: stage),
-                registry: operationRegistry
-            ) {
-                try await transcription.cancel()
-            }
+                stage: stage
+            )
         } catch {
             let failureReason = Self.failureReason(for: error)
             let timedOut = error is any TranscriptionTimeoutEvidence
@@ -1504,14 +1504,11 @@ public final class DictationCoordinator {
         capture.cancel()
         let result: TranscriptionResult?
         do {
-            result = try await BoundedOperation.run(
+            result = try await requestCancellation(
+                transcription,
                 operationID: operationID,
-                stage: .cancellation,
-                timeout: timeoutPolicy.budget(for: .cancellation),
-                registry: operationRegistry
-            ) {
-                try await transcription.cancel()
-            }
+                stage: .cancellation
+            )
         } catch {
             lastFailureReason = "speech capture failure cancellation timed out"
             lastFailureCode = .transcriptionTimedOut
@@ -1772,6 +1769,7 @@ public final class DictationCoordinator {
             activeTranscription = nil
             sessionStore = nil
             activeOperationID = nil
+            transcriptionCancellationTask = nil
             diagnostics.mark(.resourcesReleased)
         }
     }
@@ -1780,18 +1778,26 @@ public final class DictationCoordinator {
         _ transcription: TranscriptionController,
         operationID: UUID,
         stage: TranscriptionStage
-    ) async {
+    ) async throws -> TranscriptionResult? {
         guard activeOperationID == operationID else {
-            return
+            return nil
         }
-        _ = try? await BoundedOperation.run(
-            operationID: operationID,
-            stage: stage,
-            timeout: timeoutPolicy.budget(for: stage),
-            registry: operationRegistry
-        ) {
-            _ = try await transcription.cancel()
+        if let cancellation = transcriptionCancellationTask,
+           cancellation.operationID == operationID {
+            return try await cancellation.task.value
         }
+        let cancellation = Task { @MainActor [timeoutPolicy, operationRegistry] in
+            try await BoundedOperation.run(
+                operationID: operationID,
+                stage: stage,
+                timeout: timeoutPolicy.budget(for: stage),
+                registry: operationRegistry
+            ) {
+                try await transcription.cancel()
+            }
+        }
+        transcriptionCancellationTask = (operationID, cancellation)
+        return try await cancellation.value
     }
 
     private func reapReleasedTranscription() {
@@ -1805,6 +1811,7 @@ public final class DictationCoordinator {
         activeTranscription = nil
         sessionStore = nil
         activeOperationID = nil
+        transcriptionCancellationTask = nil
         acceptsCallbacks = false
         diagnostics.mark(.resourcesReleased)
     }
@@ -1988,14 +1995,11 @@ public final class DictationCoordinator {
             let terminalReason: String
             let terminalFailureCode: DictationFailureCode
             do {
-                result = try await BoundedOperation.run(
+                result = try await requestCancellation(
+                    activeTranscription,
                     operationID: operationID,
-                    stage: .shutdown,
-                    timeout: timeoutPolicy.budget(for: .shutdown),
-                    registry: operationRegistry
-                ) {
-                    try await activeTranscription.cancel()
-                }
+                    stage: .shutdown
+                )
                 terminalState = .interrupted
                 terminalEvent = .interrupt
                 terminalReason = "application shutdown"

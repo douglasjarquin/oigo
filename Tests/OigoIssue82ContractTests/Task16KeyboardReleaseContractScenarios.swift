@@ -54,7 +54,8 @@ enum Task16KeyboardReleaseContracts {
         )
         guard rows["release-before-ready"]?.transcriptionCancelCount == 1,
               rows["release-during-recording"]?.transcriptionFinishCount == 1,
-              rows["release-during-recording"]?.captureStopCount == 1 else {
+              rows["release-during-recording"]?.captureStopCount == 1,
+              rows["app-close-during-terminalization"]?.transcriptionCancelCount == 1 else {
             throw ContractFailure(message: "release was not idempotent across startup and recording")
         }
         print("COUNTS: release_cases=4 terminalization=1 resources=0 duplicate_stop=0")
