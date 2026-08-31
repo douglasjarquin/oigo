@@ -31,7 +31,7 @@ evidence_tasks=(global-shortcut-baseline task-1 keyboard-release-lifecycle task-
 scenario="${values[scenario]}"
 [[ -n "${suites[$scenario]-}" ]] || { print -u2 "ERROR unsupported-scenario"; exit 64; }
 if [[ "$scenario" == failure ]]; then
-    allowed_cases=(microphone-denied speech-unavailable input-unavailable assets-unavailable audio-start-failure accessibility-denied window-server-unavailable)
+    allowed_cases=(microphone-unavailable microphone-denied speech-unavailable input-unavailable assets-unavailable startup-release audio-start-failure stale-generation secure-field accessibility-denied window-server-unavailable)
     [[ " ${allowed_cases[*]} " == *" ${values[case]-} "* ]] || { print -u2 "ERROR unsupported-case"; exit 64; }
 elif [[ "$scenario" == keyboard-release-lifecycle ]]; then
     allowed_cases=(release-before-ready release-during-recording interrupt-during-audio app-close-during-terminalization)
@@ -41,7 +41,13 @@ elif [[ -n "${values[case]-}" ]]; then
     exit 64
 fi
 
-if [[ "$scenario" != keyboard-release-lifecycle ]]; then
+run_global_shortcut=false
+if [[ "$scenario" == global-shortcut ]]; then
+    run_global_shortcut=true
+elif [[ "$scenario" == all && -n "${values[frontmost-app]-}" ]]; then
+    run_global_shortcut=true
+fi
+if [[ "$scenario" != keyboard-release-lifecycle && "$scenario" != failure && "$run_global_shortcut" == true ]]; then
     required_cross_app=(frontmost-app target-field-id configure-key-code configure-modifiers event-key-code event-modifiers)
     for key in $required_cross_app; do [[ -n "${values[$key]-}" ]] || { print -u2 "ERROR missing-argument"; exit 64; }; done
     for key in configure-key-code event-key-code; do
@@ -51,7 +57,7 @@ if [[ "$scenario" != keyboard-release-lifecycle ]]; then
         [[ "${values[$key]}" =~ '^(command|shift|option|control|function)(,(command|shift|option|control|function))*$' ]] || { print -u2 "ERROR invalid-modifiers"; exit 64; }
     done
 fi
-if [[ "$scenario" == global-shortcut ]]; then
+if [[ "$scenario" == global-shortcut || ("$scenario" == all && "$run_global_shortcut" == true) ]]; then
     $relaunch || { print -u2 "ERROR relaunch-required"; exit 64; }
     [[ "${values[configure-key-code]}" == 0 && "${values[event-key-code]}" == 0 &&
        "${values[configure-modifiers]}" == command && "${values[event-modifiers]}" == command ]] || {
@@ -76,10 +82,53 @@ source_root="${values[source-root]:A}"
 qa_root="${values[qa-root]:A}"
 evidence_root="${values[evidence-root]:A}"
 fixture_root="$qa_root/${fixtures[$scenario]}"
-[[ -z "${values[fixture-root]-}" || "${values[fixture-root]:A}" == "$fixture_root" ]] || { print -u2 "ERROR fixture-root-mismatch"; exit 1; }
+if [[ "$scenario" == failure && -n "${values[fixture-root]-}" ]]; then
+    supplied_fixture_root="${values[fixture-root]:A}"
+    [[ "$supplied_fixture_root" == "$fixture_root" || "$supplied_fixture_root" == "$fixture_root/${values[case]}" ]] || {
+        print -u2 "ERROR fixture-root-mismatch"
+        exit 1
+    }
+    fixture_root="$supplied_fixture_root"
+else
+    [[ -z "${values[fixture-root]-}" || "${values[fixture-root]:A}" == "$fixture_root" ]] || { print -u2 "ERROR fixture-root-mismatch"; exit 1; }
+fi
 attempt_dir="$(jq -r .attempt_dir "$qa_root/run.json")"
 [[ "$evidence_root" == "$attempt_dir/${evidence_tasks[$scenario]}" || "$evidence_root" == "$attempt_dir/${evidence_tasks[$scenario]}"/* ]] || { print -u2 "ERROR evidence-root-mismatch"; exit 1; }
 mkdir -p "$fixture_root" "$evidence_root" "$qa_root/session/native-qa"
+
+source_root="${source_root:A}"
+qa_root="${qa_root:A}"
+app="${values[app]:A}"
+[[ -d "$source_root" && "$source_root" == "$qa_root/source-${values[app-source-sha]}" ]] || { print -u2 "ERROR source-sha-mismatch"; exit 1; }
+[[ -d "$app" && "${app:t}" == Oigo.app && "$app" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-bundle"; exit 1; }
+[[ "${values[app-source-sha]}" =~ '^[0-9a-f]{40}$' && "${values[app-sha]}" =~ '^[0-9a-f]{64}$' ]] || { print -u2 "ERROR invalid-sha"; exit 1; }
+actual_sha="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$app" | sed -n 's/^APP_BUNDLE_SHA=sha256://p')"
+[[ "$actual_sha" == "${values[app-sha]}" ]] || { print -u2 "ERROR app-sha-mismatch"; exit 1; }
+
+if [[ "$scenario" == failure ]]; then
+    failure_payload="$qa_root/session/native-qa/failure-payload.json"
+    jq -n --arg suite "${suites[$scenario]}" --arg fixture "$fixture_root" \
+        --arg failure_case "${values[case]}" --arg provider "${values[deny]-}" \
+        '{suite:$suite,fixture:$fixture,failure_case:$failure_case,failure_provider:(if $provider == "" then null else $provider end),outcome:"INCONCLUSIVE",category:$failure_case,native_pass:false,state_mutated:false,shared_system_mutated:false,physical_edges:[],checkpoint_execution:"not-run-by-injected-provider",recovery:"no-PASS-emitted"}' > "$failure_payload"
+    "$source_root/Scripts/oigo-qa-write-evidence.sh" --run-marker "$qa_root/run.json" \
+        --output "$evidence_root/native-qa-receipt.json" --verdict INCONCLUSIVE \
+        --source-sha "${values[app-source-sha]}" --app-sha "${values[app-sha]}" \
+        --scenario "$scenario" --payload-file "$failure_payload"
+    print "INCONCLUSIVE ${values[case]}"
+    exit 0
+fi
+
+if [[ "$scenario" == all && "$run_global_shortcut" == false ]]; then
+    aggregate_payload="$qa_root/session/native-qa/aggregate-payload.json"
+    jq -n --arg suite "${suites[$scenario]}" --arg fixture "$fixture_root" \
+        '{suite:$suite,fixture:$fixture,category:"native-target-not-supplied",outcome:"INCONCLUSIVE",blocking_rows:["H82-01","H82-02","H82-09"],native_pass:false,state_mutated:false,shared_system_mutated:false,aggregate:"bounded-acceptance-only"}' > "$aggregate_payload"
+    "$source_root/Scripts/oigo-qa-write-evidence.sh" --run-marker "$qa_root/run.json" \
+        --output "$evidence_root/native-qa-receipt.json" --verdict INCONCLUSIVE \
+        --source-sha "${values[app-source-sha]}" --app-sha "${values[app-sha]}" \
+        --scenario "$scenario" --payload-file "$aggregate_payload"
+    print "INCONCLUSIVE native-target-not-supplied"
+    exit 0
+fi
 
 if [[ "$scenario" == keyboard-release-lifecycle ]]; then
     app="${values[app]:A}"

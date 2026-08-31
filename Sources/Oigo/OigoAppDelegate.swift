@@ -83,7 +83,7 @@ private struct OigoQALaunchConfiguration {
     }
 
     func record(_ checkpoint: String, details: [String: Any] = [:]) {
-        guard scenario == "global-shortcut" else { return }
+        guard scenario == "global-shortcut" || scenario == "all" else { return }
         let output = qaRoot.appendingPathComponent("session/native-qa/oigo-checkpoints.jsonl")
         do {
             try FileManager.default.createDirectory(
