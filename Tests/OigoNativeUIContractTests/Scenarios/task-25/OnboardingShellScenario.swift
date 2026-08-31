@@ -302,15 +302,57 @@ final class OnboardingShellScenario: NativeUIContractScenario {
                       failureClose.accessibilityIdentifier() == fixture.controls[2] else { exit(11) }
                 failureWindow.close()
                 guard !failureWindow.isVisible,
-                      factory.settingsStore.load().globalShortcut == committedSettings.globalShortcut,
-                      factory.settingsStore.load().localeIdentifier == committedSettings.localeIdentifier else { exit(11) }
+                      factory.settingsStore.load() == committedSettings else { exit(11) }
                 failureController.showAndFocus()
                 guard failureWindow.isVisible else { exit(11) }
                 failureWindow.close()
             }
             guard factory.closeCallbackCount >= failureControllers.count,
-                  factory.settingsStore.load().globalShortcut == committedSettings.globalShortcut,
-                  factory.settingsStore.load().localeIdentifier == committedSettings.localeIdentifier else { exit(11) }
+                  factory.settingsStore.load() == committedSettings else { exit(11) }
+
+            let keyboardController = factory.makeController(initialStep: .system)
+            keyboardController.showAndFocus()
+            guard let keyboardWindow = keyboardController.window,
+                  let keyboardEvent = NSEvent.keyEvent(
+                      with: .keyDown,
+                      location: .zero,
+                      modifierFlags: [],
+                      timestamp: 0,
+                      windowNumber: keyboardWindow.windowNumber,
+                      context: nil,
+                      characters: "\r",
+                      charactersIgnoringModifiers: "\r",
+                      isARepeat: false,
+                      keyCode: 36
+                  ) else { exit(11) }
+            keyboardWindow.sendEvent(keyboardEvent)
+            guard factory.sourceProbeGenerations.count == 1 else { exit(11) }
+            keyboardWindow.close()
+
+            let probeController = factory.makeController(
+                initialStep: .language,
+                microphoneState: .granted
+            )
+            probeController.showAndFocus()
+            guard factory.sourceProbeGenerations.count == 2 else { exit(11) }
+            probeController.window?.close()
+            guard factory.sourceProbeStopCount >= 1,
+                  factory.settingsStore.load() == committedSettings else { exit(11) }
+
+            let testController = factory.makeController(initialStep: .testDictation)
+            testController.showAndFocus()
+            guard let testWindow = testController.window,
+                  let testContent = testWindow.contentView else { exit(11) }
+            let testViews = allViews(testContent)
+            guard let action = testViews.first(where: {
+                ($0 as? NSButton)?.title == "Start test dictation"
+            }) as? NSButton,
+                  action.isEnabled else { exit(11) }
+            action.performClick(nil)
+            guard factory.testGenerations.count == 1 else { exit(11) }
+            testWindow.close()
+            guard factory.testCancelCount >= 1,
+                  factory.settingsStore.load() == committedSettings else { exit(11) }
 
             controller.setStorageHealth(.ready(.init(
                 recoveredSessionCount: 0,
@@ -327,9 +369,6 @@ final class OnboardingShellScenario: NativeUIContractScenario {
                 productionContent.appearance = productionWindow.appearance
                 productionWindow.effectiveAppearance.performAsCurrentDrawingAppearance {
                     productionContent.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-                    for view in self.allViews(productionContent) where view.wantsLayer {
-                        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-                    }
                 }
                 productionWindow.displayIfNeeded()
             }
@@ -343,6 +382,7 @@ final class OnboardingShellScenario: NativeUIContractScenario {
             guard factory.closeCallbackCount > failureControllers.count else { exit(15) }
             print("PASS onboarding-shell fixture=shell production-controller=true window=640 content=576 chrome=38 padding=32/24 title=Set Up Oigo stages=4 controls=accessible")
             print("PASS onboarding-failures stages=1..4 prerequisites=missing back-continue=deterministic close-reopen=clean callbacks=non-nil persistence=unchanged")
+            print("PASS onboarding-resources source-probe-start=2 source-probe-stop=\(factory.sourceProbeStopCount) test-start=1 test-cancel=\(factory.testCancelCount) mouse=action-click keyboard=return cleanup=clean")
             NSApp.terminate(nil)
         }
 
@@ -371,7 +411,9 @@ final class OnboardingShellScenario: NativeUIContractScenario {
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = graphicsContext
         graphicsContext.cgContext.scaleBy(x: scale, y: scale)
-        view.layer?.render(in: graphicsContext.cgContext)
+        NSColor.windowBackgroundColor.setFill()
+        view.bounds.fill()
+        view.displayIgnoringOpacity(view.bounds, in: graphicsContext)
         graphicsContext.flushGraphics()
         NSGraphicsContext.restoreGraphicsState()
         guard let png = bitmap.representation(using: .png, properties: [:]) else { return false }

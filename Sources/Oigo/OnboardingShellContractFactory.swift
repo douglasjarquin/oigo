@@ -13,11 +13,17 @@ final class OnboardingShellContractFactory {
     var closeCallbackCount: Int { callbackState.closeCallbackCount }
     var sourceProbeGenerations: [UInt64] { callbackState.sourceProbeGenerations }
     var testGenerations: [UInt64] { callbackState.testGenerations }
+    var sourceProbeStopCount: Int { callbackState.sourceProbeStopCount }
+    var testStopCount: Int { callbackState.testStopCount }
+    var testCancelCount: Int { callbackState.testCancelCount }
 
     private final class CallbackState {
         var closeCallbackCount = 0
         var sourceProbeGenerations: [UInt64] = []
         var testGenerations: [UInt64] = []
+        var sourceProbeStopCount = 0
+        var testStopCount = 0
+        var testCancelCount = 0
     }
 
     init(defaultsSuite: String) throws {
@@ -154,12 +160,18 @@ final class OnboardingShellContractFactory {
             startSourceProbe: { _, _, generation in
                 callbacks.sourceProbeGenerations.append(generation)
             },
-            stopSourceProbe: {},
+            stopSourceProbe: {
+                callbacks.sourceProbeStopCount += 1
+            },
             startTest: { generation in
                 callbacks.testGenerations.append(generation)
             },
-            stopTest: {},
-            cancelTest: {},
+            stopTest: {
+                callbacks.testStopCount += 1
+            },
+            cancelTest: {
+                callbacks.testCancelCount += 1
+            },
             openHistory: {},
             onComplete: {},
             onClose: {
