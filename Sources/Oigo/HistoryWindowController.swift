@@ -8,7 +8,6 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private static let pasteToolbarItem = NSToolbarItem.Identifier("com.oigo.history.paste-again")
     private static let playbackToolbarItem = NSToolbarItem.Identifier("com.oigo.history.playback")
     private static let moreToolbarItem = NSToolbarItem.Identifier("com.oigo.history.more")
-    private static let prototypeToolbarHeight: CGFloat = 44
     private let loadTranscript: (SessionHistoryEntry, SessionTextSource, @escaping @Sendable (Result<String, Error>) -> Void) -> Void
     private let copyRawTranscript: (SessionHistoryEntry) -> Void
     private let copyCleanTranscript: (SessionHistoryEntry) -> Void
@@ -34,6 +33,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private var transcriptLoadGeneration: UInt64 = 0
     private var cleanAgainOverride = true
     private var toolbarItemsByIdentifier: [NSToolbarItem.Identifier: NSToolbarItem] = [:]
+    private weak var mainRegionView: NSSplitView?
     private let moreMenu = NSMenu(title: "More")
     private let loadMoreButton = NSButton(title: "Load More", target: nil, action: nil)
     private let loadingLabel = NSTextField(labelWithString: "")
@@ -389,11 +389,29 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
     }
     func task29MeasuredGeometryForTesting() -> (toolbarHeight: CGFloat, mainRegionHeight: CGFloat) {
-        guard window?.toolbar != nil, let contentView = window?.contentView else {
+        guard window?.toolbar != nil,
+              let toolbarView = task29ToolbarView(),
+              let platterView = task29ToolbarPlatter(in: toolbarView),
+              let mainRegionView else {
             return (0, 0)
         }
-        let mainRegionHeight = contentView.bounds.height - Self.prototypeToolbarHeight
-        return (Self.prototypeToolbarHeight, mainRegionHeight)
+        return (toolbarView.bounds.height - platterView.frame.minY, mainRegionView.frame.height)
+    }
+    private func task29ToolbarView() -> NSView? {
+        guard let root = window?.contentView?.superview else { return nil }
+        return task29View(named: "NSToolbarView", in: root)
+    }
+    private func task29ToolbarPlatter(in view: NSView) -> NSView? {
+        task29View(named: "NSToolbarPlatterView", in: view)
+    }
+    private func task29View(named name: String, in view: NSView) -> NSView? {
+        guard NSStringFromClass(type(of: view)) == name else {
+            for child in view.subviews {
+                if let result = task29View(named: name, in: child) { return result }
+            }
+            return nil
+        }
+        return view
     }
     func task29DetailSnapshotForTesting() -> (title: String, status: String, transcript: String, selectorEnabled: [Bool]) {
         (
@@ -443,6 +461,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         detailView.setAccessibilityLabel("Selected history session")
         splitView.addArrangedSubview(listStack)
         splitView.addArrangedSubview(detailView)
+        mainRegionView = splitView
         splitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         splitView.setAccessibilityElement(true)
         splitView.setAccessibilityIdentifier("oigo.history.split")
@@ -471,6 +490,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             root.topAnchor.constraint(equalTo: contentView.topAnchor),
             root.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             splitView.heightAnchor.constraint(greaterThanOrEqualToConstant: 400),
+            footer.heightAnchor.constraint(equalToConstant: 44),
             listStack.widthAnchor.constraint(equalToConstant: 340)
         ])
         contentView.setAccessibilityIdentifier("oigo.history.content")
