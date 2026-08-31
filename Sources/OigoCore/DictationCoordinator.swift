@@ -1182,12 +1182,11 @@ public final class DictationCoordinator {
     public func cancelActiveWork(
         reason: String = "dictation operation cancelled"
     ) async {
+        let isCancellation = reason == "dictation operation cancelled"
         if terminalOperationInFlight,
            let activeTranscription,
            let operationID = activeOperationID {
-            pendingTranscriptionTerminalState = reason == "dictation operation cancelled"
-                ? .cancelled
-                : .interrupted
+            pendingTranscriptionTerminalState = isCancellation ? .cancelled : .interrupted
             _ = try? await BoundedOperation.run(
                 operationID: operationID,
                 stage: .cancellation,
@@ -1199,11 +1198,19 @@ public final class DictationCoordinator {
             return
         }
         if activeTranscription != nil {
-            _ = try? await cancelRecordingWithTranscription()
+            if isCancellation {
+                _ = try? await cancelRecordingWithTranscription()
+            } else {
+                _ = try? await interruptRecordingWithTranscription(reason: reason)
+            }
             return
         }
         if activeCapture != nil {
-            _ = try? cancelRecording()
+            if isCancellation {
+                _ = try? cancelRecording()
+            } else {
+                _ = try? interruptRecording(reason: reason)
+            }
             return
         }
         if [.cleaning, .inserting].contains(state) {
@@ -1957,6 +1964,9 @@ public final class DictationCoordinator {
     }
 
     public func shutdownWithTranscription() async {
+        if activeTranscription != nil {
+            pendingTranscriptionTerminalState = .interrupted
+        }
         guard await waitForTerminalOperationIfNeeded(
             operationID: activeOperationID ?? UUID(),
             stage: .shutdown
@@ -1971,7 +1981,6 @@ public final class DictationCoordinator {
            let store = sessionStore,
            let session = currentSession,
            let operationID = activeOperationID {
-            pendingTranscriptionTerminalState = .interrupted
             activeCapture?.cancel()
             let result: TranscriptionResult?
             let terminalState: DictationSessionState

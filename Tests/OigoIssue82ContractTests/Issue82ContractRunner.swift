@@ -26,6 +26,7 @@ struct OigoIssue82ContractTests {
             ("recorder keycode zero", testRecorderKeyCodeZero),
             ("recorder rejection", testRecorderRejection),
             ("app bridge release during startup", testAppBridgeReleaseDuringStartup),
+            ("keyboard release lifecycle", testKeyboardReleaseLifecycle),
             ("app bridge processing feedback", testAppBridgeProcessingFeedback),
             ("keyboard startup production bridge sequence", testKeyboardStartupProductionSequence),
             ("keyboard startup AppDelegate recovery and locale binding", testKeyboardStartupLocaleGenerationRejection),

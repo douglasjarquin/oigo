@@ -5,6 +5,10 @@ import OigoHotKey
 
 @MainActor
 extension OigoIssue82ContractTests {
+    static func testKeyboardReleaseLifecycle() throws {
+        try Task16KeyboardReleaseContracts.verifyLifecycle()
+    }
+
     static func testShortcutContractDefaultAndMigration() throws {
         let legacy = ToggleShortcut(keyCode: 49, modifiers: 0x900)
         let canonical = ToggleShortcut(keyCode: 49, modifiers: 0x300)

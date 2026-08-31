@@ -496,6 +496,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var finishRequestedAfterStart = false
     private var shortcutFeedbackDetail: String?
     private var lastKeyboardStartupGeneration: UInt64 = 0
+    private var lastKeyboardTerminalizedGeneration: UInt64?
     private var workspaceObservers: [NSObjectProtocol] = []
     private(set) var settingsShortcutCallbackCounts = OigoSettingsShortcutCallbackCounts()
     private(set) var settingsShortcutPreSaveState: OigoSettingsShortcutOwnerState?
@@ -660,10 +661,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishApplicationTermination() async {
         operationGate.cancelCurrent()
-        await coordinator.cancelActiveWork(reason: "application shutdown")
         if coordinator.hasActiveTranscription {
             await coordinator.shutdownWithTranscription()
         } else {
+            await coordinator.cancelActiveWork(reason: "application shutdown")
             await coordinator.shutdownAndWait()
         }
     }
@@ -1126,7 +1127,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         if event.edge == .pressed {
             keyboardStartupBoundaries?.observe(.globalPressed)
         }
-        _ = productionShortcutBridge.receive(event)
+        let result = productionShortcutBridge.receive(event)
+        if result == .releaseLatched,
+           operationGate.currentKind?.isDictationLifecycle == true,
+           coordinator.state == .preparing {
+            finishRequestedAfterStart = false
+            operationGate.cancelCurrent()
+        }
     }
 
     private func startKeyboardDictation() {
@@ -1481,6 +1488,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 refreshHistory()
             }
             scheduleIdleMaintenance(.sessionTerminal)
+            observeKeyboardTerminalization(generation: handle.generation)
             updateSurface()
         } catch is CancellationError {
             await coordinator.cancelActiveWork()
@@ -1621,6 +1629,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             guard operationGate.isCurrent(handle) else { return }
             livePreview = ""
             applyTerminalDisplay(cancelled: true)
+            observeKeyboardTerminalization(generation: handle.generation)
             updateSurface()
         } catch {
             let failureReason = Self.failureReason(for: error)
@@ -1639,6 +1648,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 lastSession = session
             }
             reportOnboardingTestFailure()
+            observeKeyboardTerminalization(generation: handle.generation)
             NSLog("Oigo rejected the dictation finish command: %@", failureReason)
             updateSurface()
         }
@@ -3552,8 +3562,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         failureDetail = copy
         shortcutFeedbackDetail = copy
         historyWindow?.showMessage(copy)
-        keyboardStartupBoundaries?.observe(.terminalized)
+        observeKeyboardTerminalization(generation: generation ?? lastKeyboardStartupGeneration)
         updateSurface()
+    }
+
+    private func observeKeyboardTerminalization(generation: UInt64) {
+        guard lastKeyboardTerminalizedGeneration != generation else {
+            return
+        }
+        lastKeyboardTerminalizedGeneration = generation
+        keyboardStartupBoundaries?.observe(.terminalized)
     }
 
     private func beginOnboardingProductionTest(generation: UInt64) {
@@ -3826,6 +3844,21 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         handleGlobalShortcut(GlobalShortcutEvent(edge: edge, generation: generation))
     }
 
+    func interruptKeyboardAudioForTesting(_ reason: String) {
+        handleWorkspaceInterruption(reason)
+    }
+
+    func shutdownKeyboardLifecycleForTesting() async {
+        presentationPublicationFence.shutdown()
+        try? shortcutRegistration.shutdown()
+        shortcutBridge.reset()
+        statusSurface.shutdownHUD()
+        let handle = operationGate.enterShutdown()
+        await finishApplicationTermination()
+        operationGate.complete(handle)
+        observeKeyboardTerminalization(generation: lastKeyboardStartupGeneration)
+    }
+
     func interruptKeyboardStartupForTesting() {
         handleWorkspaceInterruption("task-15 startup interruption")
     }
@@ -3846,13 +3879,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         (lastFailureCode, shortcutFeedbackDetail ?? failureDetail)
     }
 
+    var keyboardStartupSessionForTesting: DictationSession? {
+        coordinator.currentSession ?? lastSession
+    }
+
     var keyboardStartupResourcesForTesting: OigoKeyboardStartupResourceSnapshot {
         let hud = statusSurface.hudResourceSnapshot
         let appDelegateResourceCount = [
             pendingSessionBoundary != nil,
             targetSnapshot != nil,
             targetSnapshotGeneration != nil,
-            hudGeneration != nil,
             recordingStartedAt != nil,
             operationGate.currentHandle != nil
         ].filter { $0 }.count
