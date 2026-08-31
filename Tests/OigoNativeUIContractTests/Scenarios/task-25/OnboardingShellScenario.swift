@@ -37,14 +37,20 @@ final class OnboardingShellScenario: NativeUIContractScenario {
         )
         let metricsSource = repositoryRoot.appendingPathComponent("Sources/Oigo/OnboardingShellMetrics.swift")
         let layoutSource = repositoryRoot.appendingPathComponent("Sources/Oigo/OnboardingShellLayout.swift")
+        let utilityWindowSource = repositoryRoot.appendingPathComponent("Sources/Oigo/OigoUtilityWindow.swift")
+        let task8ObservationSource = repositoryRoot.appendingPathComponent("Sources/Oigo/Task8ControlObservation.swift")
+        let factorySource = repositoryRoot.appendingPathComponent("Sources/Oigo/OnboardingShellContractFactory.swift")
         guard let source = try? String(contentsOf: controllerSource, encoding: .utf8),
               source.contains("OigoOnboardingShellLayout.install("),
               FileManager.default.fileExists(atPath: metricsSource.path),
-              FileManager.default.fileExists(atPath: layoutSource.path) else {
+              FileManager.default.fileExists(atPath: layoutSource.path),
+              FileManager.default.fileExists(atPath: utilityWindowSource.path),
+              FileManager.default.fileExists(atPath: task8ObservationSource.path),
+              FileManager.default.fileExists(atPath: factorySource.path) else {
             throw ContractInputError(category: "missing-onboarding-shell")
         }
         let output = try runCompiledContract(
-            sources: [metricsSource, layoutSource],
+            sources: [metricsSource, layoutSource, utilityWindowSource, task8ObservationSource, controllerSource, factorySource],
             fixture: fixture,
             evidenceRoot: arguments.evidenceRoot
         )
@@ -90,6 +96,7 @@ final class OnboardingShellScenario: NativeUIContractScenario {
         fixture: Fixture,
         evidenceRoot: URL
     ) throws -> String {
+        let repositoryRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("oigo-native-ui-redesign.task25." + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -101,8 +108,15 @@ final class OnboardingShellScenario: NativeUIContractScenario {
         try contractDriver.write(to: driver, atomically: true, encoding: .utf8)
         _ = try runProcess(
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
-            arguments: ["swiftc"] + sources.map(\.path)
-                + [driver.path, "-framework", "AppKit", "-o", executable.path]
+            arguments: [
+                "swiftc",
+                "-I", repositoryRoot.appendingPathComponent(".build/arm64-apple-macosx/debug/Modules").path
+            ] + sources.map(\.path) + [
+                driver.path,
+                "-framework", "AppKit",
+                "-framework", "Carbon",
+                "-o", executable.path
+            ] + dependencyObjects(repositoryRoot)
         )
         let data = try runProcess(
             executable: executable,
@@ -112,6 +126,16 @@ final class OnboardingShellScenario: NativeUIContractScenario {
             throw ContractInputError(category: "unreadable-onboarding-shell-output")
         }
         return output
+    }
+
+    private static func dependencyObjects(_ repositoryRoot: URL) -> [String] {
+        ["OigoCore.build", "OigoHotKey.build"].flatMap { directory in
+            let root = repositoryRoot.appendingPathComponent(".build/arm64-apple-macosx/debug/" + directory)
+            return (try? FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: nil
+            ))?.filter { $0.pathExtension == "o" }.map(\.path) ?? []
+        }
     }
 
     private static func writeReceipt(output: String, fixture: Fixture, evidenceRoot: URL) throws {
@@ -198,141 +222,134 @@ final class OnboardingShellScenario: NativeUIContractScenario {
         }
 
         func applicationDidFinishLaunching(_ notification: Notification) {
+            _ = notification
             NSApp.appearance = NSAppearance(named: NSAppearance.Name("NSAppearanceNameAqua"))
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: OigoOnboardingShellMetrics.windowWidth, height: 560),
-                styleMask: [.titled, .closable, .fullSizeContentView],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = OigoOnboardingShellMetrics.title
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.isReleasedWhenClosed = false
-            window.center()
-            let content = NSView()
-            content.wantsLayer = true
-            content.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-            window.contentView = content
-
-            let chromeTitle = NSTextField(labelWithString: fixture.title)
-            chromeTitle.translatesAutoresizingMaskIntoConstraints = false
-
-            let stageRow = NSStackView()
-            let stageLabels = OigoOnboardingShellLayout.configureProgress(stageRow, titles: fixture.stages)
-
-            let bodyTitle = NSTextField(labelWithString: "Mac & Storage")
-            bodyTitle.font = .systemFont(ofSize: 20, weight: .semibold)
-            bodyTitle.translatesAutoresizingMaskIntoConstraints = false
-            bodyTitle.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.title")
-            bodyTitle.setAccessibilityLabel(bodyTitle.stringValue)
-            let body = NSTextField(wrappingLabelWithString: "Oigo checks that this Mac can record durably before anything else.")
-            body.font = .systemFont(ofSize: 12)
-            body.textColor = .secondaryLabelColor
-            body.translatesAutoresizingMaskIntoConstraints = false
-            let bodySpacer = NSView()
-            bodySpacer.translatesAutoresizingMaskIntoConstraints = false
-            let footerSpacer = NSView()
-            footerSpacer.translatesAutoresizingMaskIntoConstraints = false
-            let back = NSButton(title: "Back", target: nil, action: nil)
-            back.isHidden = true
-            let next = NSButton(title: "Continue", target: nil, action: nil)
-            window.standardWindowButton(.closeButton)?.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.close")
-            window.standardWindowButton(.closeButton)?.setAccessibilityIdentifier("oigo.onboarding.close")
-            window.standardWindowButton(.closeButton)?.setAccessibilityLabel("Close")
-            let footer = NSStackView(views: [back, footerSpacer, next])
-
-            let stack = NSStackView(views: [stageRow, bodyTitle, body, bodySpacer, footer])
-            OigoOnboardingShellLayout.install(
-                window: window,
-                contentView: content,
-                chromeTitleLabel: chromeTitle,
-                progressStages: stageRow,
-                stack: stack,
-                backButton: back,
-                nextButton: next
-            )
-            guard let chrome = content.subviews.first(where: {
-                $0.accessibilityIdentifier() == "oigo.onboarding.chrome"
-            }) else { exit(10) }
-            NSLayoutConstraint.activate([
-                bodyTitle.widthAnchor.constraint(equalTo: stack.widthAnchor),
-                body.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            ])
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            let factory: OnboardingShellContractFactory
+            do {
+                factory = try OnboardingShellContractFactory(defaultsSuite: "com.oigo.qa.task25")
+            } catch {
+                exit(20)
+            }
+            let controller = factory.controller
+            controller.showAndFocus()
+            guard let window = controller.window,
+                  let content = window.contentView else { exit(10) }
             window.layoutIfNeeded()
+            let views = allViews(content)
+            let stageLabels = views.compactMap({ $0 as? NSTextField }).filter({
+                $0.accessibilityIdentifier().hasPrefix("oigo.onboarding.progress.stage-")
+            })
+            guard let stageRow = stageLabels.first?.superview,
+                  let chrome = views.first(where: {
+                      $0.accessibilityIdentifier() == "oigo.onboarding.chrome"
+                  }),
+                  let chromeTitle = views.first(where: {
+                      $0.accessibilityIdentifier() == "oigo.onboarding.chrome-title"
+                  }) as? NSTextField,
+                  let back = views.first(where: {
+                      $0.accessibilityIdentifier() == fixture.controls[0]
+                  }) as? NSButton,
+                  let next = views.first(where: {
+                      $0.accessibilityIdentifier() == fixture.controls[1]
+                  }) as? NSButton,
+                  let close = window.standardWindowButton(.closeButton) else { exit(10) }
             let stageX = stageRow.convert(.zero, to: content).x
-            let committedSettings = ["shortcut": "fixture-committed", "locale": "en-US"]
-            var observedCommittedSettings = committedSettings
+            let committedSettings = factory.settingsStore.load()
             guard abs(window.frame.width - fixture.windowWidth) < 0.5,
                   abs(stageRow.frame.width - fixture.contentWidth) < 0.5,
                   abs(chrome.frame.height - fixture.chromeHeight) < 0.5,
                   abs(stageX - fixture.horizontalPadding) < 0.5,
+                  window.title == fixture.title,
                   chromeTitle.stringValue == fixture.title,
                   stageLabels.count == 4,
                   stageLabels.allSatisfy({ !$0.accessibilityIdentifier().isEmpty }),
                   back.accessibilityIdentifier() == fixture.controls[0],
-                  next.accessibilityIdentifier() == fixture.controls[1] else { exit(10) }
+                  next.accessibilityIdentifier() == fixture.controls[1],
+                  close.accessibilityIdentifier() == fixture.controls[2],
+                  next.isEnabled else { exit(10) }
             guard fixture.failureCases.allSatisfy({ item in
                 item.closeAllowed && item.continueEnabled == false && item.backVisible == (item.stage > 1)
             }) else { exit(11) }
-            for failureCase in fixture.failureCases {
-                back.isHidden = !failureCase.backVisible
-                next.isEnabled = failureCase.continueEnabled
-                guard back.isHidden == !failureCase.backVisible,
-                      next.isEnabled == failureCase.continueEnabled,
-                      window.standardWindowButton(.closeButton)?.identifier?.rawValue == fixture.controls[2] else {
-                    exit(11)
-                }
-                observedCommittedSettings["candidate"] = "stage-\(failureCase.stage)"
-                guard observedCommittedSettings["shortcut"] == committedSettings["shortcut"],
-                      observedCommittedSettings["locale"] == committedSettings["locale"] else {
-                    exit(11)
-                }
-                window.close()
-                window.makeKeyAndOrderFront(nil)
-                guard window.isVisible,
-                      observedCommittedSettings["shortcut"] == committedSettings["shortcut"],
-                      observedCommittedSettings["locale"] == committedSettings["locale"] else { exit(11) }
+
+            let failureControllers: [(OnboardingWindowController, Int)] = [
+                (factory.controller, 1),
+                (factory.makeController(
+                    initialStep: .language,
+                    microphoneState: .denied,
+                    storageHealth: .checking
+                ), 2),
+                (factory.makeController(initialStep: .shortcut, accessibilityState: .denied), 3),
+                (factory.makeController(
+                    initialStep: .testDictation,
+                    storageHealth: .checking
+                ), 4)
+            ]
+            for (failureController, stage) in failureControllers {
+                if stage == 1 { failureController.setStorageHealth(.checking) }
+                failureController.showAndFocus()
+                guard let failureWindow = failureController.window,
+                      let failureContent = failureWindow.contentView else { exit(11) }
+                let failureViews = allViews(failureContent)
+                guard let failureBack = failureViews.first(where: {
+                    $0.accessibilityIdentifier() == fixture.controls[0]
+                }) as? NSButton,
+                      let failureNext = failureViews.first(where: {
+                          $0.accessibilityIdentifier() == fixture.controls[1]
+                      }) as? NSButton,
+                      let failureClose = failureWindow.standardWindowButton(.closeButton),
+                      failureBack.isHidden == (stage == 1),
+                      !failureNext.isEnabled,
+                      failureClose.accessibilityIdentifier() == fixture.controls[2] else { exit(11) }
+                failureWindow.close()
+                guard !failureWindow.isVisible,
+                      factory.settingsStore.load().globalShortcut == committedSettings.globalShortcut,
+                      factory.settingsStore.load().localeIdentifier == committedSettings.localeIdentifier else { exit(11) }
+                failureController.showAndFocus()
+                guard failureWindow.isVisible else { exit(11) }
+                failureWindow.close()
             }
-            back.isHidden = true
-            next.isEnabled = true
+            guard factory.closeCallbackCount >= failureControllers.count,
+                  factory.settingsStore.load().globalShortcut == committedSettings.globalShortcut,
+                  factory.settingsStore.load().localeIdentifier == committedSettings.localeIdentifier else { exit(11) }
+
+            controller.setStorageHealth(.ready(.init(
+                recoveredSessionCount: 0,
+                historyEntryCount: 0,
+                malformedSessionCount: 0
+            )))
+            controller.showAndFocus()
+            guard let productionWindow = controller.window,
+                  let productionContent = productionWindow.contentView else { exit(12) }
             let applyAppearance: (String?) -> Void = { name in
-                window.appearance = name.flatMap { NSAppearance(named: NSAppearance.Name($0)) }
-                content.appearance = window.appearance
-                window.effectiveAppearance.performAsCurrentDrawingAppearance {
-                    let background = NSColor.windowBackgroundColor.cgColor
-                    content.layer?.backgroundColor = background
-                    chrome.layer?.backgroundColor = background
-                    chromeTitle.textColor = .labelColor
-                    bodyTitle.textColor = .labelColor
-                    body.textColor = .secondaryLabelColor
-                    for label in stageRow.arrangedSubviews.compactMap({ $0 as? NSTextField }) {
-                        label.textColor = label.stringValue.hasPrefix("1 ")
-                            ? .controlAccentColor
-                            : .secondaryLabelColor
+                productionWindow.appearance = name.flatMap {
+                    NSAppearance(named: NSAppearance.Name($0))
+                }
+                productionContent.appearance = productionWindow.appearance
+                productionWindow.effectiveAppearance.performAsCurrentDrawingAppearance {
+                    productionContent.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+                    for view in self.allViews(productionContent) where view.wantsLayer {
+                        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
                     }
                 }
-                content.needsDisplay = true
-                window.displayIfNeeded()
+                productionWindow.displayIfNeeded()
             }
             applyAppearance("NSAppearanceNameAqua")
-            guard capture(view: content, to: evidenceRoot.appendingPathComponent("onboarding-shell-light.png")) else { exit(12) }
-
+            guard capture(view: productionContent, to: evidenceRoot.appendingPathComponent("onboarding-shell-light.png")) else { exit(12) }
             applyAppearance("NSAppearanceNameDarkAqua")
-            guard capture(view: content, to: evidenceRoot.appendingPathComponent("onboarding-shell-dark.png")) else { exit(13) }
-
+            guard capture(view: productionContent, to: evidenceRoot.appendingPathComponent("onboarding-shell-dark.png")) else { exit(13) }
             applyAppearance("NSAppearanceNameAccessibilityHighContrastAqua")
-            guard capture(view: content, to: evidenceRoot.appendingPathComponent("onboarding-shell-increased-contrast.png")) else { exit(14) }
-            window.close()
-            window.makeKeyAndOrderFront(nil)
-            guard window.isVisible else { exit(15) }
-            window.close()
-            print("PASS onboarding-shell fixture=shell window=640 content=576 chrome=38 padding=32/24 title=Set Up Oigo stages=4 controls=accessible")
-            print("PASS onboarding-failures stages=1..4 prerequisites=missing back-continue=deterministic close-reopen=clean persistence=unchanged")
+            guard capture(view: productionContent, to: evidenceRoot.appendingPathComponent("onboarding-shell-increased-contrast.png")) else { exit(14) }
+            productionWindow.close()
+            guard factory.closeCallbackCount > failureControllers.count else { exit(15) }
+            print("PASS onboarding-shell fixture=shell production-controller=true window=640 content=576 chrome=38 padding=32/24 title=Set Up Oigo stages=4 controls=accessible")
+            print("PASS onboarding-failures stages=1..4 prerequisites=missing back-continue=deterministic close-reopen=clean callbacks=non-nil persistence=unchanged")
             NSApp.terminate(nil)
         }
+
+        private func allViews(_ root: NSView) -> [NSView] {
+            [root] + root.subviews.flatMap(allViews)
+        }
+
     }
 
     func capture(view: NSView, to url: URL) -> Bool {

@@ -178,6 +178,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.title = OigoOnboardingShellMetrics.title
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        window.minSize = NSSize(width: OigoOnboardingShellMetrics.windowWidth, height: 520)
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
@@ -238,6 +239,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     func showAndFocus() {
         showWindow(nil)
+        if let window {
+            var frame = window.frame
+            frame.size = NSSize(width: OigoOnboardingShellMetrics.windowWidth, height: 680)
+            window.setFrame(frame, display: false)
+        }
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -546,6 +552,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         actionButton.isEnabled = true
         nextButton.title = currentStep == .complete ? "Finish setup" : "Continue"
         nextButton.isEnabled = true
+        if currentStep == .system {
+            nextButton.isEnabled = storageHealth.isReady
+        }
         if currentStep == .language {
             nextButton.isEnabled = microphoneState == .granted
                 && evidence.microphoneCanAdvance

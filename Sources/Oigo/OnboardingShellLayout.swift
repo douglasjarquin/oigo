@@ -42,6 +42,7 @@ enum OigoOnboardingShellLayout {
         chromeTitleLabel.alignment = .center
         chromeTitleLabel.textColor = .labelColor
         chromeTitleLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.chrome-title")
+        chromeTitleLabel.setAccessibilityIdentifier("oigo.onboarding.chrome-title")
         chromeTitleLabel.setAccessibilityRole(.staticText)
         chromeTitleLabel.setAccessibilityLabel(OigoOnboardingShellMetrics.title)
         backButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.back")
@@ -70,6 +71,7 @@ enum OigoOnboardingShellLayout {
         contentView.addSubview(chrome)
 
         NSLayoutConstraint.activate([
+            contentView.widthAnchor.constraint(equalToConstant: OigoOnboardingShellMetrics.windowWidth),
             chrome.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             chrome.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             chrome.topAnchor.constraint(equalTo: contentView.topAnchor),

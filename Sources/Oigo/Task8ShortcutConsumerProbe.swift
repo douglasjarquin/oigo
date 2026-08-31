@@ -3,13 +3,6 @@ import Foundation
 import OigoCore
 import OigoHotKey
 
-struct Task8ControlObservation: Codable {
-    let status: String
-    let hint: String
-    let recorderDisplay: String
-    let recorderAccessibilityValue: String
-}
-
 struct Task8HUDObservation: Codable {
     let title: String
     let detail: String

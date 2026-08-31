@@ -793,20 +793,6 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 }
 
 @MainActor
-final class OigoUtilityWindow: NSWindow {
-    var onEscape: (() -> Void)?
-
-    override func cancelOperation(_ sender: Any?) {
-        _ = sender
-        if let onEscape {
-            onEscape()
-        } else {
-            super.cancelOperation(sender)
-        }
-    }
-}
-
-@MainActor
 private final class HistorySessionRowView: NSTableCellView {
     func configure(projection: OigoHistoryRowProjection, dateFormatter: DateFormatter) {
         subviews.forEach { $0.removeFromSuperview() }
