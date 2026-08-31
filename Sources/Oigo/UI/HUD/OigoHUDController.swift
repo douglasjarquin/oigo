@@ -84,10 +84,16 @@ public final class OigoHUDController {
     private var sessionReference: AnyObject?
     private var renderRevision: UInt64 = 0
     private var recordingTimerStartCount = 0
+    private var lastPlacementInput: HUDPlacementInput?
 
     public init() {
         panel = MacUIFloatingPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 336, height: 96)
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: OigoHUDShellSize.compact.width,
+                height: OigoHUDShellSize.compact.height
+            )
         )
         configurePanel()
         configureContent()
@@ -100,6 +106,23 @@ public final class OigoHUDController {
 
     public var canBecomeMain: Bool {
         panel.canBecomeMain
+    }
+
+    public var renderedSize: HUDSize {
+        HUDSize(width: Double(panel.contentView?.bounds.width ?? 0), height: Double(panel.contentView?.bounds.height ?? 0))
+    }
+
+    public var renderedCornerRadius: Double {
+        Double(contentView.layer?.cornerRadius ?? 0)
+    }
+
+    public var renderedFrame: HUDRect {
+        HUDRect(
+            x: Double(panel.frame.origin.x),
+            y: Double(panel.frame.origin.y),
+            width: Double(panel.frame.width),
+            height: Double(panel.frame.height)
+        )
     }
 
     public var isVisible: Bool {
@@ -151,16 +174,22 @@ public final class OigoHUDController {
         releaseTransientReferences()
 
         self.shortcutReleaseHint = shortcutReleaseHint
-        let content = OigoHUDShellPolicy.content(for: state, releaseHint: shortcutReleaseHint)
+        let content = OigoHUDShellPolicy.content(
+            for: state,
+            releaseHint: shortcutReleaseHint,
+            preview: previewText
+        )
         render(content: content, state: state, startedAt: startedAt)
         if state == .shutdown {
             lifecycle.shutdown()
             releaseTransientReferences()
+            lastPlacementInput = nil
             panel.orderOut(nil)
             return true
         }
         self.sessionReference = sessionReference
-        applyPlacement(placementInput)
+        lastPlacementInput = placementInput
+        applyPlacement(placementInput, size: content.size)
         panel.orderFront(nil)
 
         if OigoHUDShellPolicy.isRecording(state) {
@@ -185,7 +214,13 @@ public final class OigoHUDController {
             return false
         }
         previewText = OigoHUDShellPolicy.boundedPreview(text)
-        renderPreview()
+        let content = OigoHUDShellPolicy.content(
+            for: state,
+            releaseHint: shortcutReleaseHint ?? "",
+            preview: previewText
+        )
+        render(content: content, state: state, startedAt: recordingStartedAt)
+        applyPlacement(lastPlacementInput, size: content.size)
         return true
     }
 
@@ -196,6 +231,7 @@ public final class OigoHUDController {
         invalidateDismissalTask()
         stopRecordingTimer()
         releaseTransientReferences()
+        lastPlacementInput = nil
         panel.orderOut(nil)
         return true
     }
@@ -223,6 +259,7 @@ public final class OigoHUDController {
     public func shutdown() {
         renderRevision &+= 1
         invalidateOperationResources()
+        lastPlacementInput = nil
         lifecycle.shutdown()
         panel.shutdown()
     }
@@ -237,7 +274,7 @@ public final class OigoHUDController {
     private func configureContent() {
         contentView = NSView(frame: panel.contentView?.bounds ?? .zero)
         contentView.wantsLayer = true
-        contentView.layer?.cornerRadius = 14
+        contentView.layer?.cornerRadius = 12
         contentView.layer?.backgroundColor = NSColor.windowBackgroundColor
             .withAlphaComponent(0.97)
             .cgColor
@@ -248,7 +285,7 @@ public final class OigoHUDController {
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.setContentHuggingPriority(.required, for: .horizontal)
 
-        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         titleLabel.textColor = .labelColor
         titleLabel.setAccessibilityRole(.staticText)
         detailLabel.font = .systemFont(ofSize: 12)
@@ -262,7 +299,7 @@ public final class OigoHUDController {
         elapsedLabel.alignment = .right
         elapsedLabel.setContentHuggingPriority(.required, for: .horizontal)
         elapsedLabel.setAccessibilityRole(.staticText)
-        previewLabel.font = .systemFont(ofSize: 12)
+        previewLabel.font = NSFontManager.shared.convert(.systemFont(ofSize: 12), toHaveTrait: .italicFontMask)
         previewLabel.textColor = .secondaryLabelColor
         previewLabel.lineBreakMode = .byWordWrapping
         previewLabel.maximumNumberOfLines = 2
@@ -287,12 +324,12 @@ public final class OigoHUDController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(stack)
         NSLayoutConstraint.activate([
-            iconView.widthAnchor.constraint(equalToConstant: 20),
-            iconView.heightAnchor.constraint(equalToConstant: 20),
+            iconView.widthAnchor.constraint(equalToConstant: 11),
+            iconView.heightAnchor.constraint(equalToConstant: 11),
             stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -14),
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 3),
+            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -3),
             titleRow.trailingAnchor.constraint(equalTo: textStack.trailingAnchor)
         ])
         panel.contentView = contentView
@@ -303,6 +340,7 @@ public final class OigoHUDController {
         state: OigoHUDState,
         startedAt: Date?
     ) {
+        applySize(content.size)
         titleLabel.stringValue = content.title
         detailLabel.stringValue = content.detail
         elapsedLabel.isHidden = !content.showsRecordingElapsed
@@ -329,12 +367,16 @@ public final class OigoHUDController {
         } ?? true
     }
 
-    private func applyPlacement(_ input: HUDPlacementInput?) {
-        let panelSize = input?.panelSize.isValid == true
-            ? input!.panelSize
-            : HUDSize(width: panel.frame.width, height: panel.frame.height)
+    private func applySize(_ size: OigoHUDShellSize) {
+        let nsSize = NSSize(width: size.width, height: size.height)
+        panel.setContentSize(nsSize)
+        contentView.setFrameSize(nsSize)
+    }
+
+    private func applyPlacement(_ input: HUDPlacementInput?, size: OigoHUDShellSize) {
+        let panelSize = HUDSize(width: size.width, height: size.height)
         if let input,
-           let placement = HUDPlacement.place(input),
+           let placement = HUDPlacement.place(input.withPanelSize(panelSize)),
            placement.generation == input.currentGeneration,
            placement.frame.isValid {
             panel.setFrame(
@@ -349,13 +391,31 @@ public final class OigoHUDController {
             return
         }
 
-        let visibleFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+        let visibleFrame = fallbackVisibleFrame(for: input)
         panel.setFrameOrigin(
             NSPoint(
                 x: visibleFrame.midX - (panelSize.width / 2),
                 y: visibleFrame.minY + 24
             )
         )
+    }
+
+    private func fallbackVisibleFrame(for input: HUDPlacementInput?) -> NSRect {
+        if let input {
+            let preferredIDs = [input.frontmostDisplayID, input.mainDisplayID].compactMap { $0 }
+            let display = preferredIDs.compactMap { id in
+                input.displays.first { $0.id == id && $0.visibleFrame.isValid }
+            }.first ?? input.displays.first(where: { $0.visibleFrame.isValid })
+            if let frame = display?.visibleFrame {
+                return NSRect(
+                    x: frame.origin.x,
+                    y: frame.origin.y,
+                    width: frame.size.width,
+                    height: frame.size.height
+                )
+            }
+        }
+        return NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
     }
 
     private func startRecordingTimer() {
@@ -442,15 +502,15 @@ public final class OigoHUDController {
     private func symbolName(for role: OigoHUDIconRole) -> String {
         switch role {
         case .information:
-            "info.circle.fill"
+            "progress.indicator"
         case .confirmation:
-            "checkmark.circle.fill"
+            "checkmark"
         case .attention:
             "exclamationmark.triangle.fill"
         case .failure:
             "xmark.octagon.fill"
         case .recording:
-            "record.circle.fill"
+            "circle.grid.3x3.fill"
         case .destination:
             "cursorarrow.rays"
         }
