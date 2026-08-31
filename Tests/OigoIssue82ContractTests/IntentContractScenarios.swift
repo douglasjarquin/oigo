@@ -6,12 +6,14 @@ extension OigoIssue82ContractTests {
     static func testIntentRapidTap() throws {
         var controller = GlobalShortcutIntentController()
         guard controller.receive(.pressed, state: .idle) == .start,
-              controller.receive(.pressed, state: .preparing, isRepeat: true) == .ignoredRepeat,
-              controller.receive(.released, state: .preparing) == .releaseLatched,
+              controller.receive(.pressed, state: .idle, isRepeat: true) == .ignoredRepeat,
+              controller.receive(.released, state: .idle) == .releaseLatched,
               controller.observe(.recording) == .stop,
               controller.receive(.released, state: .finalizing) == .ignoredProcessing(.finalizing) else {
-            throw ContractFailure(message: "rapid press/release did not produce one latched stop without cancellation")
+            throw ContractFailure(message: "rapid release before readiness did not produce one latched stop")
         }
+
+        print("TRACE: intent rapid tap start -> release-latched -> stop")
     }
 
     static func testIntentDuplicatesAndProcessing() throws {
@@ -55,9 +57,11 @@ extension OigoIssue82ContractTests {
 
         state = .recording
         guard bridge.observeState() == .stop,
+              bridge.observeState() == nil,
+              bridge.receive(.released) == .ignoredRecordingNotOwned,
               stops == 1,
               !feedback.contains(.ignoredProcessing(.finalizing)) else {
-            throw ContractFailure(message: "latched release did not stop exactly once at recording")
+            throw ContractFailure(message: "latched release was not consumed exactly once at recording")
         }
 
         state = .finalizing
@@ -66,6 +70,8 @@ extension OigoIssue82ContractTests {
               stops == 1 else {
             throw ContractFailure(message: "processing release changed the active operation")
         }
+
+        print("COUNTS: startup_start=1 latched_stop=1 repeated_observe_stop=0 duplicate_release_stop=0")
     }
 
     static func testAppBridgeProcessingFeedback() throws {
@@ -95,6 +101,34 @@ extension OigoIssue82ContractTests {
               stops == 0 else {
             throw ContractFailure(message: "keyboard input claimed a mouse-owned recording")
         }
+
+        state = .idle
+        guard bridge.receive(.released) == .ignoredDuplicateRelease,
+              bridge.receive(.pressed) == .start,
+              bridge.receive(.released) == .releaseLatched,
+              starts == 1,
+              stops == 0 else {
+            throw ContractFailure(message: "invalid release or pre-readiness release changed operation ownership")
+        }
+
+        state = .interrupted
+        guard bridge.observeState() == .reset,
+              bridge.observeState() == nil else {
+            throw ContractFailure(message: "repeated interruption did not clear keyboard ownership exactly once")
+        }
+
+        state = .idle
+        guard bridge.receive(.pressed) == .start else {
+            throw ContractFailure(message: "keyboard operation did not resume after interruption reset")
+        }
+        state = .recording
+        guard bridge.receive(.released) == .stop,
+              starts == 2,
+              stops == 1 else {
+            throw ContractFailure(message: "resumed keyboard operation did not stop exactly once")
+        }
+
+        print("COUNTS: invalid_release_calls=0 interrupted_reset=1 repeated_interruption=0 resumed_start=1 resumed_stop=1")
     }
 
 

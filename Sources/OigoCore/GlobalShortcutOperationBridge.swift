@@ -9,7 +9,6 @@ public final class GlobalShortcutOperationBridge {
     private let stop: Operation
     private let feedback: Feedback
     private var intent = GlobalShortcutIntentController()
-    private var keyboardStartupInFlight = false
 
     public private(set) var lastResult: GlobalShortcutIntentResult?
 
@@ -30,12 +29,10 @@ public final class GlobalShortcutOperationBridge {
         _ edge: GlobalShortcutIntentEdge,
         isRepeat: Bool = false
     ) -> GlobalShortcutIntentResult {
-        let state = keyboardStartupInFlight ? .preparing : stateProvider()
-        let result = intent.receive(edge, state: state, isRepeat: isRepeat)
+        let result = intent.receive(edge, state: stateProvider(), isRepeat: isRepeat)
         lastResult = result
         switch result {
         case .start:
-            keyboardStartupInFlight = true
             start()
         case .stop:
             stop()
@@ -51,9 +48,6 @@ public final class GlobalShortcutOperationBridge {
     public func observeState() -> GlobalShortcutIntentResult? {
         let state = stateProvider()
         let result = intent.observe(state)
-        if state == .recording || state.isIssue82TerminalForBridge {
-            keyboardStartupInFlight = false
-        }
         guard let result else {
             return nil
         }
@@ -69,20 +63,8 @@ public final class GlobalShortcutOperationBridge {
 
     @discardableResult
     public func reset() -> GlobalShortcutIntentResult {
-        keyboardStartupInFlight = false
         let result = intent.reset()
         lastResult = result
         return result
-    }
-}
-
-private extension DictationState {
-    var isIssue82TerminalForBridge: Bool {
-        switch self {
-        case .complete, .failed, .cancelled, .interrupted:
-            true
-        default:
-            false
-        }
     }
 }
