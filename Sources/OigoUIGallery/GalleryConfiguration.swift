@@ -72,10 +72,16 @@ struct GalleryConfiguration {
         let approvedEvidenceRoot = repositoryRoot
             .appendingPathComponent(".omo/evidence/oigo-shortcut-transcription-design-fidelity", isDirectory: true)
             .standardizedFileURL.resolvingSymlinksInPath()
-        let approvedTaskEvidenceRoot = approvedEvidenceRoot
+        var approvedTaskEvidenceRoots = [approvedEvidenceRoot
             .appendingPathComponent(evidenceTaskIdentifier, isDirectory: true)
             .standardizedFileURL.resolvingSymlinksInPath()
-        guard isWithin(evidenceRoot, of: approvedTaskEvidenceRoot) else {
+        ]
+        if scenario == "components", taskNumber == 7 {
+            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
+                .appendingPathComponent("task-19", isDirectory: true)
+                .standardizedFileURL.resolvingSymlinksInPath())
+        }
+        guard approvedTaskEvidenceRoots.contains(where: { isWithin(evidenceRoot, of: $0) }) else {
             throw GalleryInputError(category: "outside-evidence-root")
         }
 

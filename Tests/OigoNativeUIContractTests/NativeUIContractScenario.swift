@@ -47,6 +47,11 @@ struct ContractArguments {
         var approvedTaskEvidenceRoots = [approvedEvidenceRoot
             .appendingPathComponent(evidenceTaskIdentifier, isDirectory: true)
             .standardizedFileURL.resolvingSymlinksInPath()]
+        if scenario == "component-contracts", taskNumber == 6 {
+            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
+                .appendingPathComponent("task-19", isDirectory: true)
+                .standardizedFileURL.resolvingSymlinksInPath())
+        }
         if scenario == "keyboard-startup", taskNumber == 5 {
             approvedTaskEvidenceRoots.append(approvedEvidenceRoot
                 .appendingPathComponent("task-15", isDirectory: true)

@@ -4,14 +4,17 @@ import AppKit
 public final class MacUIShortcutPresentation: NSStackView {
     public private(set) var glyphs: [String]
 
-    public init(glyphs: [String], accessibilityLabel: String) {
+    public init(glyphs: [String], accessibilityLabel: String, accessibilityIdentifier: String? = nil) {
         self.glyphs = glyphs
         super.init(frame: .zero)
         orientation = .horizontal
         alignment = .centerY
-        spacing = 4
-        setAccessibilityElement(true)
-        setAccessibilityLabel(accessibilityLabel)
+        spacing = MacUITokens.Spacing.tight
+        MacUIAccessibility.configure(
+            self,
+            identifier: accessibilityIdentifier ?? "macui.shortcut",
+            label: accessibilityLabel
+        )
         rebuildGlyphs()
     }
 
@@ -25,12 +28,14 @@ public final class MacUIShortcutPresentation: NSStackView {
         arrangedSubviews.forEach { removeArrangedSubview($0); $0.removeFromSuperview() }
         for glyph in glyphs {
             let label = NSTextField(labelWithString: glyph)
-            label.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+            label.font = MacUITokens.Typography.shortcut
             label.alignment = .center
             label.drawsBackground = true
-            label.backgroundColor = .controlBackgroundColor
+            label.backgroundColor = MacUITokens.Colors.controlBackground
             label.wantsLayer = true
-            label.layer?.cornerRadius = 6
+            label.layer?.cornerRadius = MacUITokens.Radius.compact
+            label.setAccessibilityRole(.staticText)
+            label.setAccessibilityLabel(glyph)
             label.setContentHuggingPriority(.required, for: .horizontal)
             addArrangedSubview(label)
         }

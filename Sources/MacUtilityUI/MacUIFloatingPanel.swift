@@ -23,6 +23,10 @@ public final class MacUIFloatingPanel: NSPanel {
         hasShadow = true
         hidesOnDeactivate = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        setAccessibilityElement(true)
+        setAccessibilityIdentifier("macui.floating-panel")
+        setAccessibilityRole(.window)
+        setAccessibilityLabel("Floating panel")
     }
 
     public func terminalize() {

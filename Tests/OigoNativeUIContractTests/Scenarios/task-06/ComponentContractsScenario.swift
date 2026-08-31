@@ -168,6 +168,9 @@ final class ComponentContractsScenario: NativeUIContractScenario {
                     throw ContractInputError(category: "forbidden-component-import")
                 }
             }
+            guard !text.contains("NSColor.white"), !text.contains("NSColor.black") else {
+                throw ContractInputError(category: "non-semantic-color")
+            }
         }
     }
 
@@ -238,6 +241,31 @@ final class ComponentContractsScenario: NativeUIContractScenario {
     )
     let shortcut = MacUIShortcutPresentation(glyphs: ["⌘", "D"], accessibilityLabel: "Command D")
     let help = MacUIFieldHelpText("Synthetic help")
+    let action = makeMacUIActionButton(title: "Apply", action: {}).0
+    let componentViews: [NSView] = [
+        row, notice, badge, form, loading, empty, permission, storage, transcript, shortcut, help, action
+    ]
+    guard componentViews.allSatisfy({
+        let identifier = $0.accessibilityIdentifier()
+        guard !identifier.isEmpty,
+              let label = $0.accessibilityLabel(), !label.isEmpty else { return false }
+        return true
+    }),
+    !panel.accessibilityIdentifier().isEmpty,
+    !(panel.accessibilityLabel() ?? "").isEmpty,
+    MacUITokens.Spacing.tight == 4,
+    MacUITokens.Spacing.controlGroup == 8,
+    MacUITokens.Spacing.row == 12,
+    MacUITokens.Spacing.section == 16,
+    MacUITokens.Radius.compact == 6,
+    MacUITokens.Radius.contained == 8,
+    MacUITokens.Typography.heading.pointSize == 20,
+    MacUITokens.Typography.section.pointSize == 13,
+    MacUITokens.Typography.label.pointSize == 13,
+    MacUITokens.Typography.shortcut.pointSize == 13,
+    MacUITokens.Colors.primaryLabel.isEqual(NSColor.labelColor),
+    MacUITokens.Colors.secondaryLabel.isEqual(NSColor.secondaryLabelColor),
+    MacUITokens.Colors.accent.isEqual(NSColor.controlAccentColor) else { exit(3) }
     loading.shutdown()
     replacedLoading.terminalize(replacingWith: NSView())
     terminalLoading.terminalize()
@@ -245,7 +273,7 @@ final class ComponentContractsScenario: NativeUIContractScenario {
           !panel.canBecomeKey, !panel.canBecomeMain,
           transcript.transcript.isEmpty, alert.alertStyle == .critical else { exit(2) }
     panel.terminalize()
-    withExtendedLifetime([row, notice, badge, form, empty, permission, storage, shortcut, help]) {}
+    withExtendedLifetime([row, notice, badge, form, empty, permission, storage, shortcut, help, action]) {}
     print("COMPONENTS 13 lifecycle=stopped panel=nonactivating transcript=clearable")
     }
     """#
