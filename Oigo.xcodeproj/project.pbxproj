@@ -17,6 +17,8 @@
         A00000010000000000000065 /* libOigoPresentation.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000055 /* libOigoPresentation.a */; };
         A00000010000000000000066 /* libOigoCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000B /* libOigoCore.a */; };
         A00000010000000000000067 /* libMacUtilityUI.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000051 /* libMacUtilityUI.a */; };
+        A00000010000000000000070 /* libOigoIdentity.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000070 /* libOigoIdentity.a */; };
+        A00000010000000000000071 /* libOigoPresentation.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000055 /* libOigoPresentation.a */; };
         A00000010000000000000068 /* HistoryPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000056 /* HistoryPresentation.swift */; };
         A00000010000000000000069 /* Task8ShortcutConsumerProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000057 /* Task8ShortcutConsumerProbe.swift */; };
         A0000001000000000000006A /* Task11OnboardingShortcutProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000058 /* Task11OnboardingShortcutProbe.swift */; };
@@ -25,6 +27,11 @@
         A0000001000000000000006D /* Task16KeyboardReleaseProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000005B /* Task16KeyboardReleaseProbe.swift */; };
         A0000001000000000000006E /* Task16KeyboardReleaseReceipt.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000005C /* Task16KeyboardReleaseReceipt.swift */; };
         A0000001000000000000006F /* AppShortcutRegistrationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000005D /* AppShortcutRegistrationController.swift */; };
+        A00000010000000000000072 /* Task8ControlObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000072 /* Task8ControlObservation.swift */; };
+        A00000010000000000000073 /* OigoUtilityWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000073 /* OigoUtilityWindow.swift */; };
+        A00000010000000000000074 /* OnboardingShellLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000074 /* OnboardingShellLayout.swift */; };
+        A00000010000000000000075 /* OnboardingShellMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000075 /* OnboardingShellMetrics.swift */; };
+        A00000010000000000000076 /* OnboardingShellContractFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000076 /* OnboardingShellContractFactory.swift */; };
         A00000010000000000000004 /* GlobalHotKeyRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000004 /* GlobalHotKeyRegistrar.swift */; };
         A00000010000000000000005 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000005 /* SettingsWindowController.swift */; };
         A00000010000000000000006 /* DictationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000006 /* DictationCoordinator.swift */; };
@@ -206,6 +213,13 @@
             remoteGlobalIDString = E00000010000000000000008;
             remoteInfo = MacUtilityUI;
         };
+        K00000010000000000000011 /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = F00000010000000000000001 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = E0000001000000000000000A;
+            remoteInfo = OigoPresentation;
+        };
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
@@ -253,6 +267,7 @@
         B00000010000000000000050 /* OigoUIGallery.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OigoUIGallery.app; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000051 /* libMacUtilityUI.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libMacUtilityUI.a; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000055 /* libOigoPresentation.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoPresentation.a; sourceTree = BUILT_PRODUCTS_DIR; };
+        B00000010000000000000070 /* libOigoIdentity.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoIdentity.a; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000052 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Oigo/Assets.xcassets; sourceTree = "<group>"; };
         B00000010000000000000053 /* OigoNativeUIContractTests */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = OigoNativeUIContractTests; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000029 /* GlobalShortcutRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutRegistration.swift; sourceTree = "<group>"; };
@@ -264,6 +279,11 @@
         B0000001000000000000005B /* Task16KeyboardReleaseProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Task16KeyboardReleaseProbe.swift; sourceTree = "<group>"; };
         B0000001000000000000005C /* Task16KeyboardReleaseReceipt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Task16KeyboardReleaseReceipt.swift; sourceTree = "<group>"; };
         B0000001000000000000005D /* AppShortcutRegistrationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcutRegistrationController.swift; sourceTree = "<group>"; };
+        B00000010000000000000072 /* Task8ControlObservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Task8ControlObservation.swift; sourceTree = "<group>"; };
+        B00000010000000000000073 /* OigoUtilityWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OigoUtilityWindow.swift; sourceTree = "<group>"; };
+        B00000010000000000000074 /* OnboardingShellLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingShellLayout.swift; sourceTree = "<group>"; };
+        B00000010000000000000075 /* OnboardingShellMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingShellMetrics.swift; sourceTree = "<group>"; };
+        B00000010000000000000076 /* OnboardingShellContractFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingShellContractFactory.swift; sourceTree = "<group>"; };
         B00000010000000000000030 /* GlobalShortcutIntentController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutIntentController.swift; sourceTree = "<group>"; };
         B00000010000000000000031 /* ShortcutPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutPresentation.swift; sourceTree = "<group>"; };
         B00000010000000000000032 /* ShortcutFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutFormatter.swift; sourceTree = "<group>"; };
@@ -311,6 +331,7 @@
                 A00000010000000000000026 /* ServiceManagement.framework in Frameworks */,
                 A00000010000000000000061 /* libMacUtilityUI.a in Frameworks */,
                 A00000010000000000000064 /* libOigoPresentation.a in Frameworks */,
+                A00000010000000000000070 /* libOigoIdentity.a in Frameworks */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -397,6 +418,16 @@
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
+        D0000001000000000000001E /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A00000010000000000000071 /* libOigoPresentation.a in Frameworks */,
+                A0000001000000000000005B /* Foundation.framework in Frameworks */,
+                A0000001000000000000005C /* AppKit.framework in Frameworks */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
         D0000001000000000000001A /* Frameworks */ = {
             isa = PBXFrameworksBuildPhase;
             buildActionMask = 2147483647;
@@ -436,6 +467,11 @@
                 B00000010000000000000001 /* main.swift */,
                 B00000010000000000000002 /* OigoAppDelegate.swift */,
                 B00000010000000000000003 /* StatusSurfaceController.swift */,
+                B00000010000000000000072 /* Task8ControlObservation.swift */,
+                B00000010000000000000073 /* OigoUtilityWindow.swift */,
+                B00000010000000000000074 /* OnboardingShellLayout.swift */,
+                B00000010000000000000075 /* OnboardingShellMetrics.swift */,
+                B00000010000000000000076 /* OnboardingShellContractFactory.swift */,
                 B00000010000000000000005 /* SettingsWindowController.swift */,
                 B00000010000000000000020 /* HistoryWindowController.swift */,
                 B00000010000000000000024 /* LaunchAtLoginService.swift */,
@@ -560,6 +596,7 @@
                 B00000010000000000000051 /* libMacUtilityUI.a */,
                 B00000010000000000000053 /* OigoNativeUIContractTests */,
                 B00000010000000000000055 /* libOigoPresentation.a */,
+                B00000010000000000000070 /* libOigoIdentity.a */,
             );
             name = Products;
             sourceTree = "<group>";
@@ -618,9 +655,9 @@
                 J00000010000000000000008 /* PBXTargetDependency */,
                 J0000001000000000000000B /* PBXTargetDependency */,
                 J0000001000000000000000E /* PBXTargetDependency */,
+                J00000010000000000000012 /* PBXTargetDependency */,
             );
             fileSystemSynchronizedGroups = (
-                C00000010000000000000013 /* Oigo Identity */,
                 C00000010000000000000015 /* Oigo HUD */,
             );
             name = Oigo;
@@ -793,6 +830,26 @@
             productReference = B00000010000000000000055 /* libOigoPresentation.a */;
             productType = "com.apple.product-type.library.static";
         };
+        E0000001000000000000000B /* OigoIdentity */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = T00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoIdentity" */;
+            buildPhases = (
+                D0000001000000000000001D /* Sources */,
+                D0000001000000000000001E /* Frameworks */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+                J00000010000000000000012 /* PBXTargetDependency */,
+            );
+            fileSystemSynchronizedGroups = (
+                C00000010000000000000013 /* Oigo Identity */,
+            );
+            name = OigoIdentity;
+            productName = OigoIdentity;
+            productReference = B00000010000000000000070 /* libOigoIdentity.a */;
+            productType = "com.apple.product-type.library.static";
+        };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -857,6 +914,7 @@
                 E00000010000000000000008 /* MacUtilityUI */,
                 E00000010000000000000009 /* OigoNativeUIContractTests */,
                 E0000001000000000000000A /* OigoPresentation */,
+                E0000001000000000000000B /* OigoIdentity */,
             );
         };
 /* End PBXProject section */
@@ -890,6 +948,11 @@
                 A00000010000000000000001 /* main.swift in Sources */,
                 A00000010000000000000002 /* OigoAppDelegate.swift in Sources */,
                 A00000010000000000000003 /* StatusSurfaceController.swift in Sources */,
+                A00000010000000000000072 /* Task8ControlObservation.swift in Sources */,
+                A00000010000000000000073 /* OigoUtilityWindow.swift in Sources */,
+                A00000010000000000000074 /* OnboardingShellLayout.swift in Sources */,
+                A00000010000000000000075 /* OnboardingShellMetrics.swift in Sources */,
+                A00000010000000000000076 /* OnboardingShellContractFactory.swift in Sources */,
                 A00000010000000000000005 /* SettingsWindowController.swift in Sources */,
                 A00000010000000000000023 /* HistoryWindowController.swift in Sources */,
                 A00000010000000000000027 /* LaunchAtLoginService.swift in Sources */,
@@ -1014,6 +1077,13 @@
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
+        D0000001000000000000001D /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -1091,6 +1161,11 @@
             isa = PBXTargetDependency;
             target = E00000010000000000000008 /* MacUtilityUI */;
             targetProxy = K00000010000000000000010 /* PBXContainerItemProxy */;
+        };
+        J00000010000000000000012 /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = E0000001000000000000000A /* OigoPresentation */;
+            targetProxy = K00000010000000000000011 /* PBXContainerItemProxy */;
         };
 /* End PBXTargetDependency section */
 
@@ -1363,6 +1438,30 @@
             };
             name = Release;
         };
+        T00000010000000000000001 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = "$(ARCHS_STANDARD)";
+                CODE_SIGNING_ALLOWED = NO;
+                CODE_SIGN_IDENTITY = "";
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_NAME = OigoIdentity;
+                SKIP_INSTALL = YES;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Debug;
+        };
+        T00000010000000000000002 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ARCHS = "$(ARCHS_STANDARD)";
+                MACOSX_DEPLOYMENT_TARGET = 26.0;
+                PRODUCT_NAME = OigoIdentity;
+                SKIP_INSTALL = YES;
+                SWIFT_STRICT_CONCURRENCY = complete;
+            };
+            name = Release;
+        };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1461,6 +1560,15 @@
             buildConfigurations = (
                 S00000010000000000000001 /* Debug */,
                 S00000010000000000000002 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        T00000010000000000000011 /* Build configuration list for PBXNativeTarget "OigoIdentity" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                T00000010000000000000001 /* Debug */,
+                T00000010000000000000002 /* Release */,
             );
             defaultConfigurationIsVisible = 0;
             defaultConfigurationName = Release;
