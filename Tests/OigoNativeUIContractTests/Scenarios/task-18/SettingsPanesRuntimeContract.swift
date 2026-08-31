@@ -111,7 +111,10 @@ enum SettingsPanesRuntimeContract {
             do {
                 let factory = try Factory()
                 switch requested {
-                case "all": try base(factory)
+                case "all":
+                    try base(factory)
+                    let failureFactory = try Factory()
+                    try failure(failureFactory)
                 case "H105-06", "H105-07", "H105-08": try h105(factory, name: requested)
                 default: throw NSError(domain: "settings", code: 2)
                 }
