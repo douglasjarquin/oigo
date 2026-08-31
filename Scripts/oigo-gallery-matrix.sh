@@ -65,7 +65,16 @@ while IFS='|' read -r scenario suite fixture_subpath; do
     session_path="$qa_root/session/$task_id"
     row_evidence="$evidence_root/$scenario"
     if ((read_only)); then
-        [[ -d "$fixture_path" && -d "$session_path" && -d "$row_evidence" ]] || { overall=1; continue; }
+        [[ -d "$fixture_path" && -d "$session_path" && -d "$row_evidence" ]] || fail missing-fixture
+        [[ -f "$row_evidence/exit" && -f "$row_evidence/screenshot-receipt.json" ]] || fail missing-marked-run
+        row_exit=$(cat "$row_evidence/exit")
+        [[ "$row_exit" == 0 ]] || {
+            printf 'ERROR row-failed scenario=%s suite=%s fixture=%s exit=%s category=marked-run-failed\n' \
+                "$scenario" "$suite" "$fixture_subpath" "$row_exit" >&2
+            overall=1
+        }
+        row_count=$((row_count + 1))
+        continue
     else
         mkdir -p "$fixture_path" "$session_path" "$row_evidence"
     fi
