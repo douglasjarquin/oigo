@@ -1,0 +1,4 @@
+# Disposable negative fixture for the Task 34 scope checker.
+design/Oigo Icon.dc.html
+site/
+.github/workflows/
