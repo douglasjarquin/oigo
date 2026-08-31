@@ -442,6 +442,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         let dictationTitle = heading("Dictation")
         let dictionaryPaneTitle = heading("Dictionary")
         let privacyPaneTitle = heading("Data & Privacy")
+        identify(generalTitle, as: "section-general")
+        identify(dictationTitle, as: "section-dictation")
+        identify(dictionaryPaneTitle, as: "section-dictionary")
+        identify(privacyPaneTitle, as: "section-data-privacy")
         let description = NSTextField(
             wrappingLabelWithString: "Changes apply immediately. Oigo checks permissions when this window becomes active or when you refresh them."
         )
@@ -449,31 +453,33 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         nextDictationNotice.textColor = MacUITokens.Colors.secondaryLabel
         nextDictationNotice.isHidden = true
 
-        let shortcutTitle = NSTextField(labelWithString: "Global shortcut")
+        let shortcutTitle = NSTextField(labelWithString: "Dictation shortcut:")
         shortcutHelp.stringValue = committedShortcutCopy.settingsHint
         shortcutHelp.textColor = MacUITokens.Colors.secondaryLabel
         identify(shortcutHelp, as: "shortcut-help")
         identify(shortcutStatus, as: "shortcut-status")
         identify(messageLabel, as: "save-message")
         identify(dictationMessage, as: "dictation-message")
-        let modeLabel = NSTextField(labelWithString: "Default mode")
-        let localeLabel = NSTextField(labelWithString: "Dictation language")
-        let retentionLabel = NSTextField(labelWithString: "Audio retention")
-        let inputLabel = NSTextField(labelWithString: "Microphone input")
-        let channelLabel = NSTextField(labelWithString: "Input channel")
+        let modeLabel = NSTextField(labelWithString: "Processing mode:")
+        let localeLabel = NSTextField(labelWithString: "Language:")
+        let retentionLabel = NSTextField(labelWithString: "Audio retention:")
+        let inputLabel = NSTextField(labelWithString: "Microphone:")
+        let channelLabel = NSTextField(labelWithString: "Channel:")
 
         let refreshButton = NSButton(title: "Refresh permission states", target: self, action: #selector(refreshPermissionStates))
         let microphoneSettingsButton = NSButton(title: "Open Microphone Settings", target: self, action: #selector(openMicrophoneSettingsAction))
         let accessibilitySettingsButton = NSButton(title: "Open Accessibility Settings", target: self, action: #selector(openAccessibilitySettingsAction))
         let retryStorageButton = NSButton(title: "Retry Storage", target: self, action: #selector(retryStorageAction))
         self.retryStorageButton = retryStorageButton
-        let rerunButton = NSButton(title: "Re-run onboarding and permission checks", target: self, action: #selector(rerunOnboardingAction))
+        let rerunButton = NSButton(title: "Run Setup Assistant Again…", target: self, action: #selector(rerunOnboardingAction))
         let historyButton = NSButton(title: "Open History", target: self, action: #selector(openHistoryAction))
         let dataButton = NSButton(title: "Open Oigo data folder", target: self, action: #selector(openDataFolderAction))
         let deleteButton = NSButton(title: "Delete All History…", target: self, action: #selector(deleteAllHistoryAction))
         deleteButton.hasDestructiveAction = true
         let exportButton = NSButton(title: "Export Diagnostics…", target: self, action: #selector(exportDiagnosticsAction))
         identify(shortcutRecorder, as: "shortcut-recorder")
+        launchAtLoginCheckbox.title = "Open Oigo automatically"
+        previewCheckbox.title = "Show live transcript preview"
         identify(launchAtLoginCheckbox, as: "launch-at-login")
         identify(openLoginItemsButton, as: "open-login-items")
         identify(previewCheckbox, as: "volatile-preview")
@@ -511,7 +517,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         messageLabel.textColor = MacUITokens.Colors.secondaryLabel
         messageLabel.maximumNumberOfLines = 4
         dictationMessage.font = MacUITokens.Typography.secondary
-        dictationMessage.textColor = .systemOrange
+        dictationMessage.textColor = MacUITokens.Colors.warning
         dictationMessage.maximumNumberOfLines = 3
 
         let shortcutRow = NSStackView(views: [shortcutTitle, shortcutRecorder])
@@ -533,7 +539,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         let dictionaryHelp = NSTextField(
             wrappingLabelWithString: "Canonical spellings are supplied to Speech and used for deterministic normalization. Editing the dictionary never rewrites historical transcripts."
         )
-        dictionaryHelp.textColor = .secondaryLabelColor
+        dictionaryHelp.textColor = MacUITokens.Colors.secondaryLabel
+        identify(dictionaryHelp, as: "dictionary-helper")
         configureDictionaryTable()
         let dictionaryScroll = NSScrollView()
         dictionaryScroll.hasVerticalScroller = true
@@ -560,14 +567,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         sampleField.target = self
         sampleField.action = #selector(previewSampleChanged)
         identify(sampleField, as: "dictionary-preview")
-        previewLabel.textColor = .secondaryLabelColor
+        previewLabel.textColor = MacUITokens.Colors.secondaryLabel
         previewLabel.maximumNumberOfLines = 3
-        dictionaryMessage.textColor = .systemOrange
+        dictionaryMessage.textColor = MacUITokens.Colors.warning
         dictionaryMessage.maximumNumberOfLines = 3
         let sampleRow = row(label: sampleLabel, control: sampleField)
 
         let permissionsTitle = NSTextField(labelWithString: "Permissions")
-        permissionsTitle.font = .boldSystemFont(ofSize: 13)
+        permissionsTitle.font = MacUITokens.Typography.section
+        identify(permissionsTitle, as: "section-permissions")
         let permissionStack = NSStackView(views: [microphoneStatus, microphoneSettingsButton, accessibilityStatus, accessibilitySettingsButton, refreshButton])
         permissionStack.orientation = .vertical
         permissionStack.alignment = .leading
@@ -815,9 +823,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         launchAtLoginStatusLabel.stringValue = presentation.detail
         openLoginItemsButton.isHidden = !presentation.showsOpenLoginItems
         if !presentation.allowsCheckboxMutation {
-            launchAtLoginStatusLabel.textColor = .systemOrange
+            launchAtLoginStatusLabel.textColor = MacUITokens.Colors.warning
         } else {
-            launchAtLoginStatusLabel.textColor = .secondaryLabelColor
+            launchAtLoginStatusLabel.textColor = MacUITokens.Colors.secondaryLabel
         }
     }
 
@@ -842,6 +850,41 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             recorderDisplay: shortcutRecorder.displayValue,
             recorderAccessibilityValue: shortcutRecorder.accessibilityValue() as? String ?? ""
         )
+    }
+
+    @discardableResult
+    func task28SelectLocaleForTesting(_ identifier: String) -> Bool {
+        if !localeSelection.hasLoadedSupported {
+            localeSelection.loadSupported(["en-US", "es-MX"])
+        }
+        localeSelection.select(identifier)
+        syncLocalePopup()
+        dictationMessage.stringValue = localeSelection.statusMessage
+        guard let request = localeSelection.beginAssetRequest(status: .installing) else {
+            return false
+        }
+        isCheckingLocale = true
+        let inspectAssets = checkSpeechAssets
+        saveTask = Task { @MainActor [weak self] in
+            let status = await inspectAssets(request.localeIdentifier)
+            guard let self else { return }
+            defer { self.saveTask = nil }
+            guard !Task.isCancelled, !isDismissed, isPresented() else { return }
+            let applied = localeSelection.applyAssetResult(
+                localeIdentifier: request.localeIdentifier,
+                generation: request.generation,
+                status: status
+            )
+            isCheckingLocale = false
+            guard applied, localeSelection.canConfirm,
+                  let locale = localeSelection.selectedIdentifier else {
+                return
+            }
+            if finishSave(committedSettings.with(localeIdentifier: locale), languageUnappliedMessage: nil) {
+                _ = localeSelection.confirm()
+            }
+        }
+        return true
     }
 
     @objc private func refreshPermissionStates() {
@@ -1080,6 +1123,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     private func configureDictionaryTable() {
+        dictionaryTable.identifier = NSUserInterfaceItemIdentifier("oigo.settings.dictionary-table")
+        dictionaryTable.setAccessibilityIdentifier("oigo.settings.dictionary-table")
+        dictionaryTable.setAccessibilityElement(true)
+        dictionaryTable.setAccessibilityRole(.table)
+        dictionaryTable.setAccessibilityLabel("Custom dictionary entries")
         dictionaryTable.addTableColumn(column(identifier: "canonical", title: "Canonical", width: 140))
         dictionaryTable.addTableColumn(column(identifier: "aliases", title: "Aliases", width: 220))
         dictionaryTable.addTableColumn(column(identifier: "locale", title: "Locale", width: 80))
@@ -1239,7 +1287,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             dictionaryMessage.stringValue = error
         } else {
             committedDictionaryEntries = dictionaryEntries
-            dictionaryMessage.stringValue = ""
+            dictionaryMessage.stringValue = "Saved."
         }
     }
 }
