@@ -42,7 +42,7 @@ elif [[ -n "${values[case]-}" ]]; then
 fi
 
 run_global_shortcut=false
-if [[ "$scenario" == global-shortcut ]]; then
+if [[ "$scenario" == global-shortcut || ("$scenario" == all && "$run_global_shortcut" == true) ]]; then
     run_global_shortcut=true
 elif [[ "$scenario" == all && -n "${values[frontmost-app]-}" ]]; then
     run_global_shortcut=true
