@@ -1,8 +1,8 @@
 # Oigo native UI audit
 
 EXECUTION_BASE_SHA=a8315736e9b9ebb8c8e0a4bd6caa987eb67b2c37
-CURRENT_HEAD_SHA=35e743f285d0617d586784e8d64080d8f10471a0
 IMPLEMENTATION_SHA=35e743f285d0617d586784e8d64080d8f10471a0
+AUDIT_COMMIT_SHA=0c514eec2e977bf7fe457d3d80f3f5eff91c518e
 REVIEWED_PLAN_SHA=4b7cf8d3e0e323b5b3d7e0f17467e5b99901682b81255ad5f06c33ad2e42a198
 BUNDLE_SHA=sha256:8245f3f18950f9a929e5777dad96f24f8c54a76695bc401d5cb771dd4fc96e65
 UNRELATED_WORKFLOW_RENAME=#140 ci: drop "master" from project workflow
@@ -10,7 +10,8 @@ UNRELATED_WORKFLOW_RENAME=#140 ci: drop "master" from project workflow
 ## Reading this audit
 
 The design artifacts named here describe approved intent and are not evidence that the native application implements or renders that intent.
-The source owner is the current authority at `CURRENT_HEAD_SHA`; a mismatch states the work still owned by the listed child issue.
+The stable implementation source is identified by `IMPLEMENTATION_SHA`.
+The explicit validator invocation's `--audit-sha` is authoritative for audit provenance; `AUDIT_COMMIT_SHA` records the already-fixed audit parent and is not a self-referential current-head field.
 Data disposition excludes transcript bodies, audio, clipboard values, dictionary terms, focused-element text, and target coordinates from the future presentation projection unless a row explicitly names an existing durable owner.
 `DETERMINISTIC PASS` identifies an executable or source-contract seam only.
 `NATIVE INCONCLUSIVE` means an app-bundle and the corresponding observed AppKit behavior are still required.
@@ -70,12 +71,12 @@ No row below makes a native claim from HTML, grep, or SwiftPM output.
 
 The current head contains the immutable `OigoPresentationState` adapter, typed publication boundary, generic `MacUtilityUI` layer, identity source and renderer, transient popover, HUD placement and state policy, Paste Again handoff contracts, and the four-stage onboarding flow.
 `OigoAppDelegate.capturePresentationInputs()` constructs one presentation state, and `publishPresentation()` sends that immutable publication to the instantiated surfaces behind `OigoPresentationGenerationFence`.
-The native visual proof, four-pane Settings, and split History workspace are implemented at `CURRENT_HEAD_SHA`; accessibility, keyboard, appearance, restoration, and lifecycle verification remains owned by #139.
+The native visual proof, four-pane Settings, and split History workspace are implemented at `IMPLEMENTATION_SHA`; accessibility, keyboard, appearance, restoration, and lifecycle verification remains owned by #139.
 Issue #140 is unrelated workflow terminology cleanup at the recorded base and does not alter this audit's product behavior boundary.
 
 ## Current F3 release artifact
 
-The current F3 rerun is bound to `CURRENT_HEAD_SHA` and bundle `sha256:8245f3f18950f9a929e5777dad96f24f8c54a76695bc401d5cb771dd4fc96e65`.
+The current F3 rerun is bound to `IMPLEMENTATION_SHA` and bundle `sha256:8245f3f18950f9a929e5777dad96f24f8c54a76695bc401d5cb771dd4fc96e65`.
 
 ## Historical Task33 release artifact
 
@@ -99,7 +100,7 @@ The prior F3 evidence used audit source `25347f64046998f37f00316a0f4b93fb5671f65
 - `swift run oigo-native-ui-contract-tests --scenario settings-panes --defaults-suite com.oigo.qa.task18 --fixture-root T/oigo-native-ui-redesign.issue137/task-18`, `swift build --product Oigo`, and `xcodebuild -project Oigo.xcodeproj -scheme Oigo -configuration Debug -derivedDataPath .build/settings-qa build` pass.
 - The native Settings bundle was launched in isolation, its live PID was enumerated with CoreGraphics, and `screencapture -x -t jpg -l <windowID>` captured all four restored panes in `.omo/evidence/issue137/native-final/`.
 
-## #131 implementation evidence at `CURRENT_HEAD_SHA`
+## #131 implementation evidence at `IMPLEMENTATION_SHA`
 
 - `Sources/Oigo/UI/Presentation/OigoPresentationInputs.swift` contains value-only snapshots of operation, storage, permissions, shortcut, input, locale, configuration, terminal, latest-session, playback, onboarding, and shutdown inputs.
 - `Sources/Oigo/UI/Presentation/OigoPresentationState.swift` contains the typed surface rows, actions, notices, terminal classes, HUD policies, availability, and copy-only posture.

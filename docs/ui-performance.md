@@ -1,9 +1,10 @@
 # Oigo integrated UI performance and lifecycle evidence
 
-CURRENT_HEAD_SHA=35e743f285d0617d586784e8d64080d8f10471a0
 IMPLEMENTATION_SHA=35e743f285d0617d586784e8d64080d8f10471a0
+AUDIT_COMMIT_SHA=0c514eec2e977bf7fe457d3d80f3f5eff91c518e
 BUNDLE_SHA=sha256:8245f3f18950f9a929e5777dad96f24f8c54a76695bc401d5cb771dd4fc96e65
 Reviewed implementation SHA: `35e743f285d0617d586784e8d64080d8f10471a0`.
+The explicit provenance validator `--audit-sha` argument is authoritative for audit-only descendants; this document does not encode a self-referential current-head value.
 The native unsigned Release artifact was built with Xcode 17F113 on macOS 26.6.2 build 25G83.
 The host model is Mac15,11 with 14 logical CPUs and 36 GB of memory.
 The tested application is the unsigned local Release `Oigo.app` built from `Oigo.xcodeproj` and scheme `Oigo`.
