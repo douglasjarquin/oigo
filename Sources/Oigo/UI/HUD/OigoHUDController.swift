@@ -43,6 +43,7 @@ public struct OigoHUDResourceSnapshot: Equatable, Sendable {
     public let dismissalTaskActive: Bool
     public let previewCharacters: Int
     public let sessionReferenceHeld: Bool
+    public let recordingTimerStartCount: Int
 
     public init(
         state: OigoHUDState?,
@@ -51,7 +52,8 @@ public struct OigoHUDResourceSnapshot: Equatable, Sendable {
         recordingTimerActive: Bool,
         dismissalTaskActive: Bool,
         previewCharacters: Int,
-        sessionReferenceHeld: Bool
+        sessionReferenceHeld: Bool,
+        recordingTimerStartCount: Int
     ) {
         self.state = state
         self.generation = generation
@@ -60,6 +62,7 @@ public struct OigoHUDResourceSnapshot: Equatable, Sendable {
         self.dismissalTaskActive = dismissalTaskActive
         self.previewCharacters = previewCharacters
         self.sessionReferenceHeld = sessionReferenceHeld
+        self.recordingTimerStartCount = recordingTimerStartCount
     }
 }
 
@@ -80,6 +83,7 @@ public final class OigoHUDController {
     private var shortcutReleaseHint: String?
     private var sessionReference: AnyObject?
     private var renderRevision: UInt64 = 0
+    private var recordingTimerStartCount = 0
 
     public init() {
         panel = MacUIFloatingPanel(
@@ -110,7 +114,8 @@ public final class OigoHUDController {
             recordingTimerActive: recordingTimer != nil,
             dismissalTaskActive: dismissalTask != nil,
             previewCharacters: previewText.count,
-            sessionReferenceHeld: sessionReference != nil
+            sessionReferenceHeld: sessionReference != nil,
+            recordingTimerStartCount: recordingTimerStartCount
         )
     }
 
@@ -355,6 +360,7 @@ public final class OigoHUDController {
 
     private func startRecordingTimer() {
         guard lifecycle.recordingTimerActive, panel.isVisible else { return }
+        recordingTimerStartCount += 1
         recordingTimer = Timer(
             timeInterval: OigoHUDShellPolicy.recordingTimerInterval,
             repeats: true

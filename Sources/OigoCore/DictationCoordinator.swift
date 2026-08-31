@@ -479,6 +479,7 @@ public final class DictationCoordinator {
         format: AudioCaptureFormat,
         now: Date = Date(),
         configuration: DictationConfigurationSnapshot? = nil,
+        onAudioReady: @escaping () -> Void = {},
         onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in }
     ) async throws -> DictationSession {
         try await startRecordingWithTranscriptionInternal(
@@ -489,6 +490,7 @@ public final class DictationCoordinator {
             session: nil,
             now: now,
             configuration: configuration,
+            onAudioReady: onAudioReady,
             onUpdate: onUpdate
         )
     }
@@ -501,6 +503,7 @@ public final class DictationCoordinator {
         format: AudioCaptureFormat,
         now: Date = Date(),
         configuration: DictationConfigurationSnapshot? = nil,
+        onAudioReady: @escaping () -> Void = {},
         onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in }
     ) async throws -> DictationSession {
         try await startRecordingWithTranscriptionInternal(
@@ -511,6 +514,7 @@ public final class DictationCoordinator {
             session: session,
             now: now,
             configuration: configuration,
+            onAudioReady: onAudioReady,
             onUpdate: onUpdate
         )
     }
@@ -523,6 +527,7 @@ public final class DictationCoordinator {
         session: DictationSession?,
         now: Date,
         configuration: DictationConfigurationSnapshot?,
+        onAudioReady: @escaping () -> Void,
         onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
     ) async throws -> DictationSession {
         reapReleasedTranscription()
@@ -590,19 +595,10 @@ public final class DictationCoordinator {
                 )
             }
             try Task.checkCancellation()
-            preparedSession = try store.update(
-                currentSession ?? persistedSession,
-                state: .recording,
-                at: now,
-                failureReason: liveTranscriptionDegradation?.rawValue,
-                failureCode: liveTranscriptionDegradation != nil ? .transcriptionFailed : nil
-            )
-            _ = try apply(.prepared)
-            currentSession = preparedSession
-            let audioDescriptor = try store.createAudioFileDescriptor(for: preparedSession)
+            let audioDescriptor = try store.createAudioFileDescriptor(for: persistedSession)
             activeAudioDescriptor = try store.duplicateAudioFileDescriptor(
                 audioDescriptor,
-                for: preparedSession
+                for: persistedSession
             )
             try capture.start(
                 to: audioDescriptor,
@@ -627,6 +623,16 @@ public final class DictationCoordinator {
                     }
                 }
             )
+            onAudioReady()
+            preparedSession = try store.update(
+                currentSession ?? persistedSession,
+                state: .recording,
+                at: now,
+                failureReason: liveTranscriptionDegradation?.rawValue,
+                failureCode: liveTranscriptionDegradation != nil ? .transcriptionFailed : nil
+            )
+            _ = try apply(.prepared)
+            currentSession = preparedSession
             if liveTranscriptionDegradation == nil {
                 lastFailureReason = nil
                 lastFailureCode = nil

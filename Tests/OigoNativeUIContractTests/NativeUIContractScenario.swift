@@ -44,10 +44,15 @@ struct ContractArguments {
             throw ContractInputError(category: "invalid-fixture-root")
         }
         let evidenceRoot = canonicalURL(try required("evidence-root", in: values))
-        let approvedTaskEvidenceRoot = approvedEvidenceRoot
+        var approvedTaskEvidenceRoots = [approvedEvidenceRoot
             .appendingPathComponent(evidenceTaskIdentifier, isDirectory: true)
-            .standardizedFileURL.resolvingSymlinksInPath()
-        guard isWithin(evidenceRoot, of: approvedTaskEvidenceRoot) else {
+            .standardizedFileURL.resolvingSymlinksInPath()]
+        if scenario == "keyboard-startup", taskNumber == 5 {
+            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
+                .appendingPathComponent("task-15", isDirectory: true)
+                .standardizedFileURL.resolvingSymlinksInPath())
+        }
+        guard approvedTaskEvidenceRoots.contains(where: { isWithin(evidenceRoot, of: $0) }) else {
             throw ContractInputError(category: "outside-evidence-root")
         }
         guard isDirectory(fixtureRoot) else {

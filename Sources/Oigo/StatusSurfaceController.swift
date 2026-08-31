@@ -281,4 +281,8 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
         hudState = nil
         hudGeneration = nil
     }
+
+    var hudResourceSnapshot: OigoHUDResourceSnapshot {
+        hudController.resourceSnapshot
+    }
 }

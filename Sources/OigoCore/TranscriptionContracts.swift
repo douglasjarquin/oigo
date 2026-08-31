@@ -4,6 +4,52 @@ public protocol DictationStartupFailureEvidence: Error, Sendable {
     var dictationStartupFailureReason: String { get }
 }
 
+public enum KeyboardStartupLocaleBindingFailure: Error, Equatable, Sendable,
+    DictationStartupFailureEvidence {
+    case staleGeneration
+    case localeMismatch
+    case assetsNotReady
+
+    public var dictationStartupFailureReason: String {
+        switch self {
+        case .staleGeneration:
+            "speech assets were verified for a stale dictation generation"
+        case .localeMismatch:
+            "speech assets were verified for a different dictation language"
+        case .assetsNotReady:
+            "speech assets are not ready for the selected dictation language"
+        }
+    }
+}
+
+public struct KeyboardStartupLocaleBinding: Equatable, Sendable {
+    public let generation: UInt64
+    public let localeIdentifier: String
+
+    public init(
+        generation: UInt64,
+        currentGeneration: UInt64,
+        requestedLocaleIdentifier: String,
+        configuredLocaleIdentifier: String,
+        verifiedLocaleIdentifier: String?
+    ) throws {
+        guard generation > 0, generation == currentGeneration else {
+            throw KeyboardStartupLocaleBindingFailure.staleGeneration
+        }
+        guard let verifiedLocaleIdentifier else {
+            throw KeyboardStartupLocaleBindingFailure.assetsNotReady
+        }
+        let requested = Locale(identifier: requestedLocaleIdentifier).identifier
+        let configured = Locale(identifier: configuredLocaleIdentifier).identifier
+        let verified = Locale(identifier: verifiedLocaleIdentifier).identifier
+        guard requested == configured, configured == verified else {
+            throw KeyboardStartupLocaleBindingFailure.localeMismatch
+        }
+        self.generation = generation
+        localeIdentifier = verified
+    }
+}
+
 public enum KeyboardStartupReadinessFailure: String, Equatable, Sendable {
     case microphoneDenied = "microphone-denied"
     case inputUnavailable = "input-unavailable"
