@@ -549,9 +549,9 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             try writeCaseReceipt(
                 name: "H105-01",
                 setup: "production language controller with en-US committed and es-MX supported",
-                trigger: "select es-MX before speech readiness, then check assets",
-                expected: "unavailable result is attached to es-MX and Continue stays disabled",
-                failure: "no locale or other setting is committed"
+                trigger: "start the en-US readiness check, switch to es-MX while that check is active, then deliver the stale en-US result",
+                expected: "readiness starts for en-US, locale switches to es-MX during the active check, and the stale result is rejected with Continue disabled",
+                failure: "stale readiness cannot overwrite es-MX, commit the locale, enable Continue, or mutate any other setting"
             )
         }
 
