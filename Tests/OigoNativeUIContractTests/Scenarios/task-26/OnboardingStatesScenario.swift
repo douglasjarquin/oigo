@@ -451,13 +451,24 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             if caseName.isEmpty || caseName == "H105-05" {
             let tryFactory = try OnboardingShellContractFactory(defaultsSuite: "com.oigo.qa.task26")
             let tryController = tryFactory.makeController(initialStep: .testDictation)
-            let trySettings = tryFactory.settingsStore.load()
+                let trySettings = tryFactory.settingsStore.load()
             tryController.showAndFocus()
             guard let tryContent = tryController.window?.contentView else { throw ProbeError.missingWindow }
             try sendClick(in: tryContent, identifier: fixture.controls.stageAction)
             try wait(until: { tryFactory.testGenerations.count == 1 })
+            let testGeneration = tryFactory.testGenerations[0]
+            let closedObservation = tryController.task8ShortcutObservation()
             tryController.window?.close()
-            guard tryFactory.testCancelCount >= 1,
+            guard tryFactory.testCancelCount >= 1 else { throw ProbeError.cleanupMismatch }
+            let staleSessionID = UUID()
+            tryController.applyTestCompletion(
+                generation: testGeneration,
+                sessionID: staleSessionID,
+                report: productionReport(sessionID: staleSessionID),
+                selectedInsertionText: "stale completion"
+            )
+            guard sameObservation(tryController.task8ShortcutObservation(), closedObservation),
+                  tryFactory.testCancelCount >= 1,
                   tryFactory.settingsStore.load() == trySettings else { throw ProbeError.cleanupMismatch }
             let reopened = tryFactory.makeController(initialStep: .testDictation)
             reopened.showAndFocus()
@@ -465,7 +476,7 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
                   let reopenedField = findField(in: reopenedContent, identifier: fixture.controls.testField),
                   reopenedField.stringValue.isEmpty else { throw ProbeError.staleSuccess }
             reopened.window?.close()
-            print("PASS H105-05 close-during-try cancel=observed reopen=clean stale-success=absent")
+            print("PASS H105-05 close-during-try cancel=observed stale-completion=ignored reopen=clean stale-success=absent")
             try writeCaseReceipt(
                 name: "H105-05",
                 setup: "production Try It controller with active test generation",
@@ -517,23 +528,24 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
                 meterLevel: 0.5
             ))
             guard let popup = findPopup(in: content, identifier: "oigo.onboarding.language") else { throw ProbeError.missingControl }
-            popup.selectItem(at: 1)
-            popup.sendAction(popup.action, to: popup.target)
-            guard findButton(in: content, identifier: fixture.controls.continue)?.isEnabled == false else {
-                throw ProbeError.generationMismatch
-            }
             try sendClick(in: content, identifier: fixture.controls.stageAction)
             try wait(until: { factory.assetRequestLocales.count == 1 })
+            popup.selectItem(at: 1)
+            popup.sendAction(popup.action, to: popup.target)
+            guard findButton(in: content, identifier: fixture.controls.continue)?.isEnabled == false,
+                  visibleText(in: content, identifier: "oigo.onboarding.status").contains("not verified") else {
+                throw ProbeError.generationMismatch
+            }
             try wait(until: { factory.assetCompletionCount == 1 })
             let continueEnabled = findButton(in: content, identifier: fixture.controls.continue)?.isEnabled
             let status = visibleText(in: content, identifier: "oigo.onboarding.status")
             guard continueEnabled == false,
-                  status.contains("Speech assets: unavailable"),
+                  status.contains("Speech assets: not verified"),
                   factory.settingsStore.load() == committed else {
                 throw ProbeError.generationMismatch
             }
             controller.window?.close()
-            print("PASS H105-01 readiness-locale-switch=observed unavailable=actionable persistence=unchanged")
+            print("PASS H105-01 active-readiness-locale-switch=observed stale-readiness=ignored persistence=unchanged")
             try writeCaseReceipt(
                 name: "H105-01",
                 setup: "production language controller with en-US committed and es-MX supported",
@@ -702,6 +714,13 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
 
         func accessibilityLabel(in root: NSView, identifier: String) -> String {
             (allViews(root).first { $0.accessibilityIdentifier() == identifier }?.accessibilityLabel() as? String) ?? ""
+        }
+
+        func sameObservation(_ lhs: Task8ControlObservation, _ rhs: Task8ControlObservation) -> Bool {
+            lhs.status == rhs.status
+                && lhs.hint == rhs.hint
+                && lhs.recorderDisplay == rhs.recorderDisplay
+                && lhs.recorderAccessibilityValue == rhs.recorderAccessibilityValue
         }
 
         func sendClick(in content: NSView, identifier: String) throws {
