@@ -126,14 +126,21 @@ final class TranscriptionFailuresScenario: NativeUIContractScenario {
             throw ContractInputError(category: "malformed-transcription-unknown-state")
         }
         let committed = OigoPresentationPublication(inputs: try inputs(for: "interrupted", generation: 7))
+        let stale = OigoPresentationPublication(inputs: try inputs(for: "speech-unavailable", generation: 6))
         var fence = OigoPresentationGenerationFence()
         var published: OigoPresentationPublication?
         guard fence.publish(committed, to: { published = $0 }),
               published == committed,
-              !caseNames.contains(fixture.rejectedCase ?? "") else {
+              stale.generation == 6,
+              stale != committed else {
             throw ContractInputError(category: "transcription-transition-setup-failed")
         }
-        guard published == committed, published?.generation == 7, published?.state.row == .interrupted else {
+        var staleConsumerCalled = false
+        guard !fence.publish(stale, to: { _ in staleConsumerCalled = true }),
+              !staleConsumerCalled,
+              published == committed,
+              published?.generation == 7,
+              published?.state.row == .interrupted else {
             throw ContractInputError(category: "rejected-transition-mutated-committed-state")
         }
     }
