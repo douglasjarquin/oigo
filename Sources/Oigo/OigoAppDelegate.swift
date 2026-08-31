@@ -2580,7 +2580,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 mode: Self.presentationMode(settingsSnapshot.defaultMode)
             ),
             terminal: terminal,
-            latestSession: lastSession.map(Self.presentationLatestSession),
+            latestSession: lastSession.map { OigoSessionPresentationProjection.latestSession($0) },
             playback: Self.presentationPlayback(playback.currentState()),
             onboarding: Self.presentationOnboarding(onboarding),
             shutdown: .init(
@@ -2786,7 +2786,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             failure = .insertion
         case .failed:
             outcome = .failed
-            failure = Self.presentationFailure(lastSession?.metadata.failureCode)
+            failure = OigoSessionPresentationProjection.failure(lastSession?.metadata.failureCode)
         case .finalizing, .cleaning, .pasting, nil:
             guard let session = lastSession else {
                 return nil
@@ -2798,7 +2798,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 outcome = .interrupted
             case .failed:
                 outcome = .failed
-                failure = Self.presentationFailure(session.metadata.failureCode)
+                failure = OigoSessionPresentationProjection.failure(session.metadata.failureCode)
             case .completed:
                 if session.metadata.cleanupFallbackReason != nil {
                     outcome = .cleanupFallback
@@ -2829,31 +2829,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             outcome: outcome,
             failure: failure
         )
-    }
-
-    private static func presentationFailure(
-        _ code: DictationFailureCode?
-    ) -> OigoTerminalPresentationFailure? {
-        switch code {
-        case .audioWriteFailed:
-            .storage
-        case .microphonePermissionRevoked:
-            .permission
-        case .transcriptionFailed:
-            .transcription
-        case .transcriptionTimedOut:
-            .timeout
-        case .cleanupTimedOut:
-            .cleanup
-        case .targetLost:
-            .targetLost
-        case .audioInputDeviceChanged, .audioInputConfigurationChanged, .audioEngineStartFailed:
-            .capture
-        case .cancelled, .applicationQuit, .audioEngineInterrupted, .unknownFailure:
-            .unknown
-        case nil:
-            nil
-        }
     }
 
     private func presentationHUD(
@@ -2890,7 +2865,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .inserting:
             state = .pasting
         case .idle, .complete, .failed, .cancelled, .interrupted:
-            state = terminal.map(hudTerminalState)
+            state = terminal.flatMap { terminal in
+                let projected = OigoSessionPresentationProjection.terminalHUDState(
+                    for: terminal,
+                    latestSession: lastSession.map { OigoSessionPresentationProjection.latestSession($0) }
+                )
+                return OigoHUDState(rawValue: projected.rawValue)
+            }
         }
         guard let state else {
             return .hidden(generation: generation)
@@ -2906,28 +2887,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             preview: state == .recording && previewEnabled ? livePreview : "",
             shortcutCopy: shortcutCopy
         )
-    }
-
-    private func hudTerminalState(_ terminal: OigoTerminalPresentationInput) -> OigoHUDState {
-        switch terminal.outcome {
-        case .completed:
-            .terminal
-        case .pasteAttempted, .pasted:
-            .pasteAttempted
-        case .copied:
-            .copyOnly
-        case .cleanupFallback:
-            .cleanupFallback
-        case .insertionFailed, .failed:
-            .preservedFailure
-        case .retryRequired:
-            .savedRetry
-        case .cancelled:
-            (lastSession?.metadata.rawTextByteCount ?? 0) > 0
-                ? .cancelledAfterRaw : .cancelledBeforeRaw
-        case .interrupted:
-            .interrupted
-        }
     }
 
     private static func presentationOperationKind(
@@ -3042,44 +3001,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .failed: .failed
         case .unavailable: .unavailable
         case nil: .idle
-        }
-    }
-
-    private static func presentationLatestSession(
-        _ session: DictationSession
-    ) -> OigoLatestSessionPresentationInput {
-        let state: OigoLatestSessionPresentationState = switch session.metadata.state {
-        case .preparing: .preparing
-        case .recording: .recording
-        case .stopping: .stopping
-        case .retrying: .retrying
-        case .completed: .complete
-        case .failed: .failed
-        case .cancelled: .cancelled
-        case .interrupted: .interrupted
-        }
-        return OigoLatestSessionPresentationInput(
-            id: session.id,
-            state: state,
-            createdAt: session.metadata.createdAt,
-            hasAudio: (session.metadata.audioByteCount ?? 0) > 0,
-            hasTranscript: (session.metadata.rawTextByteCount ?? 0) > 0,
-            failure: Self.presentationFailure(session.metadata.failureCode),
-            durationSeconds: session.metadata.duration.map { max(0, Int($0.rounded())) },
-            source: Self.presentationLatestSource(session.metadata)
-        )
-    }
-
-    private static func presentationLatestSource(
-        _ metadata: SessionMetadata
-    ) -> OigoLatestSessionPresentationSource {
-        switch metadata.configurationSnapshot?.processingMode {
-        case .instant:
-            .instant
-        case .clean:
-            .clean
-        case nil:
-            .unknown
         }
     }
 
