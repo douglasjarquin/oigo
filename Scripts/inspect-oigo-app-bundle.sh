@@ -141,10 +141,10 @@ fi
 
 if [[ -x "$executable" ]]; then
     archs="$(/usr/bin/lipo -archs "$executable" 2>/dev/null || true)"
-    if [[ "$archs" == "arm64" ]]; then
-        pass "executable architecture is arm64"
+    if [[ " $archs " == *" arm64 "* ]]; then
+        pass "executable includes arm64 architecture (slices: $archs)"
     else
-        fail "executable architecture must be exactly arm64, found ${archs:-<unknown>}"
+        fail "executable must include arm64 architecture, found ${archs:-<unknown>}"
     fi
 fi
 

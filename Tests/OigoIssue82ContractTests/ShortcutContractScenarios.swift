@@ -5,12 +5,17 @@ import OigoHotKey
 
 @MainActor
 extension OigoIssue82ContractTests {
+    static func testKeyboardReleaseLifecycle() throws {
+        try Task16KeyboardReleaseContracts.verifyLifecycle()
+    }
+
     static func testShortcutContractDefaultAndMigration() throws {
         let legacy = ToggleShortcut(keyCode: 49, modifiers: 0x900)
-        let canonical = ToggleShortcut(keyCode: 49, modifiers: 0x300)
-        guard ToggleShortcut.default == canonical,
-              canonical.displayName == "Shift-Command-Space" else {
-            throw ContractFailure(message: "shortcut default did not use Shift-Command-Space")
+        let canonical = ToggleShortcut.fixedFn
+        guard canonical.keyCode == 63,
+              canonical.modifiers == 0,
+              canonical.displayName == "Fn" else {
+            throw ContractFailure(message: "shortcut default did not use Fn")
         }
 
         let suiteName = "oigo-issue82-shortcut-migration-" + UUID().uuidString
@@ -35,7 +40,7 @@ extension OigoIssue82ContractTests {
               loaded.audioRetention == stored.audioRetention,
               loaded.keepSuccessfulAudioIndefinitely == stored.keepSuccessfulAudioIndefinitely,
               loaded.launchAtLogin == stored.launchAtLogin else {
-            throw ContractFailure(message: "legacy v1 shortcut did not migrate without changing other settings")
+            throw ContractFailure(message: "legacy v1 shortcut did not reset to Fn without changing other settings")
         }
 
         let persisted = try JSONDecoder().decode(
@@ -58,8 +63,8 @@ extension OigoIssue82ContractTests {
             try JSONEncoder().encode(OigoSettings(globalShortcut: ToggleShortcut(keyCode: 0, modifiers: 0x100))),
             forKey: "oigo.settings.v1"
         )
-        guard OigoSettingsStore(defaults: defaults).load().globalShortcut == ToggleShortcut(keyCode: 0, modifiers: 0x100) else {
-            throw ContractFailure(message: "custom key-code-zero shortcut was changed during migration")
+        guard OigoSettingsStore(defaults: defaults).load().globalShortcut == canonical else {
+            throw ContractFailure(message: "stored custom shortcut was not reset to Fn")
         }
     }
 

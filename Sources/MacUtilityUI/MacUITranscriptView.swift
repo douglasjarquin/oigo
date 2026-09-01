@@ -23,14 +23,20 @@ public final class MacUITranscriptView: NSScrollView {
         textView.isSelectable = true
         textView.allowsUndo = false
         textView.drawsBackground = true
-        textView.backgroundColor = .textBackgroundColor
-        textView.textColor = .textColor
-        textView.font = .preferredFont(forTextStyle: .body)
-        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.backgroundColor = MacUITokens.Colors.textBackground
+        textView.textColor = MacUITokens.Colors.primaryLabel
+        textView.font = MacUITokens.Typography.body
+        textView.textContainerInset = NSSize(width: MacUITokens.Spacing.controlGroup, height: MacUITokens.Spacing.controlGroup)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
+        MacUIAccessibility.configure(
+            self,
+            identifier: "macui.transcript",
+            label: "Transcript",
+            role: .textArea
+        )
     }
 
     public func setTranscript(_ transcript: String) {

@@ -320,7 +320,7 @@ final class PasteAgainHandoffScenario: NativeUIContractScenario {
               delegate.contains("statusSurface.presentHUD"),
               delegate.contains("statusSurface.shutdownHUD()"),
               delegate.contains("terminal: terminal"),
-              delegate.contains("terminal.map(hudTerminalState)"),
+              delegate.contains("hud: presentationHUD("),
               status.contains("private let hudController = OigoHUDController()"),
               status.contains("func presentHUD("),
               status.contains("func shutdownHUD()"),

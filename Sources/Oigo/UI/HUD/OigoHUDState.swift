@@ -10,6 +10,7 @@ public enum OigoHUDTone: String, CaseIterable, Equatable, Sendable {
 }
 
 public enum OigoHUDIconRole: String, CaseIterable, Equatable, Sendable {
+    case progress
     case information
     case confirmation
     case attention
@@ -33,6 +34,21 @@ public enum OigoHUDDismissalKind: String, CaseIterable, Equatable, Sendable {
     case hidden
 }
 
+public struct OigoHUDShellSize: Equatable, Sendable {
+    public let width: Double
+    public let height: Double
+
+    public init(width: Double, height: Double) {
+        self.width = width
+        self.height = height
+    }
+
+    public static let compact = Self(width: 252, height: 38)
+    public static let recording = Self(width: 252, height: 54)
+    public static let expanded = Self(width: 252, height: 73)
+    public static let terminal = Self(width: 252, height: 58)
+}
+
 public struct OigoHUDDismissalPolicy: Equatable, Sendable {
     public let kind: OigoHUDDismissalKind
     public let seconds: TimeInterval?
@@ -51,6 +67,7 @@ public struct OigoHUDDismissalPolicy: Equatable, Sendable {
 }
 
 public struct OigoHUDContent: Equatable, Sendable {
+    public let size: OigoHUDShellSize
     public let title: String
     public let detail: String
     public let tone: OigoHUDTone
@@ -62,6 +79,7 @@ public struct OigoHUDContent: Equatable, Sendable {
     public let allowsPreview: Bool
 
     public init(
+        size: OigoHUDShellSize = .compact,
         title: String,
         detail: String,
         tone: OigoHUDTone,
@@ -72,6 +90,7 @@ public struct OigoHUDContent: Equatable, Sendable {
         showsRecordingElapsed: Bool,
         allowsPreview: Bool
     ) {
+        self.size = size
         self.title = title
         self.detail = detail
         self.tone = tone

@@ -34,6 +34,16 @@ extension OigoIssue82ContractTests {
               try activeShortcut(of: registrar) == second else {
             throw ContractFailure(message: "replacement did not register the candidate before removing the prior shortcut")
         }
+
+        let callsBeforeDuplicate = backend.calls
+        try registrar.register(shortcut: second, onEvent: { event in
+            events.append(event)
+        })
+        guard backend.calls == callsBeforeDuplicate,
+              backend.activeRegistrationCount == 1 else {
+            throw ContractFailure(message: "duplicate registration was not rejected atomically")
+        }
+        print("STATE registrar-atomic edges=pressed,released order=candidate-register,previous-unregister active-count=1 duplicate=suppressed")
     }
 
     static func testRegistrarFailureAndGeneration() throws {
@@ -69,10 +79,47 @@ extension OigoIssue82ContractTests {
         try registrar.register(shortcut: second, onEvent: { event in
             events.append(event)
         })
-        backend.emit(.pressed, generation: firstGeneration)
+        backend.emitRetired(.pressed, generation: firstGeneration)
         guard events.isEmpty else {
             throw ContractFailure(message: "stale callback from a replaced generation was delivered")
         }
+
+        let teardownBackend = RecordingRegistrationBackend()
+        let teardownRegistrar = CarbonGlobalShortcutRegistrar(backend: teardownBackend)
+        var previousOwnerEvents: [GlobalShortcutEvent] = []
+        var candidateOwnerEvents: [GlobalShortcutEvent] = []
+        try teardownRegistrar.register(shortcut: first, onEvent: { event in
+            previousOwnerEvents.append(event)
+        })
+        let teardownFirstGeneration = try activeGeneration(of: teardownRegistrar)
+        teardownBackend.failUnregisterFor = first
+        var teardownFailurePropagated = false
+        do {
+            try teardownRegistrar.register(shortcut: second, onEvent: { event in
+                candidateOwnerEvents.append(event)
+            })
+        } catch {
+            teardownFailurePropagated = true
+        }
+        guard teardownFailurePropagated,
+              teardownBackend.calls.suffix(3) == [
+                  "register:12/256",
+                  "unregister:49/768",
+                  "unregister:12/256"
+              ],
+              teardownBackend.activeRegistrationCount == 1,
+              !teardownRegistrar.status.isActive,
+              teardownRegistrar.lastError?.contains("teardown failed") == true else {
+            throw ContractFailure(message: "old-handle teardown failure did not clean the candidate and fail closed")
+        }
+        teardownBackend.emit(.pressed, generation: teardownFirstGeneration)
+        if let candidateGeneration = teardownBackend.generation(for: second) {
+            teardownBackend.emitRetired(.released, generation: candidateGeneration)
+        }
+        guard previousOwnerEvents.isEmpty, candidateOwnerEvents.isEmpty else {
+            throw ContractFailure(message: "fail-closed registrar delivered a callback after teardown failure")
+        }
+        print("STATE registrar-failure candidate-failure=preserved stale=ignored teardown=propagated candidate-cleanup=complete active=false callbacks=0")
     }
 
     static func activeGeneration(of registrar: CarbonGlobalShortcutRegistrar) throws -> UInt64 {

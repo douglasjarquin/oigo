@@ -9,23 +9,28 @@ public enum OigoHUDShellPolicy {
     public static let ordinaryTerminalDismissal: TimeInterval = 1.8
     public static let actionableTerminalDismissal: TimeInterval = 3.0
 
-    public static func content(for state: OigoHUDState) -> OigoHUDContent {
+    public static func content(
+        for state: OigoHUDState,
+        releaseHint: String,
+        preview: String = ""
+    ) -> OigoHUDContent {
         switch state {
         case .preparing:
             content(
-                title: "Preparing...",
-                detail: "Getting ready to record.",
+                title: "Preparing…",
+                detail: "",
                 tone: .informational,
-                iconRole: .information
+                iconRole: .progress
             )
         case .recording:
             content(
                 title: "Recording",
-                detail: "Release the shortcut to finish.",
+                detail: releaseHint,
                 tone: .recording,
                 iconRole: .recording,
                 showsRecordingElapsed: true,
-                allowsPreview: true
+                allowsPreview: true,
+                size: preview.isEmpty ? .recording : .expanded
             )
         case .degradedRecording:
             content(
@@ -34,37 +39,39 @@ public enum OigoHUDShellPolicy {
                 tone: .warning,
                 iconRole: .attention,
                 actionability: .retryTranscription,
-                showsRecordingElapsed: true
+                showsRecordingElapsed: true,
+                size: .recording
             )
         case .finalizing:
             content(
-                title: "Finalizing...",
-                detail: "Finishing the recording.",
+                title: "Finalizing…",
+                detail: "",
                 tone: .informational,
-                iconRole: .information
+                iconRole: .progress
             )
         case .cleaning:
             content(
-                title: "Cleaning...",
-                detail: "Applying the selected cleanup.",
+                title: "Cleaning…",
+                detail: "",
                 tone: .informational,
-                iconRole: .information
+                iconRole: .progress
             )
         case .pasting:
             content(
-                title: "Pasting...",
-                detail: "Sending the result to the current destination.",
+                title: "Pasting…",
+                detail: "",
                 tone: .informational,
-                iconRole: .information
+                iconRole: .progress
             )
         case .pasteAttempted:
             content(
                 title: "Paste attempted",
-                detail: "Clipboard retained; third-party paste result is unknown.",
+                detail: "",
                 tone: .success,
                 iconRole: .confirmation,
                 dismissal: .timed(after: ordinaryTerminalDismissal),
-                isTerminal: true
+                isTerminal: true,
+                size: .compact
             )
         case .copied:
             content(
@@ -74,7 +81,8 @@ public enum OigoHUDShellPolicy {
                 iconRole: .confirmation,
                 actionability: .pasteAgain,
                 dismissal: .timed(after: actionableTerminalDismissal),
-                isTerminal: true
+                isTerminal: true,
+                size: .terminal
             )
         case .copyOnly:
             content(
@@ -84,7 +92,8 @@ public enum OigoHUDShellPolicy {
                 iconRole: .information,
                 actionability: .pasteAgain,
                 dismissal: .timed(after: actionableTerminalDismissal),
-                isTerminal: true
+                isTerminal: true,
+                size: .terminal
             )
         case .savedRetry:
             content(
@@ -94,7 +103,8 @@ public enum OigoHUDShellPolicy {
                 iconRole: .attention,
                 actionability: .retryTranscription,
                 dismissal: .timed(after: actionableTerminalDismissal),
-                isTerminal: true
+                isTerminal: true,
+                size: .terminal
             )
         case .preservedFailure:
             content(
@@ -104,7 +114,8 @@ public enum OigoHUDShellPolicy {
                 iconRole: .failure,
                 actionability: .copyAndPasteAgain,
                 dismissal: .timed(after: actionableTerminalDismissal),
-                isTerminal: true
+                isTerminal: true,
+                size: .terminal
             )
         case .cleanupFallback:
             content(
@@ -114,7 +125,8 @@ public enum OigoHUDShellPolicy {
                 iconRole: .attention,
                 actionability: .pasteAgain,
                 dismissal: .timed(after: actionableTerminalDismissal),
-                isTerminal: true
+                isTerminal: true,
+                size: .terminal
             )
         case .cancelledBeforeRaw:
             content(
@@ -123,7 +135,8 @@ public enum OigoHUDShellPolicy {
                 tone: .neutral,
                 iconRole: .information,
                 dismissal: .timed(after: ordinaryTerminalDismissal),
-                isTerminal: true
+                isTerminal: true,
+                size: .terminal
             )
         case .cancelledAfterRaw:
             content(
@@ -133,7 +146,8 @@ public enum OigoHUDShellPolicy {
                 iconRole: .information,
                 actionability: .openHistory,
                 dismissal: .timed(after: actionableTerminalDismissal),
-                isTerminal: true
+                isTerminal: true,
+                size: .terminal
             )
         case .interrupted:
             content(
@@ -143,7 +157,8 @@ public enum OigoHUDShellPolicy {
                 iconRole: .attention,
                 actionability: .openHistory,
                 dismissal: .timed(after: actionableTerminalDismissal),
-                isTerminal: true
+                isTerminal: true,
+                size: .terminal
             )
         case .pasteAgainDestination:
             content(
@@ -151,7 +166,8 @@ public enum OigoHUDShellPolicy {
                 detail: "Paste Again is waiting for the destination.",
                 tone: .informational,
                 iconRole: .destination,
-                actionability: .chooseDestination
+                actionability: .chooseDestination,
+                size: .terminal
             )
         case .terminal:
             content(
@@ -160,7 +176,8 @@ public enum OigoHUDShellPolicy {
                 tone: .success,
                 iconRole: .confirmation,
                 dismissal: .timed(after: ordinaryTerminalDismissal),
-                isTerminal: true
+                isTerminal: true,
+                size: .terminal
             )
         case .shutdown:
             content(
@@ -186,6 +203,10 @@ public enum OigoHUDShellPolicy {
         [.recording, .degradedRecording].contains(state)
     }
 
+    public static func allowsPreview(_ state: OigoHUDState) -> Bool {
+        state == .recording
+    }
+
     private static func content(
         title: String,
         detail: String,
@@ -195,9 +216,11 @@ public enum OigoHUDShellPolicy {
         dismissal: OigoHUDDismissalPolicy = .persistent,
         isTerminal: Bool = false,
         showsRecordingElapsed: Bool = false,
-        allowsPreview: Bool = false
+        allowsPreview: Bool = false,
+        size: OigoHUDShellSize = .compact
     ) -> OigoHUDContent {
         OigoHUDContent(
+            size: size,
             title: title,
             detail: detail,
             tone: tone,

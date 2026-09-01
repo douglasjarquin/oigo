@@ -6,6 +6,10 @@ struct ContractArguments {
     let defaultsSuite: String
     let fixtureRoot: URL
     let fixtureName: String?
+    let caseName: String?
+    let evidenceRoot: URL
+    let appearance: String
+    let contrast: String
 
     static func parse(_ arguments: [String]) throws -> ContractArguments {
         let values = try parseOptions(arguments)
@@ -14,86 +18,117 @@ struct ContractArguments {
             throw ContractInputError(category: "invalid-scenario")
         }
 
-        let defaultsSuite: String
-        let fixtureRoot: URL
+        let defaultsSuite = try required("defaults-suite", in: values)
+        guard defaultsSuite.range(
+            of: #"^com\.oigo\.qa\.task[0-9]{2}$"#,
+            options: .regularExpression
+        ) != nil else {
+            throw ContractInputError(category: "invalid-defaults-suite")
+        }
+        let taskNumber = try taskNumber(for: defaultsSuite)
+        let taskRootIdentifier = "task-" + defaultsSuite.suffix(2)
+        let evidenceTaskIdentifier = "task-\(taskNumber)"
+
+        let fixtureRoot = canonicalURL(try required("fixture-root", in: values))
+        guard let qaRoot = markedQARoot(containing: fixtureRoot) else {
+            throw ContractInputError(category: "invalid-fixture-root")
+        }
+        let repositoryRoot = qaRoot.deletingLastPathComponent().deletingLastPathComponent()
+        let approvedEvidenceRoot = repositoryRoot
+            .appendingPathComponent(".omo/evidence/oigo-shortcut-transcription-design-fidelity", isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath()
+        try validateRunMarker(at: qaRoot, evidenceRoot: approvedEvidenceRoot)
+        let approvedFixtureRoot = qaRoot
+            .appendingPathComponent("fixtures/native/\(taskRootIdentifier)", isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath()
+        guard isWithin(fixtureRoot, of: approvedFixtureRoot) else {
+            throw ContractInputError(category: "invalid-fixture-root")
+        }
+        let evidenceRoot = canonicalURL(try required("evidence-root", in: values))
+        var approvedTaskEvidenceRoots = [approvedEvidenceRoot
+            .appendingPathComponent(evidenceTaskIdentifier, isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath()]
+        if scenario == "component-contracts", taskNumber == 6 {
+            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
+                .appendingPathComponent("task-19", isDirectory: true)
+                .standardizedFileURL.resolvingSymlinksInPath())
+        }
+        if scenario == "identity", taskNumber == 9 {
+            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
+                .appendingPathComponent("task-20", isDirectory: true)
+                .standardizedFileURL.resolvingSymlinksInPath())
+        }
+        if scenario == "keyboard-startup", taskNumber == 5 {
+            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
+                .appendingPathComponent("task-15", isDirectory: true)
+                .standardizedFileURL.resolvingSymlinksInPath())
+        }
+        if scenario == "popover-state-matrix", taskNumber == 12 {
+            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
+                .appendingPathComponent("task-22", isDirectory: true)
+                .standardizedFileURL.resolvingSymlinksInPath())
+        }
+        if scenario == "settings-panes", taskNumber == 18 {
+            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
+                .appendingPathComponent("task-28", isDirectory: true)
+                .standardizedFileURL.resolvingSymlinksInPath())
+        }
+        approvedTaskEvidenceRoots.append(approvedEvidenceRoot
+            .appendingPathComponent("task-32", isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath())
+        guard approvedTaskEvidenceRoots.contains(where: { isWithin(evidenceRoot, of: $0) }) else {
+            throw ContractInputError(category: "outside-evidence-root")
+        }
+        guard isDirectory(fixtureRoot) else {
+            throw ContractInputError(category: "missing-owned-directory")
+        }
+        do {
+            try FileManager.default.createDirectory(at: evidenceRoot, withIntermediateDirectories: true)
+        } catch {
+            throw ContractInputError(category: "missing-owned-directory")
+        }
+        guard isDirectory(evidenceRoot) else {
+            throw ContractInputError(category: "missing-owned-directory")
+        }
+
         let fixtureName: String?
         if let requestedFixture = values["fixture"] {
-            guard values.count == 2,
-                  requestedFixture.range(of: #"^[a-z][a-z0-9-]*$"#, options: .regularExpression) != nil else {
+            guard requestedFixture.range(of: #"^[a-z][a-z0-9-]*$"#, options: .regularExpression) != nil else {
                 throw ContractInputError(category: "invalid-fixture")
             }
-            switch scenario {
-            case "popover-routing":
-                defaultsSuite = "com.oigo.qa.task11"
-                fixtureRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                    .appendingPathComponent("Tests/OigoNativeUIContractFixtures/task-11", isDirectory: true)
-                    .standardizedFileURL
-                    .resolvingSymlinksInPath()
-                fixtureName = requestedFixture
-            case "popover-state-matrix":
-                defaultsSuite = "com.oigo.qa.task12"
-                fixtureRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                    .appendingPathComponent("Tests/OigoNativeUIContractFixtures/task-12", isDirectory: true)
-                    .appendingPathComponent(requestedFixture, isDirectory: true)
-                    .standardizedFileURL
-                    .resolvingSymlinksInPath()
-                fixtureName = nil
-            case "popover-actions":
-                defaultsSuite = "com.oigo.qa.task13"
-                fixtureRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                    .appendingPathComponent("Tests/OigoNativeUIContractFixtures/task-13", isDirectory: true)
-                    .appendingPathComponent(requestedFixture, isDirectory: true)
-                    .standardizedFileURL
-                    .resolvingSymlinksInPath()
-                fixtureName = nil
-            case "hud-placement" where requestedFixture == "multi-display-negative-origin":
-                defaultsSuite = "com.oigo.qa.task14"
-                fixtureRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                    .appendingPathComponent("Fixtures/native-ui/task-14", isDirectory: true)
-                    .standardizedFileURL
-                    .resolvingSymlinksInPath()
-                fixtureName = nil
-            case "hud-states" where requestedFixture == "exhaustive":
-                defaultsSuite = "com.oigo.qa.task15"
-                fixtureRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                    .appendingPathComponent("Fixtures/native-ui/task-15", isDirectory: true)
-                    .standardizedFileURL
-                    .resolvingSymlinksInPath()
-                fixtureName = nil
-            case "paste-again-handoff":
-                defaultsSuite = "com.oigo.qa.task16"
-                fixtureRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                    .appendingPathComponent("Tests/OigoNativeUIContractFixtures/task-16", isDirectory: true)
-                    .appendingPathComponent(requestedFixture, isDirectory: true)
-                    .standardizedFileURL
-                    .resolvingSymlinksInPath()
-                fixtureName = nil
-            default:
-                throw ContractInputError(category: "invalid-fixture")
-            }
+            fixtureName = requestedFixture
         } else {
-            defaultsSuite = try required("defaults-suite", in: values)
-            guard defaultsSuite.range(
-                of: #"^com\.oigo\.qa\.task[0-9]+$"#,
-                options: .regularExpression
-            ) != nil else {
-                throw ContractInputError(category: "invalid-defaults-suite")
-            }
-
-            fixtureRoot = URL(fileURLWithPath: try required("fixture-root", in: values))
-                .standardizedFileURL
-                .resolvingSymlinksInPath()
-            guard fixtureRoot.path.hasPrefix("/"), isOwnedTaskPath(fixtureRoot) else {
-                throw ContractInputError(category: "invalid-fixture-root")
-            }
             fixtureName = nil
+        }
+
+        let caseName: String?
+        if let requestedCase = values["case"] {
+            guard requestedCase.range(of: #"^[A-Za-z][A-Za-z0-9-]*$"#, options: .regularExpression) != nil else {
+                throw ContractInputError(category: "invalid-case")
+            }
+            caseName = requestedCase
+        } else {
+            caseName = nil
+        }
+
+        let appearance = values["appearance"] ?? "system"
+        guard ["light", "dark", "system"].contains(appearance) else {
+            throw ContractInputError(category: "invalid-appearance")
+        }
+        let contrast = values["contrast"] ?? "standard"
+        guard ["standard", "increased"].contains(contrast) else {
+            throw ContractInputError(category: "invalid-contrast")
         }
 
         return ContractArguments(
             scenario: scenario,
             defaultsSuite: defaultsSuite,
             fixtureRoot: fixtureRoot,
-            fixtureName: fixtureName
+            fixtureName: fixtureName,
+            caseName: caseName,
+            evidenceRoot: evidenceRoot,
+            appearance: appearance,
+            contrast: contrast
         )
     }
 
@@ -110,7 +145,11 @@ struct ContractArguments {
                 throw ContractInputError(category: "malformed-arguments")
             }
             let key = String(option.dropFirst(2))
-            guard ["scenario", "defaults-suite", "fixture-root", "fixture"].contains(key), values[key] == nil else {
+            let allowed = [
+                "scenario", "defaults-suite", "fixture-root", "fixture", "case", "evidence-root",
+                "appearance", "contrast"
+            ]
+            guard allowed.contains(key), values[key] == nil else {
                 throw ContractInputError(category: "unknown-or-duplicate-argument")
             }
             values[key] = value
@@ -126,16 +165,52 @@ struct ContractArguments {
         return value
     }
 
-    private static func isOwnedTaskPath(_ url: URL) -> Bool {
+    private static func canonicalURL(_ path: String) -> URL {
+        URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()
+    }
+
+    private static func isWithin(_ candidate: URL, of root: URL) -> Bool {
+        candidate.path == root.path || candidate.path.hasPrefix(root.path + "/")
+    }
+
+    private static func taskNumber(for defaultsSuite: String) throws -> Int {
+        guard let taskNumber = Int(defaultsSuite.suffix(2)) else {
+            throw ContractInputError(category: "invalid-defaults-suite")
+        }
+        return taskNumber
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        var directory = ObjCBool(false)
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &directory) && directory.boolValue
+    }
+
+    private static func markedQARoot(containing url: URL) -> URL? {
         var candidate = url
         while candidate.path != "/" {
-            if candidate.lastPathComponent.hasPrefix("oigo-native-ui-redesign.") {
-                return candidate.deletingLastPathComponent().lastPathComponent == "T"
-                    && url.path.hasPrefix(candidate.path + "/")
+            if candidate.lastPathComponent == "oigo-shortcut-transcription-design-fidelity.qa",
+               candidate.deletingLastPathComponent().lastPathComponent == "T" {
+                return candidate
             }
             candidate.deleteLastPathComponent()
         }
-        return false
+        return nil
+    }
+
+    private static func validateRunMarker(at qaRoot: URL, evidenceRoot: URL) throws {
+        let repositoryRoot = qaRoot.deletingLastPathComponent().deletingLastPathComponent()
+        let marker = qaRoot.appendingPathComponent("run.json")
+        guard let data = try? Data(contentsOf: marker),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["qa_root"] as? String == qaRoot.path,
+              object["attempt_dir"] as? String == evidenceRoot.path,
+              object["repository"] as? String == repositoryRoot.path,
+              object["reviewed_plan_sha"] as? String == "4b7cf8d3e0e323b5b3d7e0f17467e5b99901682b81255ad5f06c33ad2e42a198",
+              object["execution_base_sha"] as? String == "a8315736e9b9ebb8c8e0a4bd6caa987eb67b2c37",
+              let runUUID = object["run_uuid"] as? String,
+              UUID(uuidString: runUUID) != nil else {
+            throw ContractInputError(category: "invalid-run-marker")
+        }
     }
 }
 

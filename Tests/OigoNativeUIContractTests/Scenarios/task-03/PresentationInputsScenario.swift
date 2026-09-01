@@ -35,7 +35,7 @@ final class PresentationInputsScenario: NativeUIContractScenario {
             throw ContractInputError(category: "missing-presentation-inputs")
         }
         try validateSourceBoundary(source)
-        guard arguments.defaultsSuite == "com.oigo.qa.task3" else {
+        guard arguments.defaultsSuite == "com.oigo.qa.task03" else {
             throw ContractInputError(category: "invalid-defaults-suite")
         }
         let fixture = try loadFixture(from: arguments.fixtureRoot)
@@ -127,10 +127,31 @@ final class PresentationInputsScenario: NativeUIContractScenario {
 
         let driver = root.appendingPathComponent("main.swift")
         let executable = root.appendingPathComponent("presentation-input-contract")
+        let core = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("Sources/OigoCore")
+        let coreSources = try FileManager.default.contentsOfDirectory(
+            at: core,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "swift" }.sorted { $0.path < $1.path }
+        guard !coreSources.isEmpty else {
+            throw ContractInputError(category: "missing-core-source")
+        }
         try contractDriver.write(to: driver, atomically: true, encoding: .utf8)
         try runProcess(
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
-            arguments: ["swiftc", source.path, driver.path, "-o", executable.path]
+            arguments: ["swiftc"] + coreSources.map(\.path) + [
+                "-emit-module", "-emit-library", "-module-name", "OigoCore",
+                "-o", root.appendingPathComponent("libOigoCore.dylib").path,
+                "-emit-module-path", root.appendingPathComponent("OigoCore.swiftmodule").path
+            ]
+        )
+        try runProcess(
+            executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
+            arguments: [
+                "swiftc", "-I", root.path, "-L", root.path,
+                "-Xlinker", "-rpath", "-Xlinker", root.path,
+                source.path, driver.path, "-lOigoCore", "-o", executable.path
+            ]
         )
 
         var expected: Data?
@@ -210,7 +231,11 @@ final class PresentationInputsScenario: NativeUIContractScenario {
             operationGate: operation,
             coordinator: .init(state: .recording, generation: 41),
             storage: .init(status: storage),
-            shortcut: .init(registration: .registered, isConfigured: true),
+            shortcut: .init(
+                registration: .registered,
+                isConfigured: true,
+                shortcut: .default
+            ),
             permissions: .init(microphone: .granted, accessibility: .denied),
             input: .init(selection: .pinnedAvailable, channelIndex: 1),
             localeAssets: .init(

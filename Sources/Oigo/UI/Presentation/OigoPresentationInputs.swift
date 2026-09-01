@@ -1,4 +1,5 @@
 import Foundation
+import OigoCore
 
 public enum OigoPresentationOperationKind: String, Equatable, Sendable {
     case dictation
@@ -87,16 +88,18 @@ public enum OigoShortcutRegistrationPresentationStatus: String, Equatable, Senda
 public struct OigoShortcutPresentationInput: Equatable, Sendable {
     public let registration: OigoShortcutRegistrationPresentationStatus
     public let isConfigured: Bool
-    public let displayName: String
+    public let shortcut: ToggleShortcut
+    public let copy: OigoShortcutCopy
 
     public init(
         registration: OigoShortcutRegistrationPresentationStatus,
         isConfigured: Bool,
-        displayName: String = "Option-Space"
+        shortcut: ToggleShortcut
     ) {
         self.registration = registration
         self.isConfigured = isConfigured
-        self.displayName = String(displayName.prefix(64))
+        self.shortcut = shortcut
+        copy = shortcut.copy
     }
 }
 

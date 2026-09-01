@@ -16,10 +16,17 @@ final class MacUIActionTarget: NSObject {
 @MainActor
 func makeMacUIActionButton(
     title: String,
-    action: @escaping @MainActor () -> Void
+    action: @escaping @MainActor () -> Void,
+    identifier: String? = nil
 ) -> (NSButton, MacUIActionTarget) {
     let target = MacUIActionTarget(action: action)
     let button = NSButton(title: title, target: target, action: #selector(MacUIActionTarget.performAction))
     button.bezelStyle = .rounded
+    MacUIAccessibility.configure(
+        button,
+        identifier: identifier ?? MacUIAccessibility.identifier(prefix: "macui.action", label: title),
+        label: title,
+        role: .button
+    )
     return (button, target)
 }

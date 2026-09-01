@@ -23,6 +23,7 @@ final class SettingsPanesScenario: NativeUIContractScenario {
             == Set(OigoSettingsField.allCases) else {
             throw ContractInputError(category: "settings-pane-contract")
         }
-        print("PASS settings-panes toolbar=4 policies=immediate+transactional")
+        try SettingsPanesRuntimeContract.run(arguments: arguments)
+        print("PASS settings-panes toolbar=4 policies=immediate+transactional production-controller=true")
     }
 }

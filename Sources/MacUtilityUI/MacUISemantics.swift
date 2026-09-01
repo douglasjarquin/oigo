@@ -12,15 +12,15 @@ public enum MacUIStatusTone: String, CaseIterable, Sendable {
     var color: NSColor {
         switch self {
         case .neutral:
-            .secondaryLabelColor
+            MacUITokens.Colors.secondaryLabel
         case .informational:
-            .controlAccentColor
+            MacUITokens.Colors.accent
         case .success:
-            .systemGreen
+            MacUITokens.Colors.success
         case .warning:
-            .systemOrange
+            MacUITokens.Colors.warning
         case .critical, .recording:
-            .systemRed
+            MacUITokens.Colors.critical
         }
     }
 }

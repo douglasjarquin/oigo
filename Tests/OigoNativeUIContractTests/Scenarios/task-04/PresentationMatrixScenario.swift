@@ -25,7 +25,7 @@ final class PresentationMatrixScenario: NativeUIContractScenario {
     }
 
     override class func run(arguments: ContractArguments) throws {
-        guard arguments.defaultsSuite == "com.oigo.qa.task4" else {
+        guard arguments.defaultsSuite == "com.oigo.qa.task04" else {
             throw ContractInputError(category: "invalid-defaults-suite")
         }
         let fixture = try loadFixture(from: arguments.fixtureRoot)
@@ -160,9 +160,17 @@ final class PresentationMatrixScenario: NativeUIContractScenario {
         let driver = root.appendingPathComponent("main.swift")
         let executable = root.appendingPathComponent("presentation-matrix-contract")
         try contractDriver.write(to: driver, atomically: true, encoding: .utf8)
+        let buildRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/arm64-apple-macosx/debug")
+        let modules = buildRoot.appendingPathComponent("Modules").path
+        let coreObjects = (try? FileManager.default.contentsOfDirectory(
+            at: buildRoot.appendingPathComponent("OigoCore.build"),
+            includingPropertiesForKeys: nil
+        ))?.filter { $0.pathExtension == "o" }.map(\.path) ?? []
         try runProcess(
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
-            arguments: ["swiftc"] + sources.map(\.path) + [driver.path, "-o", executable.path]
+            arguments: ["swiftc", "-I", modules] + sources.map(\.path)
+                + [driver.path, "-o", executable.path] + coreObjects
         )
         let data = try runProcess(executable: executable, arguments: [mode])
         guard let output = String(data: data, encoding: .utf8),
@@ -360,7 +368,11 @@ final class PresentationMatrixScenario: NativeUIContractScenario {
             operationGate: .init(activeOperation: nil, busyReason: busy),
             coordinator: .init(state: coordinator, generation: 42),
             storage: .init(status: storage),
-            shortcut: .init(registration: shortcut, isConfigured: shortcut == .registered),
+            shortcut: .init(
+                registration: shortcut,
+                isConfigured: shortcut == .registered,
+                shortcut: .default
+            ),
             permissions: .init(microphone: microphone, accessibility: accessibility),
             input: .init(selection: input, channelIndex: 0),
             localeAssets: .init(localeIdentifier: locale, status: assets, generation: 42),
@@ -417,6 +429,35 @@ final class PresentationMatrixScenario: NativeUIContractScenario {
     for state in states {
         print(state.sanitizedDescription)
     }
+    let dictationRecording = OigoPresentationState.project(OigoPresentationInputs(
+        generation: 42,
+        operationGate: .init(
+            activeOperation: .init(generation: 42, kind: .dictation),
+            busyReason: .occupied(.dictation)
+        ),
+        coordinator: .init(state: .recording, generation: 42),
+        storage: .init(status: .ready),
+        shortcut: .init(registration: .registered, isConfigured: true, shortcut: .default),
+        permissions: .init(microphone: .granted, accessibility: .granted),
+        input: .init(selection: .systemDefault, channelIndex: 0),
+        localeAssets: .init(localeIdentifier: locale, status: .ready, generation: 42),
+        activeConfiguration: nil,
+        nextConfiguration: .init(
+            localeIdentifier: locale,
+            input: .systemDefault,
+            channelIndex: 0,
+            appliesTo: .next
+        ),
+        terminal: nil,
+        latestSession: nil,
+        playback: .init(generation: 42, status: .idle),
+        onboarding: .init(stage: .complete, status: .passed, failure: nil),
+        shutdown: .init(status: .inactive, fencedOperationCount: 0)
+    ))
+    guard dictationRecording.row == .recording,
+          dictationRecording.primaryAction == .enabled(.stopDictation) else {
+        exit(1)
+    }
     print("MATRIX rows=\(rows.count) unique=\(Set(states.map(\.row)).count)")
 
     if CommandLine.arguments.dropFirst().first == "conflict" {
@@ -426,7 +467,11 @@ final class PresentationMatrixScenario: NativeUIContractScenario {
             operationGate: conflict.operationGate,
             coordinator: conflict.coordinator,
             storage: conflict.storage,
-            shortcut: .init(registration: .conflict, isConfigured: true),
+            shortcut: .init(
+                registration: .conflict,
+                isConfigured: true,
+                shortcut: .default
+            ),
             permissions: .init(microphone: .denied, accessibility: .denied),
             input: .init(selection: .pinnedUnavailable, channelIndex: 0),
             localeAssets: .init(localeIdentifier: locale, status: .unavailable, generation: 42),

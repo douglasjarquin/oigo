@@ -84,6 +84,53 @@ public enum OigoPresentationAction: Equatable, Sendable {
     }
 }
 
+public enum OigoStatusMenuIdentity {
+    public static let statusItemIdentifier = "oigo.status-item"
+    public static let startIdentifier = "oigo.status.start-dictation"
+    public static let stopIdentifier = "oigo.status.stop-dictation"
+    public static let historyIdentifier = "oigo.status.history"
+    public static let settingsIdentifier = "oigo.status.settings"
+    public static let quitIdentifier = "oigo.status.quit"
+
+    public static func identifier(for action: OigoPresentationAction) -> String {
+        switch action {
+        case .startDictation: startIdentifier
+        case .stopDictation: stopIdentifier
+        case .openHistory: historyIdentifier
+        case .openSettings, .openSystemSettings: settingsIdentifier
+        case .quit: quitIdentifier
+        default: "oigo.status." + action.category
+        }
+    }
+
+    public static func accessibilityName(for action: OigoPresentationAction) -> String {
+        switch action {
+        case .startDictation: "Start Oigo dictation"
+        case .stopDictation: "Stop Oigo dictation"
+        case .openHistory: "Open Oigo History"
+        case .openSettings, .openSystemSettings: "Open Oigo Settings"
+        case .quit: "Quit Oigo"
+        default: action.category.replacingOccurrences(of: "-", with: " ").capitalized
+        }
+    }
+
+    public static func statusAccessibilityValue(_ status: OigoPresentationStatus) -> String {
+        switch status {
+        case .checking: "Checking"
+        case .ready: "Ready"
+        case .readyCopyOnly: "Ready, copy only"
+        case .attentionNeeded: "Attention needed"
+        case .preparing: "Preparing"
+        case .recording: "Recording"
+        case .finalizing: "Finalizing"
+        case .cleaning: "Cleaning"
+        case .inserting: "Inserting"
+        case .busy: "Busy"
+        case .quitting: "Quitting"
+        }
+    }
+}
+
 public enum OigoActionDisabledReason: Equatable, Sendable {
     case checking
     case storageUnavailable
@@ -265,6 +312,34 @@ public struct OigoPresentationState: Equatable, Sendable, CustomStringConvertibl
     public let nextDictation: OigoNextDictationNotice
     public let copyOnly: OigoCopyOnlyPosture
     public let terminal: OigoTerminalPresentationClass?
+
+    public init(
+        row: OigoPresentationStateRow,
+        menuMark: OigoMenuMark,
+        status: OigoPresentationStatus,
+        primaryAction: OigoPrimaryPresentationAction,
+        context: OigoPresentationContext,
+        notice: OigoNotice?,
+        latestSessionActions: OigoBoundedLatestSessionActions,
+        hud: OigoHUDPolicy,
+        availability: OigoPresentationAvailability,
+        nextDictation: OigoNextDictationNotice,
+        copyOnly: OigoCopyOnlyPosture,
+        terminal: OigoTerminalPresentationClass?
+    ) {
+        self.row = row
+        self.menuMark = menuMark
+        self.status = status
+        self.primaryAction = primaryAction
+        self.context = context
+        self.notice = notice
+        self.latestSessionActions = latestSessionActions
+        self.hud = hud
+        self.availability = availability
+        self.nextDictation = nextDictation
+        self.copyOnly = copyOnly
+        self.terminal = terminal
+    }
 
     public var sanitizedDescription: String {
         [

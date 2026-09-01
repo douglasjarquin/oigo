@@ -149,7 +149,8 @@ public struct AppCommandAvailability: Equatable, Sendable {
         occupiedKind: AppOperationKind?,
         acceptingCommands: Bool,
         setupComplete: Bool,
-        storageReady: Bool
+        storageReady: Bool,
+        speechAssetsReady: Bool = true
     ) -> AppCommandAvailability {
         let busyReason: AppOperationBusyReason?
         if !acceptingCommands {
@@ -169,6 +170,7 @@ public struct AppCommandAvailability: Equatable, Sendable {
         ].contains(coordinatorState)
         let dictationOccupied = occupiedKind?.isDictationLifecycle == true
         let canStart = setupComplete
+            && speechAssetsReady
             && idleForSessionWork
             && terminalCoordinator
         // A live dictation-lifecycle handle is stoppable even before setup completes.
@@ -184,7 +186,7 @@ public struct AppCommandAvailability: Equatable, Sendable {
             canCleanAgain: canHistoryAction,
             canReapplyDictionary: canHistoryAction,
             canPasteAgain: canHistoryAction,
-            canRunOnboardingTest: idleForSessionWork && terminalCoordinator,
+            canRunOnboardingTest: speechAssetsReady && idleForSessionWork && terminalCoordinator,
             canCancelOnboardingTest: acceptingCommands && occupiedKind == .onboardingTest,
             canRunMaintenance: canHistoryAction,
             settingsApplyToNextDictation: occupiedKind != nil,
@@ -268,14 +270,16 @@ public final class AppOperationGate {
     public func availability(
         coordinatorState: DictationState,
         setupComplete: Bool = true,
-        storageReady: Bool = true
+        storageReady: Bool = true,
+        speechAssetsReady: Bool = true
     ) -> AppCommandAvailability {
         AppCommandAvailability.evaluate(
             coordinatorState: coordinatorState,
             occupiedKind: currentKind,
             acceptingCommands: acceptingCommands,
             setupComplete: setupComplete,
-            storageReady: storageReady
+            storageReady: storageReady,
+            speechAssetsReady: speechAssetsReady
         )
     }
 

@@ -1,3 +1,5 @@
+import Foundation
+
 public enum GlobalShortcutIntentEdge: Equatable, Sendable {
     case pressed
     case released
@@ -121,7 +123,7 @@ public struct GlobalShortcutIntentController: Sendable {
         }
 
         switch state {
-        case .preparing:
+        case .idle, .complete, .failed, .cancelled, .interrupted, .preparing:
             releaseLatched = true
             return .releaseLatched
         case .recording:
@@ -167,5 +169,84 @@ private extension DictationState {
         default:
             false
         }
+    }
+}
+
+public enum FnShortcutGestureEdge: Equatable, Sendable {
+    case pressed
+    case released
+}
+
+public enum FnShortcutGestureResult: Equatable, Sendable {
+    case start
+    case releaseDeferred
+    case enterHandsFree
+    case stop
+    case ignored
+}
+
+public struct FnShortcutGestureController: Sendable {
+    public static let doubleTapInterval: TimeInterval = 0.25
+
+    private var physicalDown = false
+    private var handsFree = false
+    private var deferredReleaseAt: TimeInterval?
+
+    public init() {}
+
+    public var isHandsFree: Bool {
+        handsFree
+    }
+
+    public mutating func receive(
+        _ edge: FnShortcutGestureEdge,
+        at timestamp: TimeInterval
+    ) -> FnShortcutGestureResult {
+        switch edge {
+        case .pressed:
+            guard !physicalDown else {
+                return .ignored
+            }
+            physicalDown = true
+            if handsFree {
+                handsFree = false
+                physicalDown = false
+                deferredReleaseAt = nil
+                return .stop
+            }
+            if let deferredReleaseAt,
+               timestamp - deferredReleaseAt <= Self.doubleTapInterval {
+                self.deferredReleaseAt = nil
+                handsFree = true
+                return .enterHandsFree
+            }
+            deferredReleaseAt = nil
+            return .start
+        case .released:
+            guard physicalDown else {
+                return .ignored
+            }
+            physicalDown = false
+            guard !handsFree else {
+                return .ignored
+            }
+            deferredReleaseAt = timestamp
+            return .releaseDeferred
+        }
+    }
+
+    public mutating func advance(to timestamp: TimeInterval) -> FnShortcutGestureResult? {
+        guard let deferredReleaseAt,
+              timestamp - deferredReleaseAt >= Self.doubleTapInterval else {
+            return nil
+        }
+        self.deferredReleaseAt = nil
+        return .stop
+    }
+
+    public mutating func reset() {
+        physicalDown = false
+        handsFree = false
+        deferredReleaseAt = nil
     }
 }

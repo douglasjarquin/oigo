@@ -1,20 +1,97 @@
+public struct OigoShortcutCopy: Equatable, Sendable {
+    public let displayName: String
+    public let compactDisplayName: String
+    public let glyphs: [String]
+    public let accessibilityLabel: String
+    public let holdHint: String
+    public let inactiveHint: String
+    public let releaseHint: String
+
+    public var settingsHint: String {
+        "Hold Fn to dictate. Double-tap Fn for hands-free mode."
+    }
+
+    public var activeStatus: String {
+        "Registration active: " + displayName
+    }
+
+    public var registeredStatus: String {
+        "Registered: " + displayName
+    }
+
+    public var savedPendingActivationStatus: String {
+        "Saved: " + displayName + ". Registration activates after setup."
+    }
+
+    public func preservedMessage(_ reason: String) -> String {
+        displayName + " remains saved: " + reason
+    }
+
+    public var globalTitle: String {
+        displayName + " Dictation: Active"
+    }
+
+    public var activeToolTip: String {
+        displayName + " dictation key active"
+    }
+
+    public var retryHint: String {
+        "Press " + displayName + " again to start dictation."
+    }
+
+    public func ignoredMessage(while state: String) -> String {
+        displayName + " ignored while " + state + " is running"
+    }
+
+    public var menuRecordingIgnoredMessage: String {
+        displayName + " ignored: recording was started from the menu"
+    }
+
+    public func unavailableMessage(_ reason: String) -> String {
+        displayName + " unavailable: " + reason
+    }
+}
+
 public enum OigoShortcutPresentation {
-    public static func displayName(for shortcut: ToggleShortcut) -> String {
+    public static func copy(for shortcut: ToggleShortcut) -> OigoShortcutCopy {
         var components: [String] = []
+        var glyphs: [String] = []
         if shortcut.modifiers & ToggleShortcutModifiers.shift != 0 {
             components.append("Shift")
+            glyphs.append("⇧")
         }
         if shortcut.modifiers & ToggleShortcutModifiers.control != 0 {
             components.append("Control")
+            glyphs.append("⌃")
         }
         if shortcut.modifiers & ToggleShortcutModifiers.option != 0 {
             components.append("Option")
+            glyphs.append("⌥")
         }
         if shortcut.modifiers & ToggleShortcutModifiers.command != 0 {
             components.append("Command")
+            glyphs.append("⌘")
         }
-        components.append(keyName(for: shortcut.keyCode))
-        return components.joined(separator: "-")
+        let key = keyName(for: shortcut.keyCode)
+        components.append(key)
+        glyphs.append(key)
+        let displayName = components.joined(separator: "-")
+        let inactiveHint = shortcut == .fixedFn
+            ? displayName + " unavailable. Check permissions and restart Oigo."
+            : displayName + " inactive. Open Settings to choose another shortcut."
+        return OigoShortcutCopy(
+            displayName: displayName,
+            compactDisplayName: glyphs.joined(),
+            glyphs: glyphs,
+            accessibilityLabel: components.joined(separator: " "),
+            holdHint: "Hold " + glyphs.joined(separator: " ") + " to dictate",
+            inactiveHint: inactiveHint,
+            releaseHint: "Release " + displayName + " to finish."
+        )
+    }
+
+    public static func displayName(for shortcut: ToggleShortcut) -> String {
+        copy(for: shortcut).displayName
     }
 
     public static func keyName(for keyCode: UInt32) -> String {
@@ -87,6 +164,8 @@ public enum OigoShortcutPresentation {
             "Delete"
         case 53:
             "Escape"
+        case 63:
+            "Fn"
         default:
             "Key \(keyCode)"
         }
@@ -94,7 +173,11 @@ public enum OigoShortcutPresentation {
 }
 
 public extension ToggleShortcut {
+    var copy: OigoShortcutCopy {
+        OigoShortcutPresentation.copy(for: self)
+    }
+
     var displayName: String {
-        OigoShortcutPresentation.displayName(for: self)
+        copy.displayName
     }
 }

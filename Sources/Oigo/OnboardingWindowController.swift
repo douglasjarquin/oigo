@@ -35,6 +35,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var localeSelection: OigoLocaleSelectionState
     private var localeMenuIdentifiers: [String] = []
     private var isLoadingLanguages = false
+    private var languageLoadGeneration: UInt64 = 0
     private var microphoneState: OigoPermissionState
     private var accessibilityState: OigoPermissionState
     private var accessibilityRequestAttempted = false
@@ -45,12 +46,19 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var copyOnlySetupAccepted = false
     private var storageHealth: DurableSessionHealth
     private var committedShortcut: ToggleShortcut
+    private var shortcutValidation: OigoShortcutValidation = .available
+    private var committedShortcutCopy: OigoShortcutCopy {
+        committedShortcut.copy
+    }
     private var inputMenuSelections: [OigoInputSelection] = []
     private var selectedInput: OigoInputSelection
     private var selectedInputChannel: Int
     private var inputDevices: [OigoInputDevice]
 
     private let progressLabel = NSTextField(labelWithString: "")
+    private let chromeTitleLabel = NSTextField(labelWithString: "Set Up Oigo")
+    private let progressStages = NSStackView()
+    private var progressStageLabels: [NSTextField] = []
     private let titleLabel = NSTextField(labelWithString: "")
     private let bodyLabel = NSTextField(wrappingLabelWithString: "")
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
@@ -156,14 +164,25 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.storageHealth = storageHealth
         committedShortcut = globalShortcut
         shortcutRecorder = ShortcutRecorderControl(shortcut: globalShortcut)
+        shortcutRecorder.isEnabled = false
+        shortcutRecorder.toolTip = "Hold Fn to dictate. Double-tap Fn for hands-free mode."
+        shortcutRecorder.setAccessibilityLabel("Fn dictation key")
 
         let window = OigoUtilityWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 640),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: OigoOnboardingShellMetrics.windowWidth,
+                height: 680
+            ),
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.title = "Welcome to Oigo"
+        window.title = OigoOnboardingShellMetrics.title
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.minSize = NSSize(width: OigoOnboardingShellMetrics.windowWidth, height: 520)
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
@@ -207,6 +226,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         _ = notification
+        languageLoadGeneration &+= 1
+        isLoadingLanguages = false
         discardShortcutCandidate()
         releaseOnboardingResources(cancelActiveTest: true)
         if support.isSupported, !completed {
@@ -218,15 +239,21 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     func showRegistrationFailure(_ message: String) {
         currentStep = .shortcut
-        statusLabel.stringValue = "Global shortcut inactive: " + message
+        shortcutValidation = .conflict(message)
         render()
     }
 
     func showAndFocus() {
         showWindow(nil)
+        if let window {
+            var frame = window.frame
+            frame.size = NSSize(width: OigoOnboardingShellMetrics.windowWidth, height: 680)
+            window.setFrame(frame, display: false)
+        }
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        focusCurrentStage()
         if currentStep == .language, microphoneState == .granted, !evidence.probeActive {
             restartSourceProbe()
         }
@@ -300,11 +327,36 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         guard let contentView = window?.contentView else {
             return
         }
-        shortcutRecorder.onValidationError = { [weak self] message in
-            self?.statusLabel.stringValue = message
+        if let closeButton = window?.standardWindowButton(.closeButton) {
+            closeButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.close")
+            closeButton.setAccessibilityIdentifier("oigo.onboarding.close")
+            closeButton.setAccessibilityLabel("Close")
         }
+        shortcutRecorder.onValidationError = { [weak self] message in
+            guard let self else { return }
+            shortcutValidation = .invalid(message)
+            statusLabel.stringValue = committedShortcutCopy.preservedMessage(message)
+            renderButtons()
+        }
+        shortcutRecorder.onCandidateChange = { [weak self] candidate in
+            guard let self, currentStep == .shortcut else { return }
+            shortcutValidation = validateShortcut(candidate)
+            render()
+        }
+        progressLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.progress")
+        progressLabel.setAccessibilityIdentifier("oigo.onboarding.progress")
+        titleLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.title")
+        titleLabel.setAccessibilityIdentifier("oigo.onboarding.title")
+        bodyLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.body")
+        bodyLabel.setAccessibilityIdentifier("oigo.onboarding.body")
+        statusLabel.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.status")
+        statusLabel.setAccessibilityIdentifier("oigo.onboarding.status")
         progressLabel.textColor = .secondaryLabelColor
-        titleLabel.font = .boldSystemFont(ofSize: 22)
+        titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
+        progressStageLabels = OigoOnboardingShellLayout.configureProgress(
+            progressStages,
+            titles: OigoOnboardingShellMetrics.stageTitles
+        )
         bodyLabel.maximumNumberOfLines = 8
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.maximumNumberOfLines = 4
@@ -318,6 +370,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         testField.isSelectable = true
         testField.isEnabled = true
         testField.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.test-field")
+        testField.setAccessibilityIdentifier("oigo.onboarding.test-field")
+        testField.setAccessibilityLabel("Dictation test field")
         meter.minValue = 0
         meter.maxValue = 1
         meter.warningValue = 0.85
@@ -325,6 +379,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         meter.levelIndicatorStyle = .continuousCapacity
         meter.heightAnchor.constraint(equalToConstant: 18).isActive = true
         shortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
+        shortcutRecorder.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.shortcut-recorder")
+        shortcutRecorder.setAccessibilityIdentifier("oigo.onboarding.shortcut-recorder")
+        shortcutRecorder.setAccessibilityLabel("Fn dictation key")
+        languagePopup.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.language")
+        languagePopup.setAccessibilityIdentifier("oigo.onboarding.language")
+        languagePopup.setAccessibilityLabel("Transcription language")
         languagePopup.target = self
         languagePopup.action = #selector(languageSelectionChanged)
         inputPopup.target = self
@@ -335,20 +395,40 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         historyButton.action = #selector(openHistoryAction)
         retryStorageButton.target = self
         retryStorageButton.action = #selector(retryStorageAction)
+        retryStorageButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.retry-storage")
+        retryStorageButton.setAccessibilityIdentifier("oigo.onboarding.retry-storage")
         openDataLocationButton.target = self
         openDataLocationButton.action = #selector(openDataLocationAction)
+        openDataLocationButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.open-data-location")
+        openDataLocationButton.setAccessibilityIdentifier("oigo.onboarding.open-data-location")
         actionButton.target = self
         actionButton.action = #selector(performAction)
+        actionButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.stage-action")
+        actionButton.setAccessibilityIdentifier("oigo.onboarding.stage-action")
         skipButton.target = self
         skipButton.action = #selector(skipTestAction)
+        skipButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.skip")
+        skipButton.setAccessibilityIdentifier("oigo.onboarding.skip")
         copyOnlyButton.target = self
         copyOnlyButton.action = #selector(acceptCopyOnlyAction)
+        copyOnlyButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.copy-only")
+        copyOnlyButton.setAccessibilityIdentifier("oigo.onboarding.copy-only")
+        copyOnlyButton.setAccessibilityLabel(copyOnlyButton.title)
         quietOverrideButton.target = self
         quietOverrideButton.action = #selector(acceptQuietOverrideAction)
         backButton.target = self
         backButton.action = #selector(goBack)
+        backButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.back")
+        backButton.setAccessibilityIdentifier("oigo.onboarding.back")
+        backButton.bezelStyle = .rounded
+        backButton.setAccessibilityLabel("Back")
         nextButton.target = self
         nextButton.action = #selector(goForward)
+        nextButton.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.continue")
+        nextButton.setAccessibilityIdentifier("oigo.onboarding.continue")
+        nextButton.bezelStyle = .rounded
+        nextButton.keyEquivalent = "\r"
+        nextButton.setAccessibilityLabel("Continue")
 
         inputRow.addArrangedSubview(inputLabel)
         inputRow.addArrangedSubview(inputPopup)
@@ -369,6 +449,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         languageRow.spacing = 8
         languageLabel.setContentHuggingPriority(.required, for: .horizontal)
         let stack = NSStackView(views: [
+            progressStages,
             progressLabel,
             titleLabel,
             bodyLabel,
@@ -392,19 +473,16 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             NSView(),
             NSStackView(views: [backButton, nextButton])
         ])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 14
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(stack)
-        let buttons = stack.arrangedSubviews.last!
-        (buttons as? NSStackView)?.spacing = 8
-        (buttons as? NSStackView)?.alignment = .trailing
+        OigoOnboardingShellLayout.install(
+            window: window!,
+            contentView: contentView,
+            chromeTitleLabel: chromeTitleLabel,
+            progressStages: progressStages,
+            stack: stack,
+            backButton: backButton,
+            nextButton: nextButton
+        )
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 32),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -32),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 28),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -24),
             bodyLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             checklistStack.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -415,12 +493,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             meter.widthAnchor.constraint(equalTo: stack.widthAnchor),
             languagePopup.widthAnchor.constraint(equalToConstant: 280),
             shortcutRecorder.widthAnchor.constraint(equalToConstant: 280),
+            shortcutRecorder.heightAnchor.constraint(equalToConstant: 44),
             inputPopup.widthAnchor.constraint(equalToConstant: 280),
             channelPopup.widthAnchor.constraint(equalToConstant: 280),
             testField.widthAnchor.constraint(equalTo: stack.widthAnchor),
             actionButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
             historyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140),
-            buttons.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
     }
 
@@ -431,7 +509,22 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             ? stage == .done ? "Setup complete" : "Stage " + String(stage.ordinal) + " of 4"
             : "Setup unavailable"
         titleLabel.stringValue = isSupported ? stage.title : "This Mac cannot run Oigo"
+        let activeOrdinal = stage.ordinal
+        for (index, label) in progressStageLabels.enumerated() {
+            let isActive = activeOrdinal == index + 1
+            let isComplete = activeOrdinal > index + 1
+            label.textColor = isActive || isComplete ? .controlAccentColor : .secondaryLabelColor
+            label.font = .systemFont(ofSize: 11, weight: isActive ? .semibold : .medium)
+            label.setAccessibilityLabel(
+                "Stage " + String(index + 1) + ". "
+                    + label.stringValue.drop(while: { $0.isNumber || $0 == " " })
+                    + (isActive ? ". Current stage" : isComplete ? ". Complete" : ". Not started")
+            )
+        }
         bodyLabel.stringValue = isSupported ? body(for: stage) : support.reason
+        titleLabel.setAccessibilityLabel(titleLabel.stringValue)
+        bodyLabel.setAccessibilityLabel(bodyLabel.stringValue)
+        progressLabel.setAccessibilityLabel(progressLabel.stringValue)
         languageRow.isHidden = currentStep != .language
         shortcutRecorder.isHidden = currentStep != .shortcut
         inputRow.isHidden = currentStep != .language
@@ -453,6 +546,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             ? accessibilityState == .granted || copyOnlySetupAccepted
             : currentStep != .testDictation || !evidence.canAcceptCopyOnly
         statusLabel.stringValue = status(for: stage)
+        statusLabel.setAccessibilityLabel(statusLabel.stringValue)
         renderChecklist()
         storageStatusLabel.stringValue = storageHealth.statusMessage
         storageStatusLabel.textColor = storageHealth.isReady ? .secondaryLabelColor : .systemOrange
@@ -467,9 +561,19 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         }
         if currentStep == .language {
             loadLanguagesIfNeeded()
-            actionButton.title = microphoneState == .granted
-                ? "Check speech assets"
-                : microphoneState == .denied ? "Open Microphone Settings" : "Allow Microphone Access"
+            if microphoneState == .granted {
+                actionButton.title = switch localeSelection.readiness.status {
+                case .ready: "Speech assets ready"
+                case .checking, .installing: "Installing speech assets…"
+                case .failed, .unavailable: "Retry speech asset installation"
+                case .unsupported: "Speech assets unavailable"
+                case .idle: "Install speech assets"
+                }
+            } else {
+                actionButton.title = microphoneState == .denied
+                    ? "Open Microphone Settings"
+                    : "Allow Microphone Access"
+            }
         } else if currentStep == .shortcut {
             actionButton.title = accessibilityRequestAttempted && accessibilityState == .denied
                 ? "Open Accessibility Settings"
@@ -477,6 +581,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         } else if currentStep == .testDictation {
             actionButton.title = onboardingTestAvailability.onboardingTestActionTitle
         }
+        actionButton.setAccessibilityLabel(actionButton.title)
         renderButtons()
     }
 
@@ -486,14 +591,26 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         }
         actionButton.isEnabled = true
         nextButton.title = currentStep == .complete ? "Finish setup" : "Continue"
+        nextButton.setAccessibilityLabel(nextButton.title)
         nextButton.isEnabled = true
+        if currentStep == .system {
+            nextButton.isEnabled = storageHealth.isReady
+        }
         if currentStep == .language {
             nextButton.isEnabled = microphoneState == .granted
                 && evidence.microphoneCanAdvance
                 && localeSelection.canConfirm
+            if microphoneState == .granted {
+                actionButton.isEnabled = switch localeSelection.readiness.status {
+                case .idle, .failed, .unavailable: true
+                case .checking, .installing, .ready, .unsupported: false
+                }
+            }
         }
         if currentStep == .shortcut {
-            nextButton.isEnabled = accessibilityState == .granted || copyOnlySetupAccepted
+            nextButton.isEnabled = (accessibilityState == .granted || copyOnlySetupAccepted)
+                && shortcutValidation.isAvailable
+                && !shortcutRecorder.isRecording
         }
         if currentStep == .testDictation {
             nextButton.isEnabled = evidence.canFinishReady
@@ -510,12 +627,15 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             $0.removeFromSuperview()
         }
         for row in evidence.checklist {
-            let label = NSTextField(labelWithString: checklistText(row))
+            let label = NSTextField(wrappingLabelWithString: checklistText(row))
             label.maximumNumberOfLines = 2
+            label.lineBreakMode = .byWordWrapping
+            label.translatesAutoresizingMaskIntoConstraints = false
             label.identifier = NSUserInterfaceItemIdentifier(
                 "oigo.onboarding.checklist." + row.item.rawValue
             )
             checklistStack.addArrangedSubview(label)
+            label.widthAnchor.constraint(equalTo: checklistStack.widthAnchor).isActive = true
         }
     }
 
@@ -540,6 +660,20 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         render()
     }
 
+    func refreshPermissions(
+        microphone: OigoPermissionState,
+        accessibility: OigoPermissionState
+    ) {
+        microphoneState = microphone
+        accessibilityState = accessibility
+        if currentStep == .language, microphoneState == .granted, !evidence.probeActive {
+            restartSourceProbe()
+        } else if currentStep == .language, microphoneState != .granted, evidence.probeActive {
+            releaseOnboardingResources(cancelActiveTest: false)
+        }
+        render()
+    }
+
     func setCommandAvailability(_ availability: AppCommandAvailability) {
         commandAvailability = availability
         if currentStep == .testDictation {
@@ -560,15 +694,15 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private func body(for stage: OigoOnboardingStage) -> String {
         switch stage {
         case .macAndStorage:
-            "Oigo needs macOS 26 or later on Apple silicon. This check runs before setup so unsupported systems fail clearly."
+            "Oigo checks that this Mac can record durably before anything else."
         case .microphoneAndLanguage:
-            "Choose the microphone, channel, and language Oigo will use. A local meter confirms the selected source produces a usable buffer, and speech assets are checked before your first valuable dictation."
+            "Choose what Oigo listens to and which language it transcribes."
         case .shortcutAndInsertion:
-            "Choose a readable global shortcut. Accessibility enables automatic paste into the field you were using; if you decline, Oigo keeps Copy and History available."
+            "Hold Fn to dictate, or double-tap Fn for hands-free mode. Accessibility enables automatic paste."
         case .tryIt:
-            "Focus the editable field below, then start and stop a real dictation. Setup records each production-path checkpoint and reports only what the owned test field proves."
+            "One real dictation, end to end, into a field Oigo owns."
         case .done:
-            completionSummary()
+            "You can change any of this later in Settings.\n" + completionSummary()
         }
     }
 
@@ -604,7 +738,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         case .pending:
             testResult = "Test not completed"
         }
-        return "Shortcut: \(committedShortcut.displayName)\n"
+        return "Shortcut: \(committedShortcutCopy.displayName)\n"
             + "Mode: \(processingMode.displayName)\n"
             + "Microphone: \(input), channel \(selectedInputChannel + 1)\n"
             + "Language: \(localeSelection.committedIdentifier) (assets: \(assetPosture))\n"
@@ -621,18 +755,48 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             }
             return localeSelection.statusMessage
         case .shortcutAndInsertion:
+            if !shortcutValidation.isAvailable {
+                return committedShortcutCopy.preservedMessage(
+                    Self.validationMessage(shortcutValidation)
+                )
+            }
+            if accessibilityState != .granted, copyOnlySetupAccepted {
+                let saveGuidance = shortcutRecorder.shortcut == committedShortcut
+                    ? committedShortcutCopy.savedPendingActivationStatus
+                    : "Current shortcut: " + committedShortcutCopy.displayName
+                        + ". Continue to save the recorded candidate."
+                return "Copy-only setup accepted. " + saveGuidance
+            }
+            if shortcutRecorder.shortcut != committedShortcut {
+                return "Current shortcut: " + committedShortcutCopy.displayName
+                    + ". Continue to save the recorded candidate."
+            }
             switch registrationStatus() {
-            case .active(let shortcut, _):
+            case .active:
                 let suffix = registrationError().map { ". Last error: " + $0 } ?? ""
-                return "Registered: " + shortcut.displayName + suffix + ". Candidate: " + shortcutRecorder.displayValue
+                return committedShortcutCopy.registeredStatus + suffix
+                    + ". Candidate: " + shortcutRecorder.displayValue
             case .inactive(let message):
-                return "Global shortcut inactive: " + (registrationError() ?? message)
+                if message == "Global shortcut registration is waiting for setup" {
+                    return committedShortcutCopy.savedPendingActivationStatus
+                }
+                return committedShortcutCopy.unavailableMessage(registrationError() ?? message)
             }
         case .tryIt:
             return evidence.statusMessage
         case .macAndStorage, .done:
             return ""
         }
+    }
+
+    func task8ShortcutObservation() -> Task8ControlObservation {
+        render()
+        return Task8ControlObservation(
+            status: statusLabel.stringValue,
+            hint: bodyLabel.stringValue,
+            recorderDisplay: shortcutRecorder.displayValue,
+            recorderAccessibilityValue: shortcutRecorder.accessibilityValue() as? String ?? ""
+        )
     }
 
     @objc private func skipTestAction() {
@@ -654,8 +818,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         if currentStep == .shortcut, accessibilityState != .granted {
             copyOnlySetupAccepted = true
             saveStep(.shortcut, true)
-            statusLabel.stringValue = "Copy-only setup accepted. Automatic paste remains optional."
-            renderButtons()
+            statusLabel.stringValue = "Copy-only setup accepted. Dictation results stay available in Copy and History."
+            render()
             return
         }
         if currentStep == .testDictation, evidence.acceptCopyOnly() {
@@ -675,9 +839,15 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         isLoadingLanguages = true
+        languageLoadGeneration &+= 1
+        let requestGeneration = languageLoadGeneration
         Task { @MainActor [weak self] in
             guard let self else { return }
             let languages = await loadSupportedLanguages()
+            guard self.currentStep == .language,
+                  self.languageLoadGeneration == requestGeneration else {
+                return
+            }
             isLoadingLanguages = false
             localeSelection.loadSupported(languages)
             syncLanguagePopup()
@@ -702,6 +872,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
               let identifier = selectedLocaleFromMenu() else {
             return
         }
+        languageLoadGeneration &+= 1
         localeSelection.select(identifier)
         statusLabel.stringValue = localeSelection.statusMessage
         renderButtons()
@@ -796,9 +967,14 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             statusLabel.stringValue = localeSelection.statusMessage
             actionButton.isEnabled = false
             renderButtons()
+            let requestGeneration = languageLoadGeneration
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let status = await checkSpeechAssets(request.localeIdentifier)
+                guard self.currentStep == .language,
+                      self.languageLoadGeneration == requestGeneration else {
+                    return
+                }
                 _ = localeSelection.applyAssetResult(
                     localeIdentifier: request.localeIdentifier,
                     generation: request.generation,
@@ -880,21 +1056,28 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             }
         }
         if currentStep == .shortcut {
+            guard accessibilityState == .granted || copyOnlySetupAccepted else {
+                statusLabel.stringValue = "Allow Accessibility or choose Continue with copy-only."
+                renderButtons()
+                return
+            }
             let candidate = shortcutRecorder.shortcut
             let result = validateShortcut(candidate)
+            shortcutValidation = result
             guard result.isAvailable else {
-                statusLabel.stringValue = "Global shortcut inactive: " + Self.validationMessage(result)
+                statusLabel.stringValue = committedShortcutCopy.preservedMessage(
+                    Self.validationMessage(result)
+                )
                 renderButtons()
                 return
             }
             let saved = saveShortcut(candidate)
+            shortcutValidation = saved
             guard saved.isAvailable else {
-                statusLabel.stringValue = "Global shortcut inactive: " + Self.validationMessage(saved)
-                renderButtons()
-                return
-            }
-            guard registrationStatus().isActive else {
-                statusLabel.stringValue = "Global shortcut inactive: " + (registrationError() ?? "Registration is not active")
+                shortcutRecorder.restoreCandidate(committedShortcut)
+                statusLabel.stringValue = committedShortcutCopy.preservedMessage(
+                    Self.validationMessage(saved)
+                )
                 renderButtons()
                 return
             }
@@ -913,11 +1096,6 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         }
         if currentStep == .testDictation, !evidence.canFinishReady {
             statusLabel.stringValue = evidence.statusMessage
-            renderButtons()
-            return
-        }
-        if currentStep == .shortcut, accessibilityState != .granted, !copyOnlySetupAccepted {
-            statusLabel.stringValue = "Allow Accessibility or choose Continue with copy-only."
             renderButtons()
             return
         }
@@ -972,9 +1150,14 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private func discardShortcutCandidate() {
         shortcutRecorder.cancelRecording()
         shortcutRecorder.restoreCandidate(committedShortcut)
+        shortcutValidation = .available
     }
 
     private func moveToStep(_ step: OigoOnboardingStep) {
+        if currentStep == .language, step != .language {
+            languageLoadGeneration &+= 1
+            isLoadingLanguages = false
+        }
         let leavingMicrophone = currentStep == .language && step != .language
         let leavingTest = currentStep == .testDictation && step != .testDictation
         if leavingMicrophone || leavingTest {
@@ -992,6 +1175,23 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         }
         saveStep(step, copyOnlySetupAccepted)
         render()
+        focusCurrentStage()
+    }
+
+    private func focusCurrentStage() {
+        guard let window else { return }
+        let target: NSView
+        switch currentStep {
+        case .system, .complete, .microphone, .insertion, .recovery:
+            target = nextButton
+        case .language:
+            target = languagePopup
+        case .shortcut:
+            target = shortcutRecorder
+        case .testDictation:
+            target = testField
+        }
+        _ = window.makeFirstResponder(target)
     }
 
     private func applyCurrentSourceSelection(unavailable: Bool? = nil) {

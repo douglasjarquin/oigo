@@ -36,7 +36,7 @@ final class IdentityScenario: NativeUIContractScenario {
     }
 
     override class func run(arguments: ContractArguments) throws {
-        guard arguments.defaultsSuite == "com.oigo.qa.task9" else {
+        guard arguments.defaultsSuite == "com.oigo.qa.task09" else {
             throw ContractInputError(category: "invalid-defaults-suite")
         }
 
@@ -77,7 +77,8 @@ final class IdentityScenario: NativeUIContractScenario {
         )
         guard output.contains("IDENTITY states=\(fixture.states.count)"),
               output.contains("animation-count=0"),
-              output.contains("interruptions=2") else {
+              output.contains("interruptions=2"),
+              output.contains("menu-actions=5") else {
             throw ContractInputError(category: "unexpected-contract-output")
         }
         print(output, terminator: "")
@@ -127,7 +128,7 @@ final class IdentityScenario: NativeUIContractScenario {
             throw ContractInputError(category: "misleading-success-output")
         }
         guard Set(fixture.states.map(\.mark)) == Set([
-            "outline", "activity", "recording", "attention"
+            "outline", "activity", "recording", "attention", "hidden"
         ]), fixture.transitions.map(\.event) == [
             "replacement", "terminalization", "item-removal", "shutdown",
             "interruption", "interruption"
@@ -160,7 +161,7 @@ final class IdentityScenario: NativeUIContractScenario {
         }.joined(separator: "\n")
         let forbidden = [
             "MacUtilityUI", "NSStatusBar.system", "OigoAppDelegate", "StatusSurfaceController",
-            "button.title = \"Oigo\"", "prewarm", "idleTimer"
+            "button.title = \"Oigo\"", "prewarm", "idleTimer", "NSColor.white", "NSColor.black"
         ]
         guard !forbidden.contains(where: text.contains) else {
             throw ContractInputError(category: "forbidden-identity-dependency")
@@ -183,6 +184,16 @@ final class IdentityScenario: NativeUIContractScenario {
         let moduleRoot = root.appendingPathComponent("Modules", isDirectory: true)
         let modulePath = moduleRoot.appendingPathComponent("OigoPresentation.swiftmodule")
         let libraryPath = moduleRoot.appendingPathComponent("libOigoPresentation.dylib")
+        let packageBuildRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/arm64-apple-macosx/debug", isDirectory: true)
+        let coreObjectRoot = packageBuildRoot.appendingPathComponent("OigoCore.build", isDirectory: true)
+        let coreObjects = (try? FileManager.default.contentsOfDirectory(
+            at: coreObjectRoot,
+            includingPropertiesForKeys: [.isRegularFileKey]
+        ))?.filter { $0.pathExtension == "o" }.sorted { $0.path < $1.path } ?? []
+        guard !coreObjects.isEmpty else {
+            throw ContractInputError(category: "missing-core-build-artifacts")
+        }
         try FileManager.default.createDirectory(at: moduleRoot, withIntermediateDirectories: true)
         try contractDriver.write(to: driver, atomically: true, encoding: .utf8)
         try runProcess(
@@ -191,12 +202,17 @@ final class IdentityScenario: NativeUIContractScenario {
                 "swiftc", "-enable-testing", "-parse-as-library", "-emit-library", "-emit-module",
                 "-module-name", "OigoPresentation",
                 sources[0].path, sources[1].path,
+                "-I", packageBuildRoot.appendingPathComponent("Modules", isDirectory: true).path,
+                "-L", packageBuildRoot.path,
                 "-emit-module-path", modulePath.path, "-o", libraryPath.path
-            ]
+            ] + coreObjects.map(\.path)
         )
         try runProcess(
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
-            arguments: ["swiftc", "-enable-testing", "-I", moduleRoot.path]
+            arguments: [
+                "swiftc", "-enable-testing", "-I", moduleRoot.path,
+                "-I", packageBuildRoot.appendingPathComponent("Modules", isDirectory: true).path
+            ]
                 + sources.dropFirst(2).map(\.path)
                 + [
                     driver.path, "-L", moduleRoot.path, "-lOigoPresentation",
@@ -233,6 +249,9 @@ final class IdentityScenario: NativeUIContractScenario {
         let errorOutput = stderr.fileHandleForReading.readDataToEndOfFile()
         guard process.terminationStatus == 0 else {
             FileHandle.standardError.write(errorOutput)
+            FileHandle.standardError.write(
+                Data(("IDENTITY_CONTRACT_EXIT=" + String(process.terminationStatus) + "\n").utf8)
+            )
             throw ContractInputError(category: "compiled-contract-failed")
         }
         return output
@@ -468,11 +487,12 @@ final class IdentityScenario: NativeUIContractScenario {
         case "activity": "processing"
         case "recording": "recording"
         case "attention": "attention"
+        case "hidden": "inactive"
         default: "idle"
         }
         typedStates[expectedVariant] = state
         guard artwork.variant.rawValue == expectedVariant,
-              artwork.isTemplate == (expectedVariant == "idle"),
+              artwork.isTemplate == ["idle", "inactive"].contains(expectedVariant),
               artwork.animatesWhenVisible == (expectedVariant == "processing" && !expected.terminal),
               artwork.accessibilityLabel == "Oigo",
               artwork.accessibilityValue == expected.value,
@@ -550,6 +570,18 @@ final class IdentityScenario: NativeUIContractScenario {
         ).size
                 == NSSize(width: 18, height: 18) else { exit(14) }
     }
+    let menuActions: [(OigoPresentationAction, String, String)] = [
+        (.startDictation, OigoStatusMenuIdentity.startIdentifier, "Start Oigo dictation"),
+        (.stopDictation, OigoStatusMenuIdentity.stopIdentifier, "Stop Oigo dictation"),
+        (.openHistory, OigoStatusMenuIdentity.historyIdentifier, "Open Oigo History"),
+        (.openSettings, OigoStatusMenuIdentity.settingsIdentifier, "Open Oigo Settings"),
+        (.quit, OigoStatusMenuIdentity.quitIdentifier, "Quit Oigo")
+    ]
+    guard menuActions.allSatisfy({ action, identifier, label in
+        OigoStatusMenuIdentity.identifier(for: action) == identifier
+            && OigoStatusMenuIdentity.accessibilityName(for: action) == label
+    }) else { exit(22) }
+    print("menu-actions=5 ")
     let semanticEnvironment = OigoStatusIdentityEnvironment(
         appearanceName: .aqua,
         increasedContrast: false,

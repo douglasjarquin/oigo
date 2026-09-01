@@ -12,7 +12,6 @@ if [[ ! -x "$executable" ]]; then
     print -u2 "FAIL: executable is missing or not executable: $executable"
     exit 1
 fi
-
 /usr/bin/python3 - "$executable" <<'PY'
 import os
 import signal

@@ -1,4 +1,7 @@
 import AppKit
+import Foundation
+import MacUtilityUI
+import OigoCore
 import OigoPresentation
 
 @MainActor
@@ -9,7 +12,7 @@ final class PopoverStatesGalleryScenario: GalleryScenario {
 
     override class func makeWindow(configuration: GalleryConfiguration) -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 580),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 700),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
@@ -24,6 +27,28 @@ final class PopoverStatesGalleryScenario: GalleryScenario {
 
 @MainActor
 private final class PopoverStatesGalleryViewController: NSViewController {
+    private struct Fixture: Decodable {
+        let shortcut: ToggleShortcut
+    }
+
+    private struct Observation: Codable {
+        let row: String
+        let shortcutText: String
+        let shortcutAccessibilityLabel: String
+        let primaryTitle: String
+        let mouseStartEnabled: Bool
+        let keyboardAvailable: Bool
+        let noticeText: String?
+        let noticeActionTitle: String?
+        let noticeActionable: Bool
+    }
+
+    private struct Receipt: Codable {
+        let shortcut: ToggleShortcut
+        let selectedRow: String
+        let observations: [Observation]
+    }
+
     private static let rows = [
         "storage-checking", "storage-ready-idle", "storage-unavailable",
         "shortcut-inactive-conflict", "mic-permission-unavailable",
@@ -36,13 +61,25 @@ private final class PopoverStatesGalleryViewController: NSViewController {
     ]
 
     private let configuration: GalleryConfiguration
+    private let committedShortcut: ToggleShortcut
     private let stateLabel = NSTextField(labelWithString: "")
     private let card = NSStackView()
     private var selectedRow = "storage-ready-idle"
     private var stateButtons: [NSButton] = []
+    private var renderedPopoverController: OigoPopoverViewController?
 
     init(configuration: GalleryConfiguration) {
         self.configuration = configuration
+        let fixtureURL = configuration.fixtureRoot.appendingPathComponent("fixture.json")
+        guard let data = try? Data(contentsOf: fixtureURL),
+              let fixture = try? JSONDecoder().decode(Fixture.self, from: data) else {
+            preconditionFailure("missing committed shortcut gallery fixture")
+        }
+        committedShortcut = ProcessInfo.processInfo.environment["OIGO_GALLERY_FIXED_FN"] == "1"
+            ? .fixedFn
+            : fixture.shortcut
+        selectedRow = fixture.shortcut.keyCode == 255
+            ? "shortcut-inactive-conflict" : "storage-ready-idle"
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -53,14 +90,18 @@ private final class PopoverStatesGalleryViewController: NSViewController {
 
     override func loadView() {
         let root = NSView()
+        root.wantsLayer = true
+        root.layer?.backgroundColor = MacUITokens.Colors.windowBackground.cgColor
         let title = NSTextField(labelWithString: "Popover state matrix")
-        title.font = .systemFont(ofSize: 20, weight: .bold)
+        title.font = MacUITokens.Typography.heading
+        title.textColor = MacUITokens.Colors.primaryLabel
         title.setAccessibilityLabel("Popover state matrix")
 
         let detail = NSTextField(
             wrappingLabelWithString: "Synthetic metadata only. Select a row to inspect the bounded 340 point popover surface."
         )
-        detail.textColor = .secondaryLabelColor
+        detail.font = MacUITokens.Typography.secondary
+        detail.textColor = MacUITokens.Colors.secondaryLabel
 
         let rowList = NSStackView()
         rowList.orientation = .vertical
@@ -70,35 +111,46 @@ private final class PopoverStatesGalleryViewController: NSViewController {
             let button = NSButton(title: row, target: self, action: #selector(selectRow(_:)))
             button.setButtonType(.toggle)
             button.identifier = NSUserInterfaceItemIdentifier(row)
+            button.font = MacUITokens.Typography.secondary
+            button.contentTintColor = MacUITokens.Colors.primaryLabel
+            button.bezelStyle = .rounded
             button.setAccessibilityLabel("Show popover state " + row)
             button.widthAnchor.constraint(equalToConstant: 270).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 24).isActive = true
             rowList.addArrangedSubview(button)
             stateButtons.append(button)
         }
 
+        rowList.frame = NSRect(x: 0, y: 0, width: 270, height: CGFloat(Self.rows.count * 28))
         let rowScroll = NSScrollView()
         rowScroll.hasVerticalScroller = true
         rowScroll.autohidesScrollers = false
         rowScroll.drawsBackground = false
         rowScroll.documentView = rowList
         rowScroll.widthAnchor.constraint(equalToConstant: 284).isActive = true
+        rowScroll.heightAnchor.constraint(equalToConstant: 520).isActive = true
 
-        stateLabel.font = .systemFont(ofSize: 12, weight: .semibold)
-        stateLabel.textColor = .secondaryLabelColor
+        stateLabel.font = MacUITokens.Typography.secondary
+        stateLabel.textColor = MacUITokens.Colors.secondaryLabel
 
         card.orientation = .vertical
         card.alignment = .leading
-        card.spacing = 8
-        card.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 12, right: 16)
+        card.spacing = MacUITokens.Spacing.controlGroup
+        card.edgeInsets = NSEdgeInsets(
+            top: MacUITokens.Spacing.row,
+            left: MacUITokens.Spacing.section,
+            bottom: MacUITokens.Spacing.row,
+            right: MacUITokens.Spacing.section
+        )
         card.wantsLayer = true
-        card.layer?.cornerRadius = 10
-        card.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        card.layer?.cornerRadius = MacUITokens.Radius.notice
+        card.layer?.backgroundColor = MacUITokens.Colors.controlBackground.cgColor
         card.widthAnchor.constraint(equalToConstant: 340).isActive = true
 
         let preview = NSStackView(views: [stateLabel, card])
         preview.orientation = .vertical
         preview.alignment = .leading
-        preview.spacing = 8
+        preview.spacing = MacUITokens.Spacing.controlGroup
 
         let body = NSStackView(views: [rowScroll, preview])
         body.orientation = .horizontal
@@ -108,8 +160,13 @@ private final class PopoverStatesGalleryViewController: NSViewController {
         let content = NSStackView(views: [title, detail, body])
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = 12
-        content.edgeInsets = NSEdgeInsets(top: 22, left: 24, bottom: 22, right: 24)
+        content.spacing = MacUITokens.Spacing.row
+        content.edgeInsets = NSEdgeInsets(
+            top: MacUITokens.Spacing.major,
+            left: MacUITokens.Spacing.major,
+            bottom: MacUITokens.Spacing.major,
+            right: MacUITokens.Spacing.major
+        )
         content.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(content)
         NSLayoutConstraint.activate([
@@ -119,7 +176,22 @@ private final class PopoverStatesGalleryViewController: NSViewController {
             content.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor)
         ])
         view = root
-        render()
+        let intendedRow = selectedRow
+        let healthy = render(rowNamed: "storage-ready-idle")
+        let conflict = render(rowNamed: "shortcut-inactive-conflict")
+        _ = render(rowNamed: intendedRow)
+        writeReceipt(observations: [healthy, conflict])
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            _ = self.render(rowNamed: "shortcut-inactive-conflict")
+            self.writeScreenshot(named: "popover-shortcut-conflict.png")
+            for row in Self.rows {
+                _ = self.render(rowNamed: row)
+                self.writeScreenshot(named: "popover-" + row + ".png")
+            }
+            _ = self.render(rowNamed: intendedRow)
+            self.writeScreenshot(named: "popover-states.png")
+        }
     }
 
     @objc private func selectRow(_ sender: NSButton) {
@@ -127,11 +199,13 @@ private final class PopoverStatesGalleryViewController: NSViewController {
             return
         }
         selectedRow = row
-        render()
+        _ = render(rowNamed: row)
         sender.window?.makeFirstResponder(sender)
     }
 
-    private func render() {
+    @discardableResult
+    private func render(rowNamed rowName: String) -> Observation {
+        selectedRow = rowName
         stateLabel.stringValue = "Synthetic state: " + selectedRow
         for button in stateButtons {
             button.state = button.identifier?.rawValue == selectedRow ? .on : .off
@@ -141,69 +215,95 @@ private final class PopoverStatesGalleryViewController: NSViewController {
             $0.removeFromSuperview()
         }
 
-        let presentation = Task12PopoverFixture.presentation(rowNamed: selectedRow)
-        let header = NSStackView(views: [
-            NSTextField(labelWithString: "Oigo"),
-            flexibleSpace(),
-            NSTextField(labelWithString: presentation.statusLabel)
-        ])
-        header.orientation = .horizontal
-        header.alignment = .centerY
-        header.spacing = 8
-        card.addArrangedSubview(header)
+        let presentation = Task12PopoverFixture.presentation(
+            rowNamed: selectedRow,
+            committedShortcut: committedShortcut
+        )
+        let controller = OigoPopoverViewController(commandHandler: { _ in })
+        controller.render(presentation, generation: 42, inputOptions: [])
+        renderedPopoverController = controller
+        let popoverView = controller.view
+        popoverView.widthAnchor.constraint(equalToConstant: CGFloat(presentation.width)).isActive = true
+        popoverView.heightAnchor.constraint(equalToConstant: controller.preferredContentSize.height).isActive = true
+        card.addArrangedSubview(popoverView)
+        card.layoutSubtreeIfNeeded()
 
-        let primary = NSButton(title: presentation.primaryAction.title, target: nil, action: nil)
-        primary.bezelStyle = .rounded
-        primary.controlSize = .large
-        primary.isEnabled = presentation.primaryAction.isEnabled
-        primary.widthAnchor.constraint(equalToConstant: 308).isActive = true
-        card.addArrangedSubview(primary)
-
-        let shortcut = NSTextField(labelWithString: "Hold  ⌥ Space  to dictate")
-        shortcut.font = .preferredFont(forTextStyle: .caption1)
-        shortcut.textColor = .secondaryLabelColor
-        shortcut.alignment = .center
-        shortcut.widthAnchor.constraint(equalToConstant: 308).isActive = true
-        card.addArrangedSubview(shortcut)
-
-        card.addArrangedSubview(divider())
-        let mode = NSSegmentedControl(labels: ["Instant", "Clean"], trackingMode: .selectOne,
-                                       target: nil, action: nil)
-        mode.selectedSegment = presentation.mode.selected == .instant ? 0 : 1
-        mode.isEnabled = presentation.mode.isEnabled
-        card.addArrangedSubview(row([NSTextField(labelWithString: "Mode"), flexibleSpace(), mode]))
-
-        let microphone = NSTextField(labelWithString: presentation.microphone.label + "  ›")
-        microphone.textColor = .secondaryLabelColor
-        card.addArrangedSubview(row([NSTextField(labelWithString: "Microphone"), flexibleSpace(), microphone]))
-
-        if let notice = presentation.notice {
-            let noticeView = NSTextField(wrappingLabelWithString: notice.title + ". " + notice.body)
-            noticeView.textColor = .secondaryLabelColor
-            noticeView.widthAnchor.constraint(equalToConstant: 308).isActive = true
-            card.addArrangedSubview(noticeView)
+        guard let shortcut = descendant(identifier: "popover-shortcut", in: popoverView),
+              let primary = descendant(
+                identifier: presentation.primaryAction.action.map(OigoStatusMenuIdentity.identifier(for:))
+                    ?? "oigo.status.primary-disabled",
+                in: popoverView
+              ) as? NSButton else {
+            preconditionFailure("rendered popover shell is missing required controls")
         }
+        let notice = descendant(identifier: "popover-prioritized-notice", in: popoverView)
+        let noticeAction = notice.flatMap(firstButton(in:))
+        return Observation(
+            row: selectedRow,
+            shortcutText: shortcut.accessibilityLabel() ?? "",
+            shortcutAccessibilityLabel: shortcut.accessibilityLabel() ?? "",
+            primaryTitle: primary.title,
+            mouseStartEnabled: primary.isEnabled,
+            keyboardAvailable: presentation.shortcut.isAvailable,
+            noticeText: notice?.accessibilityLabel(),
+            noticeActionTitle: noticeAction?.title,
+            noticeActionable: noticeAction?.isEnabled == true
+        )
+    }
 
-        card.addArrangedSubview(divider())
-        let latest = NSTextField(labelWithString: "LAST DICTATION")
-        latest.font = .systemFont(ofSize: 11, weight: .semibold)
-        latest.textColor = .secondaryLabelColor
-        card.addArrangedSubview(latest)
-        if let latest = presentation.latest {
-            card.addArrangedSubview(NSTextField(
-                labelWithString: [latest.status, latest.duration, latest.source].joined(separator: " · ")
-            ))
-        } else {
-            card.addArrangedSubview(NSTextField(labelWithString: "No recent dictation"))
+    @MainActor
+    private func descendant(identifier: String, in root: NSView) -> NSView? {
+        if root.accessibilityIdentifier() == identifier { return root }
+        for child in root.subviews {
+            if let match = descendant(identifier: identifier, in: child) { return match }
         }
+        return nil
+    }
 
-        let footer = row([
-            NSButton(title: "History…", target: nil, action: nil),
-            NSButton(title: "Settings…", target: nil, action: nil),
-            flexibleSpace(),
-            NSButton(title: "Quit Oigo", target: nil, action: nil)
-        ])
-        card.addArrangedSubview(footer)
+    @MainActor
+    private func firstButton(in root: NSView) -> NSButton? {
+        if let button = root as? NSButton { return button }
+        return root.subviews.lazy.compactMap(firstButton(in:)).first
+    }
+
+    private func writeReceipt(observations: [Observation]) {
+        let receipt = Receipt(
+            shortcut: committedShortcut,
+            selectedRow: selectedRow,
+            observations: observations
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(receipt) else {
+            preconditionFailure("could not encode shortcut gallery receipt")
+        }
+        do {
+            try data.write(
+                to: configuration.evidenceRoot.appendingPathComponent("shortcut-gallery.json"),
+                options: .atomic
+            )
+        } catch {
+            preconditionFailure("could not write shortcut gallery receipt")
+        }
+    }
+
+    private func writeScreenshot(named fileName: String) {
+        view.layoutSubtreeIfNeeded()
+        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            preconditionFailure("could not allocate popover gallery bitmap")
+        }
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+            preconditionFailure("could not encode popover gallery screenshot")
+        }
+        do {
+            try png.write(
+                to: configuration.evidenceRoot.appendingPathComponent(fileName),
+                options: .atomic
+            )
+        } catch {
+            preconditionFailure("could not write popover gallery screenshot")
+        }
     }
 
     private func row(_ views: [NSView]) -> NSStackView {

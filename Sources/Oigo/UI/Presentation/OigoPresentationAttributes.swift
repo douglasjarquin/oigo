@@ -54,9 +54,11 @@ extension OigoPresentationState {
             return .enabled(.retryStorage)
         case .retryRequired:
             return .enabled(.retryTranscription)
-        case .storageChecking, .languageAssetsCheckingInstalling, .preparing,
-             .finalizingCleaningInserting, .pasteOwnedFieldVerified:
+        case .storageChecking, .languageAssetsCheckingInstalling, .finalizingCleaningInserting,
+             .pasteOwnedFieldVerified:
             return .disabled(nil, .checking)
+        case .preparing:
+            return .enabled(.stopDictation)
         case .microphonePermissionUnavailable:
             return .disabled(.startDictation, .microphoneUnavailable)
         case .selectedInputUnavailable:

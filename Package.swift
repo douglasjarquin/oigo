@@ -130,6 +130,14 @@ let package = Package(
             ]
         ),
         .target(
+            name: "OigoIdentity",
+            dependencies: ["OigoPresentation"],
+            path: "Sources/Oigo/UI/Identity",
+            linkerSettings: [
+                .linkedFramework("AppKit")
+            ]
+        ),
+        .target(
             name: "OigoCapture",
             dependencies: ["OigoCore"],
             path: "Sources/OigoCapture",
@@ -187,11 +195,11 @@ let package = Package(
         .executableTarget(
             name: "Oigo",
             dependencies: [
-                "MacUtilityUI", "OigoPresentation", "OigoCore", "OigoCapture",
+                "MacUtilityUI", "OigoPresentation", "OigoIdentity", "OigoCore", "OigoCapture",
                 "OigoTranscription", "OigoInsertion", "OigoHotKey"
             ],
             path: "Sources/Oigo",
-            exclude: ["UI/Presentation"],
+            exclude: ["UI/Presentation", "UI/Identity"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("ServiceManagement")
@@ -299,12 +307,12 @@ let package = Package(
         ),
         .executableTarget(
             name: "OigoNativeUIContractTests",
-            dependencies: ["OigoCore", "OigoInsertion"],
+            dependencies: ["OigoCore", "OigoHotKey", "OigoInsertion", "OigoPresentation"],
             path: "Tests/OigoNativeUIContractTests"
         ),
         .executableTarget(
             name: "OigoUIGallery",
-            dependencies: ["MacUtilityUI", "OigoCore", "OigoPresentation"],
+            dependencies: ["MacUtilityUI", "OigoCore", "OigoPresentation", "OigoIdentity"],
             path: "Sources/OigoUIGallery",
             linkerSettings: [
                 .linkedFramework("AppKit")

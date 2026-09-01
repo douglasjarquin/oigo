@@ -2,25 +2,30 @@ import AppKit
 
 @MainActor
 public final class MacUIEmptyStateView: NSStackView {
-    public init(message: String, iconRole: MacUIStatusIconRole = .information) {
+    public init(message: String, iconRole: MacUIStatusIconRole = .information, accessibilityIdentifier: String? = nil) {
         super.init(frame: .zero)
         orientation = .vertical
         alignment = .centerX
-        spacing = 8
+        spacing = MacUITokens.Spacing.controlGroup
 
         let image = NSImageView()
         image.image = NSImage(
             systemSymbolName: iconRole.symbolName,
             accessibilityDescription: message
         )
-        image.contentTintColor = .secondaryLabelColor
+        image.contentTintColor = MacUITokens.Colors.secondaryLabel
         addArrangedSubview(image)
 
         let label = NSTextField(wrappingLabelWithString: message)
         label.alignment = .center
-        label.textColor = .secondaryLabelColor
-        label.font = .preferredFont(forTextStyle: .body)
+        label.textColor = MacUITokens.Colors.secondaryLabel
+        label.font = MacUITokens.Typography.body
         addArrangedSubview(label)
+        MacUIAccessibility.configure(
+            self,
+            identifier: accessibilityIdentifier ?? MacUIAccessibility.identifier(prefix: "macui.empty-state", label: message),
+            label: message
+        )
     }
 
     @available(*, unavailable)
@@ -42,11 +47,11 @@ public final class MacUILoadingView: NSStackView {
         }
     }
 
-    public init(label: String) {
+    public init(label: String, accessibilityIdentifier: String? = nil) {
         super.init(frame: .zero)
         orientation = .horizontal
         alignment = .centerY
-        spacing = 8
+        spacing = MacUITokens.Spacing.controlGroup
 
         progressIndicator.style = .spinning
         progressIndicator.controlSize = .small
@@ -54,9 +59,14 @@ public final class MacUILoadingView: NSStackView {
         addArrangedSubview(progressIndicator)
 
         let labelView = NSTextField(labelWithString: label)
-        labelView.textColor = .secondaryLabelColor
-        labelView.font = .preferredFont(forTextStyle: .callout)
+        labelView.textColor = MacUITokens.Colors.secondaryLabel
+        labelView.font = MacUITokens.Typography.callout
         addArrangedSubview(labelView)
+        MacUIAccessibility.configure(
+            self,
+            identifier: accessibilityIdentifier ?? MacUIAccessibility.identifier(prefix: "macui.loading", label: label),
+            label: label
+        )
     }
 
     public override func viewDidMoveToWindow() {

@@ -1,6 +1,10 @@
 # Oigo integrated UI performance and lifecycle evidence
 
-Reviewed implementation SHA: `c5a6143df0ab7b08f91745d03d046d1190d253c4`.
+IMPLEMENTATION_SHA=35e743f285d0617d586784e8d64080d8f10471a0
+AUDIT_COMMIT_SHA=0c514eec2e977bf7fe457d3d80f3f5eff91c518e
+BUNDLE_SHA=sha256:8245f3f18950f9a929e5777dad96f24f8c54a76695bc401d5cb771dd4fc96e65
+Reviewed implementation SHA: `35e743f285d0617d586784e8d64080d8f10471a0`.
+The explicit provenance validator `--audit-sha` argument is authoritative for audit-only descendants; this document does not encode a self-referential current-head value.
 The native unsigned Release artifact was built with Xcode 17F113 on macOS 26.6.2 build 25G83.
 The host model is Mac15,11 with 14 logical CPUs and 36 GB of memory.
 The tested application is the unsigned local Release `Oigo.app` built from `Oigo.xcodeproj` and scheme `Oigo`.
@@ -25,7 +29,14 @@ It reports counts and geometry only and does not load transcript, audio, clipboa
 
 The fresh native capture is `.omo/evidence/issue139/native/history-integrated-fixed.jpg`.
 The capture was taken from the source-equivalent Debug build because the temporary QA launch hook is intentionally excluded from production; the unsigned Release hash is recorded separately below.
-The final source-equivalent Release application binary is `sha256:8bb9df44bcca3ad5424b99ddfc528df1caffd6981632bd01c2fb5923b0163abe`.
+The current F3 Release application binary is `sha256:8245f3f18950f9a929e5777dad96f24f8c54a76695bc401d5cb771dd4fc96e65`.
+The F3 bundle bytes were built from the exact archived source `35e743f285d0617d586784e8d64080d8f10471a0`.
+
+## Historical Task33 release artifact
+
+Task33 remains bound to implementation source `962b9ff20b2b1913b8cc6c992aec13e875abaca4` and bundle `sha256:6ec5d03d7ae6526214d79821d2c551dafaa50049c3f394620051ab40ed299970`.
+
+The prior F3 bundle remains a separate historical audit artifact at `sha256:17ef4de8f067c29c6df8b18a0f4433541a5c41d552db7b866a8301eb1b5e5bbb`.
 
 ## UI-specific budget record
 
