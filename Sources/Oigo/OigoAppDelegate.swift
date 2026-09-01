@@ -383,6 +383,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let deviceInventoryMonitor = SystemAudioDeviceMonitor()
     private lazy var recorder = AudioRecorder(deviceMonitor: deviceMonitor)
     private var transcription: TranscriptionService?
+    private var speechAssetReadiness: OigoLocaleAssetStatus = .checking
+    private var speechAssetCheckTask: Task<Void, Never>?
     private let insertion: InsertionService
     private let playback = AudioPlayback()
     private lazy var shortcutBridge = GlobalShortcutOperationBridge(
@@ -394,23 +396,34 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var productionShortcutBridge = GlobalShortcutProductionBridge(
         operations: shortcutBridge
     )
+    private lazy var fnKeyMonitor = FnKeyMonitor { [weak self] edge, timestamp in
+        self?.handleFnKey(edge, timestamp: timestamp)
+    }
+    private var fnShortcutGesture = FnShortcutGestureController()
+    private var fnReleaseTask: Task<Void, Never>?
     private lazy var shortcutRegistration = AppShortcutRegistrationController(
-        committedShortcut: settings.globalShortcut,
-        registrar: shortcutRegistrar,
+        committedShortcut: ToggleShortcut.fixedFn,
+        registrar: fixedFnShortcutRegistration,
         onRegisteredEvent: { [weak self] event in self?.handleGlobalShortcut(event) }
     )
-    private lazy var statusSurface = StatusSurfaceController { [weak self] command in
-        switch command {
-        case .history:
-            self?.openHistory()
-        case .settings:
-            self?.openSettings()
-        case .quit:
-            self?.quit()
-        case .popover(let command):
-            self?.performPopoverCommand(command)
+    private let fixedFnShortcutRegistration = FixedFnShortcutRegistrationClient()
+    private lazy var statusSurface = StatusSurfaceController(
+        onPopoverWillShow: { [weak self] in
+            self?.refreshPermissionPresentation()
+        },
+        commandHandler: { [weak self] command in
+            switch command {
+            case .history:
+                self?.openHistory()
+            case .settings:
+                self?.openSettings()
+            case .quit:
+                self?.quit()
+            case .popover(let command):
+                self?.performPopoverCommand(command)
+            }
         }
-    }
+    )
     private let settingsStore: OigoSettingsStore
     private let onboardingStore: OigoOnboardingStore
     private let shortcutRegistrar: any GlobalShortcutRegistrationClient
@@ -545,6 +558,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         self.settingsPermissionStates = settingsPermissionStates
         self.insertion = insertion ?? InsertionService()
         self.keyboardStartupBoundaries = keyboardStartupBoundaries
+        if keyboardStartupBoundaries != nil {
+            speechAssetReadiness = .ready
+        }
         self.launchAtLoginController = launchAtLoginController
             ?? OigoLaunchAtLoginController(client: SystemLaunchAtLoginClient())
         settings = settingsStore.load()
@@ -632,8 +648,18 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        _ = notification
+        refreshPermissionPresentation()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
+        speechAssetCheckTask?.cancel()
+        speechAssetCheckTask = nil
+        fnReleaseTask?.cancel()
+        fnReleaseTask = nil
+        fnKeyMonitor.stop()
         presentationPublicationFence.shutdown()
         do {
             try shortcutRegistration.shutdown()
@@ -644,7 +670,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             lastFailureCode = "shortcut-teardown"
             FileHandle.standardError.write(Data(("ERROR shortcut-teardown: \(error)\n").utf8))
         }
-        shortcutBridge.reset()
+        resetShortcutInput()
         let storageWasChecking = storageCapability.health == .checking
         storageCapability.shutdown()
         deviceInventoryMonitor.stop()
@@ -702,8 +728,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         if let settingsWindow, settingsWindow.window?.isVisible == true {
-            settingsWindow.showWindow(nil)
-            settingsWindow.window?.makeKeyAndOrderFront(nil)
+            settingsWindow.showAndFocus()
             return
         }
         presentSettings(supportedLocales: [])
@@ -1070,12 +1095,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         do {
             try shortcutRegistration.synchronize(
                 storageReady: isShortcutStorageReady,
-                onboardingComplete: onboardingStore.load().isComplete
+                onboardingComplete: isSetupReady
             )
-            shortcutBridge.reset()
+            shortcutRegistration.registrationStatus.isActive ? fnKeyMonitor.start() : fnKeyMonitor.stop()
+            resetShortcutInput()
         } catch {
+            fnKeyMonitor.stop()
             NSLog("Oigo could not register the global toggle shortcut: %@", Self.failureReason(for: error))
-            shortcutBridge.reset()
+            resetShortcutInput()
             updateSurface()
         }
     }
@@ -1142,6 +1169,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             showOnboarding(OigoSystemSupportEvaluator.current())
             return
         }
+        guard allowBeforeSetup || speechAssetReadiness.isReady else {
+            updateSurface()
+            return
+        }
         guard storageCapability.health.isReady else {
             reportOnboardingTestFailure()
             updateSurface()
@@ -1153,7 +1184,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             startDictation(kind: allowBeforeSetup ? .onboardingTest : .dictation)
         case .recording:
             finishDictation()
-        case .preparing, .finalizing, .cleaning, .inserting:
+        case .preparing:
+            finishDictation()
+        case .finalizing, .cleaning, .inserting:
             showShortcutFeedback(.ignoredProcessing(coordinator.state))
         }
     }
@@ -1166,12 +1199,96 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         } else {
             qaLaunchConfiguration?.record("key-up-received")
         }
-        let result = productionShortcutBridge.receive(event)
-        if result == .releaseLatched,
-           operationGate.currentKind?.isDictationLifecycle == true,
-           coordinator.state == .preparing {
-            finishRequestedAfterStart = false
-            operationGate.cancelCurrent()
+        let edge: FnShortcutGestureEdge = switch event.edge {
+        case .pressed: .pressed
+        case .released: .released
+        }
+        applyFnShortcutGesture(
+            edge,
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            event: event
+        )
+    }
+
+    private func handleFnKey(_ edge: FnShortcutGestureEdge, timestamp: TimeInterval) {
+        let globalEdge: GlobalShortcutEdge = switch edge {
+        case .pressed: .pressed
+        case .released: .released
+        }
+        applyFnShortcutGesture(
+            edge,
+            timestamp: timestamp,
+            event: GlobalShortcutEvent(
+                edge: globalEdge,
+                generation: lastKeyboardStartupGeneration
+            )
+        )
+    }
+
+    private func applyFnShortcutGesture(
+        _ edge: FnShortcutGestureEdge,
+        timestamp: TimeInterval,
+        event: GlobalShortcutEvent
+    ) {
+        let result = fnShortcutGesture.receive(
+            edge,
+            at: timestamp
+        )
+        switch result {
+        case .start:
+            applyShortcutIntent(.pressed, from: event)
+        case .releaseDeferred:
+            scheduleDeferredFnRelease(generation: event.generation)
+        case .enterHandsFree:
+            fnReleaseTask?.cancel()
+            fnReleaseTask = nil
+            shortcutFeedbackDetail = "Hands-free mode"
+            updateSurface()
+        case .stop:
+            applyShortcutIntent(.released, from: event)
+        case .ignored:
+            break
+        }
+    }
+
+    private func applyShortcutIntent(_ edge: GlobalShortcutEdge, from event: GlobalShortcutEvent) {
+        _ = productionShortcutBridge.receive(
+            GlobalShortcutEvent(edge: edge, generation: event.generation)
+        )
+    }
+
+    private func resetShortcutInput() {
+        fnReleaseTask?.cancel()
+        fnReleaseTask = nil
+        fnShortcutGesture.reset()
+        shortcutBridge.reset()
+    }
+
+    private func scheduleDeferredFnRelease(generation: UInt64) {
+        fnReleaseTask?.cancel()
+        fnReleaseTask = Task { @MainActor [weak self] in
+            let delay = FnShortcutGestureController.doubleTapInterval + 0.02
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch {
+                return
+            }
+            guard let self else {
+                return
+            }
+            fnReleaseTask = nil
+            guard let result = fnShortcutGesture.advance(
+                to: ProcessInfo.processInfo.systemUptime
+            ) else {
+                return
+            }
+            guard result == .stop else {
+                return
+            }
+            applyShortcutIntent(
+                .released,
+                from: GlobalShortcutEvent(edge: .released, generation: generation)
+            )
         }
     }
 
@@ -1184,6 +1301,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 generation: nil
             )
             return
+        }
+        guard speechAssetReadiness.isReady else {
+            shortcutFeedbackDetail = "Finish speech asset setup before starting dictation."
+            resetShortcutInput()
+            updateSurface()
+            return
+        }
+        if accessibilityPermissionState() != .granted, !fnKeyMonitor.isGlobalMonitoringActive {
+            shortcutFeedbackDetail =
+                "Allow Accessibility so Oigo can detect Fn release while you type in other apps."
         }
         startDictation(kind: onboardingAllowsTest ? .onboardingTest : .dictation)
     }
@@ -1215,12 +1342,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 showShortcutFeedback(.ignoredBusy(coordinator.state))
             }
-            shortcutBridge.reset()
+            resetShortcutInput()
             return
         }
         switch operationGate.begin(kind) {
         case .failure(let reason):
-            shortcutBridge.reset()
+            resetShortcutInput()
             showBusy(reason)
         case .success(let handle):
             lastKeyboardStartupGeneration = handle.generation
@@ -1238,7 +1365,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                         }
                     }
                 } else {
-                    self.shortcutBridge.reset()
+                    self.resetShortcutInput()
                     self.operationGate.complete(handle)
                 }
             }
@@ -1259,7 +1386,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 showShortcutFeedback(.ignoredBusy(coordinator.state))
             }
-            shortcutBridge.reset()
+            resetShortcutInput()
             return
         }
         continueDictationStop()
@@ -1275,7 +1402,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         guard coordinator.state == .recording,
               let handle = operationGate.currentHandle,
               handle.kind.isDictationLifecycle else {
-            shortcutBridge.reset()
+            resetShortcutInput()
             updateSurface()
             return
         }
@@ -1354,7 +1481,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     )
                     return
                 }
-                let microphoneStateBeforeRequest = microphonePermissionState()
                 let capturedTarget = try await insertion.captureTargetBeforeMicrophonePermission {
                     try await self.ensureMicrophonePermission()
                 }
@@ -1366,12 +1492,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 targetSnapshot = capturedTarget
                 targetSnapshotGeneration = handle.generation
                 try Task.checkCancellation()
-                guard microphoneStateBeforeRequest == .granted else {
+                guard microphonePermissionState() == .granted else {
                     clearTargetSnapshot(generation: handle.generation)
                     reportOnboardingTestFailure()
                     presentKeyboardStartupRecovery(
                         category: "microphone-denied",
-                        copy: settings.globalShortcut.copy.retryHint,
+                        copy: "Microphone access is required. Allow Oigo in System Settings.",
                         generation: handle.generation
                     )
                     return
@@ -1556,7 +1682,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 cancelled: false
             )
             markStorageUnhealthyIfNeeded(error)
-            shortcutBridge.reset()
+            resetShortcutInput()
             lastSession = coordinator.currentSession ?? lastSession
             clearTargetSnapshot(generation: handle.generation)
             guard operationGate.isCurrent(handle) else { return }
@@ -1672,7 +1798,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             updateSurface()
         } catch is CancellationError {
             await coordinator.cancelActiveWork()
-            shortcutBridge.reset()
+            resetShortcutInput()
             lastSession = coordinator.currentSession ?? lastSession
             recordingStartedAt = nil
             clearTargetSnapshot(generation: handle.generation)
@@ -1687,7 +1813,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 await coordinator.cancelActiveWork(reason: failureReason)
             }
             markStorageUnhealthyIfNeeded(error)
-            shortcutBridge.reset()
+            resetShortcutInput()
             lastSession = coordinator.currentSession ?? lastSession
             clearTargetSnapshot(generation: handle.generation)
             guard operationGate.isCurrent(handle) else { return }
@@ -1714,8 +1840,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         operationGate.availability(
             coordinatorState: coordinator.state,
             setupComplete: onboardingStore.load().isComplete,
-            storageReady: storageCapability.health.isReady
+            storageReady: storageCapability.health.isReady,
+            speechAssetsReady: speechAssetReadiness.isReady
         )
+    }
+
+    private var isSetupReady: Bool {
+        onboardingStore.load().isComplete && speechAssetReadiness.isReady
     }
 
     private func frozenConfiguration() -> DictationConfigurationSnapshot {
@@ -2532,7 +2663,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             occupiedKind: operationHandle?.kind,
             acceptingCommands: acceptingCommands,
             setupComplete: onboarding.isComplete,
-            storageReady: storageHealth.isReady
+            storageReady: storageHealth.isReady,
+            speechAssetsReady: speechAssetReadiness.isReady
         )
         let settingsSnapshot = settings
         let committedShortcutCopy = settingsSnapshot.globalShortcut.copy
@@ -2578,7 +2710,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             input: .init(selection: inputStatus, channelIndex: settingsSnapshot.selectedInputChannel),
             localeAssets: .init(
                 localeIdentifier: localeIdentifier,
-                status: Self.presentationAssetStatus(transcription?.currentAssetState),
+                status: Self.presentationAssetStatus(speechAssetReadiness),
                 generation: generation
             ),
             activeConfiguration: activeConfiguration,
@@ -3014,6 +3146,20 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private static func presentationAssetStatus(
+        _ status: OigoLocaleAssetStatus
+    ) -> OigoLocaleAssetPresentationStatus {
+        switch status {
+        case .idle: .idle
+        case .checking: .checking
+        case .installing: .installing
+        case .ready: .ready
+        case .failed: .failed
+        case .unavailable: .unavailable
+        case .unsupported: .unsupported
+        }
+    }
+
     private static func presentationPlayback(
         _ state: AudioPlaybackState
     ) -> OigoPlaybackPresentationInput {
@@ -3061,7 +3207,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .active:
             if let error {
                 return (
-                    "Global Shortcut Active - Open Settings…",
+                    "Fn Dictation Active - Open Settings…",
                     committedShortcutCopy.activeToolTip + ". Last registration error: " + error
                 )
             }
@@ -3071,7 +3217,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             )
         case .inactive(let message):
             return (
-                "Global Shortcut Inactive - Open Settings…",
+                "Fn Dictation Unavailable - Open Settings…",
                 committedShortcutCopy.unavailableMessage(error ?? message)
             )
         }
@@ -3232,8 +3378,46 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         onboardingWindow?.setStorageHealth(displayedStorageHealth)
         if storageCapability.health.isReady {
             scheduleIdleMaintenance(.startup)
+            preflightSpeechAssetsIfNeeded()
         }
         updateSurface()
+    }
+
+    private func preflightSpeechAssetsIfNeeded() {
+        guard storageCapability.health.isReady,
+              onboardingStore.load().isComplete,
+              keyboardStartupBoundaries == nil,
+              speechAssetCheckTask == nil else {
+            return
+        }
+        speechAssetReadiness = .checking
+        let identifier = settings.localeIdentifier.isEmpty
+            ? Locale.current.identifier
+            : settings.localeIdentifier
+        let service = transcriptionService(for: identifier)
+        speechAssetCheckTask = Task { @MainActor [weak self, service] in
+            let status: OigoLocaleAssetStatus
+            do {
+                status = Self.localeAssetStatus(from: try await service.checkSpeechAssets())
+            } catch {
+                status = Self.localeAssetStatus(from: service.currentAssetState)
+            }
+            guard !Task.isCancelled, let self else {
+                return
+            }
+            speechAssetCheckTask = nil
+            speechAssetReadiness = status
+            if !status.isReady {
+                let stored = onboardingStore.load()
+                onboardingStore.save(OigoOnboardingState(
+                    step: .language,
+                    copyOnlyAccepted: stored.copyOnlyAccepted
+                ))
+                showOnboarding(OigoSystemSupportEvaluator.current())
+            }
+            synchronizeShortcutRegistration()
+            updateSurface()
+        }
     }
 
     private var displayedStorageHealth: DurableSessionHealth {
@@ -3286,12 +3470,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         guard storageCapability.health.isReady else {
             return .unavailable("durable storage is unavailable")
         }
-        let service = speechAssetService(for: identifier)
+        let service = transcriptionService(for: identifier)
+        let status: OigoLocaleAssetStatus
         do {
-            return Self.localeAssetStatus(from: try await service.installSpeechAssets())
+            status = Self.localeAssetStatus(from: try await service.installSpeechAssets())
         } catch {
-            return Self.localeAssetStatus(from: service.currentAssetState)
+            status = Self.localeAssetStatus(from: service.currentAssetState)
         }
+        speechAssetReadiness = status
+        updateSurface()
+        return status
     }
 
     private static func localeAssetStatus(from state: SpeechAssetState) -> OigoLocaleAssetStatus {
@@ -3305,13 +3493,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .unavailable(let reason):
             .unavailable(reason)
         }
-    }
-
-    private func speechAssetService(for identifier: String) -> TranscriptionService {
-        TranscriptionService(
-            locale: Locale(identifier: identifier),
-            instrumentation: performanceInstrumentation
-        )
     }
 
     private func loadDictionary() {
@@ -3528,7 +3709,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         recordingStartedAt = nil
         insertionDisplayStatus = nil
         livePreview = ""
-        shortcutBridge.reset()
+        resetShortcutInput()
         lastFailureCode = category
         failureDetail = copy
         shortcutFeedbackDetail = copy
@@ -3616,7 +3797,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
               let generation = onboardingTestGeneration else {
             return
         }
-        shortcutBridge.reset()
+        resetShortcutInput()
         let bound = recorder.currentSelection()
         let session = sessionForOnboardingTest(session)
         let selectedText: String
@@ -3669,7 +3850,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
               let generation = onboardingTestGeneration else {
             return
         }
-        shortcutBridge.reset()
+        resetShortcutInput()
         let bound = recorder.currentSelection()
         let session = sessionForOnboardingTest(lastSession ?? coordinator.currentSession)
         let cafExists = session.map { FileManager.default.fileExists(atPath: $0.audioURL.path) } ?? false
@@ -3812,6 +3993,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func prepareKeyboardStartupOwnerForTesting() async {
+        speechAssetReadiness = .ready
         _ = storageCapability.start()
         await storageCapability.waitForCurrentAttempt(timeout: .seconds(2))
     }
@@ -3827,7 +4009,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func shutdownKeyboardLifecycleForTesting() async {
         presentationPublicationFence.shutdown()
         try? shortcutRegistration.shutdown()
-        shortcutBridge.reset()
+        resetShortcutInput()
         statusSurface.shutdownHUD()
         let handle = operationGate.enterShutdown()
         await finishApplicationTermination()
@@ -3983,15 +4165,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .granted:
             return
         case .unknown:
-            let presentation = OigoPermissionPresentation.microphone(.unknown)
-            let alert = NSAlert()
-            alert.messageText = presentation.title
-            alert.informativeText = presentation.explanation
-            alert.addButton(withTitle: "Allow Microphone")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else {
-                throw AudioRecorderError.microphonePermission("permission request was cancelled")
-            }
             guard await AudioRecorder.requestMicrophonePermission() else {
                 throw AudioRecorderError.microphonePermission("denied")
             }
@@ -4011,6 +4184,23 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func openSystemSettings(_ url: URL) {
         NSWorkspace.shared.open(url)
+    }
+
+    private func refreshPermissionPresentation() {
+        refreshPermissionSurface()
+    }
+
+    private func refreshPermissionSurface() {
+        let microphone = microphonePermissionState()
+        let accessibility = accessibilityPermissionState()
+        if onboardingStore.load().isComplete {
+            updateSurface()
+        } else {
+            onboardingWindow?.refreshPermissions(
+                microphone: microphone,
+                accessibility: accessibility
+            )
+        }
     }
 
     private func waitForDestinationHandoff() async {

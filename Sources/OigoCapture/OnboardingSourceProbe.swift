@@ -119,7 +119,7 @@ public final class OnboardingSourceProbe: @unchecked Sendable {
         self.adapter = adapter
         lock.unlock()
 
-        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: nil) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: sourceFormat) { [weak self] buffer, _ in
             self?.handle(buffer, generation: generation)
         }
         try engine.start()

@@ -38,11 +38,27 @@ final class AppDelegatePublicationScenario: NativeUIContractScenario {
         let publicationSource = presentationRoot
             .appendingPathComponent("OigoPresentationPublication.swift")
         let delegateSource = repository.appendingPathComponent("Sources/Oigo/OigoAppDelegate.swift")
+        let onboardingSource = repository.appendingPathComponent("Sources/Oigo/OnboardingWindowController.swift")
+        let statusSurfaceSource = repository.appendingPathComponent("Sources/Oigo/StatusSurfaceController.swift")
         guard FileManager.default.fileExists(atPath: publicationSource.path) else {
             try demonstrateUngatedRepaint(fixture)
             throw ContractInputError(category: "missing-publication-boundary")
         }
         try validateDelegateBoundary(delegateSource)
+        try validatePermissionRefreshBoundary(
+            delegate: delegateSource,
+            onboarding: onboardingSource
+        )
+        try validateMicrophoneStartupGrantBoundary(delegate: delegateSource)
+        try validateOigoEntitlementsBoundary(
+            project: repository.appendingPathComponent("Oigo.xcodeproj/project.pbxproj"),
+            entitlements: repository.appendingPathComponent("Oigo/Oigo.entitlements"),
+            installScript: repository.appendingPathComponent("Scripts/install-oigo-dev.sh")
+        )
+        try validatePopoverPermissionRefreshBoundary(
+            delegate: delegateSource,
+            statusSurface: statusSurfaceSource
+        )
 
         let sources = [
             presentationRoot.appendingPathComponent("OigoPresentationInputs.swift"),
@@ -134,6 +150,102 @@ final class AppDelegatePublicationScenario: NativeUIContractScenario {
               text.contains("publishPresentation"),
               text.contains("presentationPublicationFence.shutdown()") else {
             throw ContractInputError(category: "missing-app-delegate-publication")
+        }
+    }
+
+    private static func validatePermissionRefreshBoundary(
+        delegate: URL,
+        onboarding: URL
+    ) throws {
+        guard let text = try? String(contentsOf: delegate, encoding: .utf8),
+              let activeStart = text.range(of: "func applicationDidBecomeActive"),
+              let activeEnd = text.range(
+                  of: "func applicationShouldTerminate",
+                  range: activeStart.upperBound..<text.endIndex
+              ) else {
+            throw ContractInputError(category: "missing-permission-presentation-refresh")
+        }
+        let activeMethod = text[activeStart.lowerBound..<activeEnd.lowerBound]
+        guard activeMethod.contains("refreshPermissionPresentation()"),
+              let refreshStart = text.range(of: "private func refreshPermissionPresentation"),
+              let refreshEnd = text.range(
+                  of: "private func waitForDestinationHandoff",
+                  range: refreshStart.upperBound..<text.endIndex
+              ) else {
+            throw ContractInputError(category: "missing-permission-presentation-refresh")
+        }
+        let refreshMethod = text[refreshStart.lowerBound..<refreshEnd.lowerBound]
+        guard refreshMethod.contains("refreshPermissionSurface()"),
+              !refreshMethod.contains("requestMicrophonePermission()") else {
+            throw ContractInputError(category: "missing-permission-presentation-refresh")
+        }
+        guard let onboardingText = try? String(contentsOf: onboarding, encoding: .utf8),
+              onboardingText.contains("func refreshPermissions("),
+              onboardingText.contains("microphoneState = microphone"),
+              onboardingText.contains("accessibilityState = accessibility"),
+              onboardingText.contains("render()") else {
+            throw ContractInputError(category: "missing-onboarding-permission-refresh")
+        }
+    }
+
+    private static func validateMicrophoneStartupGrantBoundary(delegate: URL) throws {
+        guard let text = try? String(contentsOf: delegate, encoding: .utf8),
+              !text.contains("microphoneStateBeforeRequest"),
+              let performStart = text.range(of: "private func performStartDictation"),
+              let performEnd = text.range(
+                  of: "private func presentKeyboardStartupRecovery",
+                  range: performStart.upperBound..<text.endIndex
+              ) else {
+            throw ContractInputError(category: "stale-microphone-grant-guard")
+        }
+        let performMethod = text[performStart.lowerBound..<performEnd.lowerBound]
+        guard performMethod.contains("ensureMicrophonePermission()"),
+              performMethod.contains("microphonePermissionState() == .granted") else {
+            throw ContractInputError(category: "stale-microphone-grant-guard")
+        }
+        guard let ensureStart = text.range(of: "private func ensureMicrophonePermission"),
+              let ensureEnd = text.range(
+                  of: "private func openSystemSettings",
+                  range: ensureStart.upperBound..<text.endIndex
+              ) else {
+            throw ContractInputError(category: "redundant-microphone-prompt")
+        }
+        let ensureMethod = text[ensureStart.lowerBound..<ensureEnd.lowerBound]
+        guard ensureMethod.contains("case .unknown:"),
+              ensureMethod.contains("requestMicrophonePermission()"),
+              !ensureMethod.contains("Allow Microphone") else {
+            throw ContractInputError(category: "redundant-microphone-prompt")
+        }
+    }
+
+    private static func validateOigoEntitlementsBoundary(
+        project: URL,
+        entitlements: URL,
+        installScript: URL
+    ) throws {
+        guard FileManager.default.fileExists(atPath: entitlements.path),
+              FileManager.default.fileExists(atPath: installScript.path),
+              let entitlementsText = try? String(contentsOf: entitlements, encoding: .utf8),
+              entitlementsText.contains("com.apple.security.device.audio-input"),
+              let projectText = try? String(contentsOf: project, encoding: .utf8),
+              projectText.contains("CODE_SIGN_ENTITLEMENTS = Oigo/Oigo.entitlements"),
+              let installScriptText = try? String(contentsOf: installScript, encoding: .utf8),
+              installScriptText.contains("codesign --force --sign - --entitlements") else {
+            throw ContractInputError(category: "missing-oigo-audio-input-entitlement")
+        }
+    }
+
+    private static func validatePopoverPermissionRefreshBoundary(
+        delegate: URL,
+        statusSurface: URL
+    ) throws {
+        guard let delegateText = try? String(contentsOf: delegate, encoding: .utf8),
+              delegateText.contains("onPopoverWillShow:"),
+              delegateText.contains("refreshPermissionPresentation()"),
+              let statusSurfaceText = try? String(contentsOf: statusSurface, encoding: .utf8),
+              statusSurfaceText.contains("onPopoverWillShow"),
+              statusSurfaceText.contains("onPopoverWillShow()") else {
+            throw ContractInputError(category: "missing-popover-permission-refresh")
         }
     }
 

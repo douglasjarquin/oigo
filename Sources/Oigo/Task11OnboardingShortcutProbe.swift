@@ -106,7 +106,7 @@ enum Task11OnboardingShortcutProbe {
                 $0.contains("Speech assets:")
             }
         })
-        try click("Check speech assets", in: onboarding)
+        try click("Install speech assets", in: onboarding)
         try pump("language-ready", until: { button("Continue", in: onboarding)?.isEnabled == true })
         rows.append(harness.observe("stage-2", controller: onboarding))
         captures.append(try capture(onboarding, name: "success-stage-2", root: evidenceRoot))

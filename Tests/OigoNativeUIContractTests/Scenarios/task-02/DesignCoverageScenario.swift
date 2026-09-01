@@ -38,7 +38,7 @@ final class DesignCoverageScenario: NativeUIContractScenario {
         guard process.terminationStatus == 0,
               let result = String(data: data, encoding: .utf8),
               result.contains("PASS native-design-coverage surfaces=6 hud_states=18 state_matrix_rows=23"),
-              result.contains("compact=224x42 expanded=280x64") else {
+              result.contains("processing=252x38 recording=252x54 preview=252x73 terminal=252x58") else {
             throw ContractInputError(category: "design-coverage-check-failed")
         }
 

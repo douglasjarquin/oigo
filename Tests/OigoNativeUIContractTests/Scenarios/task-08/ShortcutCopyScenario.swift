@@ -216,11 +216,11 @@ final class ShortcutCopyScenario: NativeUIContractScenario {
               nativeConsumers.statusActive.title.contains(fixture.expectedDisplayName),
               nativeConsumers.statusActive.menuTitle.contains(fixture.expectedDisplayName),
               nativeConsumers.statusActive.toolTip.contains(fixture.expectedDisplayName),
-              nativeConsumers.statusError.title == "Global Shortcut Active - Open Settings…",
+              nativeConsumers.statusError.title == "Fn Dictation Active - Open Settings…",
               nativeConsumers.statusError.menuTitle == nativeConsumers.statusError.title,
               nativeConsumers.statusError.toolTip.contains(fixture.expectedDisplayName),
               nativeConsumers.statusError.toolTip.contains("Synthetic registration warning"),
-              nativeConsumers.statusConflict.title == "Global Shortcut Inactive - Open Settings…",
+              nativeConsumers.statusConflict.title == "Fn Dictation Unavailable - Open Settings…",
               nativeConsumers.statusConflict.menuTitle == nativeConsumers.statusConflict.title,
               nativeConsumers.statusConflict.toolTip.contains(fixture.expectedDisplayName),
               [nativeConsumers.statusActive, nativeConsumers.statusError, nativeConsumers.statusConflict]

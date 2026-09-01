@@ -75,7 +75,9 @@ private final class PopoverStatesGalleryViewController: NSViewController {
               let fixture = try? JSONDecoder().decode(Fixture.self, from: data) else {
             preconditionFailure("missing committed shortcut gallery fixture")
         }
-        committedShortcut = fixture.shortcut
+        committedShortcut = ProcessInfo.processInfo.environment["OIGO_GALLERY_FIXED_FN"] == "1"
+            ? .fixedFn
+            : fixture.shortcut
         selectedRow = fixture.shortcut.keyCode == 255
             ? "shortcut-inactive-conflict" : "storage-ready-idle"
         super.init(nibName: nil, bundle: nil)
@@ -183,6 +185,10 @@ private final class PopoverStatesGalleryViewController: NSViewController {
             guard let self else { return }
             _ = self.render(rowNamed: "shortcut-inactive-conflict")
             self.writeScreenshot(named: "popover-shortcut-conflict.png")
+            for row in Self.rows {
+                _ = self.render(rowNamed: row)
+                self.writeScreenshot(named: "popover-" + row + ".png")
+            }
             _ = self.render(rowNamed: intendedRow)
             self.writeScreenshot(named: "popover-states.png")
         }

@@ -594,6 +594,11 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         guard Bundle.main.bundleIdentifier != nil else {
             throw AudioRecorderError.missingApplicationBundle
         }
+        guard AVAudioApplication.shared.recordPermission == .granted else {
+            throw AudioRecorderError.microphonePermission(
+                String(describing: AVAudioApplication.shared.recordPermission)
+            )
+        }
 
         lock.lock()
         let unavailable = recording || starting || finishing
@@ -631,10 +636,44 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         return recording
     }
 
+    private static let permissionRequestLock = NSLock()
+    nonisolated(unsafe) private static var permissionRequestInFlight = false
+    nonisolated(unsafe) private static var permissionRequestWaiters: [CheckedContinuation<Bool, Never>] = []
+
     public static func requestMicrophonePermission() async -> Bool {
-        await withCheckedContinuation { continuation in
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            return true
+        case .denied:
+            return false
+        case .undetermined:
+            break
+        @unknown default:
+            break
+        }
+        return await withCheckedContinuation { continuation in
+            permissionRequestLock.lock()
+            if AVAudioApplication.shared.recordPermission == .granted {
+                permissionRequestLock.unlock()
+                continuation.resume(returning: true)
+                return
+            }
+            permissionRequestWaiters.append(continuation)
+            guard !permissionRequestInFlight else {
+                permissionRequestLock.unlock()
+                return
+            }
+            permissionRequestInFlight = true
+            permissionRequestLock.unlock()
             AVAudioApplication.requestRecordPermission { granted in
-                continuation.resume(returning: granted)
+                permissionRequestLock.lock()
+                let waiters = permissionRequestWaiters
+                permissionRequestWaiters = []
+                permissionRequestInFlight = false
+                permissionRequestLock.unlock()
+                for waiter in waiters {
+                    waiter.resume(returning: granted)
+                }
             }
         }
     }
@@ -776,7 +815,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
         do {
             let startupInterruption = try callbackDeliveryGate.performExclusively { () -> String? in
-                inputNode.installTap(onBus: 0, bufferSize: 1_024, format: nil) { [weak self] buffer, _ in
+                inputNode.installTap(onBus: 0, bufferSize: 1_024, format: sourceFormat) { [weak self] buffer, _ in
                     self?.handle(buffer, generation: recordingGeneration)
                 }
                 let observer = NotificationCenter.default.addObserver(
@@ -937,10 +976,19 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             }
         }
         try inputRouter.route(inputNode: inputNode, to: device.deviceID)
+        guard let configuration = Self.inputConfiguration(for: inputNode) else {
+            throw AudioRecorderError.invalidInputFormat
+        }
+        guard OigoInputChannelPolicy.isValid(
+            preparedInput.selectedChannel,
+            channelCount: Int(configuration.channelCount)
+        ) else {
+            throw AudioRecorderError.selectedChannelUnavailable
+        }
         lock.lock()
         activeDeviceUID = device.uid
         lock.unlock()
-        return (device, preparedInput.configuration)
+        return (device, configuration)
     }
 
     private func handleDeviceChange(_ devices: [OigoInputDevice], generation: UInt64) {

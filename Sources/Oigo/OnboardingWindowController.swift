@@ -164,6 +164,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.storageHealth = storageHealth
         committedShortcut = globalShortcut
         shortcutRecorder = ShortcutRecorderControl(shortcut: globalShortcut)
+        shortcutRecorder.isEnabled = false
+        shortcutRecorder.toolTip = "Hold Fn to dictate. Double-tap Fn for hands-free mode."
+        shortcutRecorder.setAccessibilityLabel("Fn dictation key")
 
         let window = OigoUtilityWindow(
             contentRect: NSRect(
@@ -378,7 +381,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         shortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
         shortcutRecorder.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.shortcut-recorder")
         shortcutRecorder.setAccessibilityIdentifier("oigo.onboarding.shortcut-recorder")
-        shortcutRecorder.setAccessibilityLabel("Dictation shortcut")
+        shortcutRecorder.setAccessibilityLabel("Fn dictation key")
         languagePopup.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.language")
         languagePopup.setAccessibilityIdentifier("oigo.onboarding.language")
         languagePopup.setAccessibilityLabel("Transcription language")
@@ -558,9 +561,19 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         }
         if currentStep == .language {
             loadLanguagesIfNeeded()
-            actionButton.title = microphoneState == .granted
-                ? "Check speech assets"
-                : microphoneState == .denied ? "Open Microphone Settings" : "Allow Microphone Access"
+            if microphoneState == .granted {
+                actionButton.title = switch localeSelection.readiness.status {
+                case .ready: "Speech assets ready"
+                case .checking, .installing: "Installing speech assets…"
+                case .failed, .unavailable: "Retry speech asset installation"
+                case .unsupported: "Speech assets unavailable"
+                case .idle: "Install speech assets"
+                }
+            } else {
+                actionButton.title = microphoneState == .denied
+                    ? "Open Microphone Settings"
+                    : "Allow Microphone Access"
+            }
         } else if currentStep == .shortcut {
             actionButton.title = accessibilityRequestAttempted && accessibilityState == .denied
                 ? "Open Accessibility Settings"
@@ -587,6 +600,12 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             nextButton.isEnabled = microphoneState == .granted
                 && evidence.microphoneCanAdvance
                 && localeSelection.canConfirm
+            if microphoneState == .granted {
+                actionButton.isEnabled = switch localeSelection.readiness.status {
+                case .idle, .failed, .unavailable: true
+                case .checking, .installing, .ready, .unsupported: false
+                }
+            }
         }
         if currentStep == .shortcut {
             nextButton.isEnabled = (accessibilityState == .granted || copyOnlySetupAccepted)
@@ -641,6 +660,20 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         render()
     }
 
+    func refreshPermissions(
+        microphone: OigoPermissionState,
+        accessibility: OigoPermissionState
+    ) {
+        microphoneState = microphone
+        accessibilityState = accessibility
+        if currentStep == .language, microphoneState == .granted, !evidence.probeActive {
+            restartSourceProbe()
+        } else if currentStep == .language, microphoneState != .granted, evidence.probeActive {
+            releaseOnboardingResources(cancelActiveTest: false)
+        }
+        render()
+    }
+
     func setCommandAvailability(_ availability: AppCommandAvailability) {
         commandAvailability = availability
         if currentStep == .testDictation {
@@ -665,7 +698,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         case .microphoneAndLanguage:
             "Choose what Oigo listens to and which language it transcribes."
         case .shortcutAndInsertion:
-            "Hold a global shortcut to dictate. Accessibility enables automatic paste."
+            "Hold Fn to dictate, or double-tap Fn for hands-free mode. Accessibility enables automatic paste."
         case .tryIt:
             "One real dictation, end to end, into a field Oigo owns."
         case .done:

@@ -429,6 +429,35 @@ final class PresentationMatrixScenario: NativeUIContractScenario {
     for state in states {
         print(state.sanitizedDescription)
     }
+    let dictationRecording = OigoPresentationState.project(OigoPresentationInputs(
+        generation: 42,
+        operationGate: .init(
+            activeOperation: .init(generation: 42, kind: .dictation),
+            busyReason: .occupied(.dictation)
+        ),
+        coordinator: .init(state: .recording, generation: 42),
+        storage: .init(status: .ready),
+        shortcut: .init(registration: .registered, isConfigured: true, shortcut: .default),
+        permissions: .init(microphone: .granted, accessibility: .granted),
+        input: .init(selection: .systemDefault, channelIndex: 0),
+        localeAssets: .init(localeIdentifier: locale, status: .ready, generation: 42),
+        activeConfiguration: nil,
+        nextConfiguration: .init(
+            localeIdentifier: locale,
+            input: .systemDefault,
+            channelIndex: 0,
+            appliesTo: .next
+        ),
+        terminal: nil,
+        latestSession: nil,
+        playback: .init(generation: 42, status: .idle),
+        onboarding: .init(stage: .complete, status: .passed, failure: nil),
+        shutdown: .init(status: .inactive, fencedOperationCount: 0)
+    ))
+    guard dictationRecording.row == .recording,
+          dictationRecording.primaryAction == .enabled(.stopDictation) else {
+        exit(1)
+    }
     print("MATRIX rows=\(rows.count) unique=\(Set(states.map(\.row)).count)")
 
     if CommandLine.arguments.dropFirst().first == "conflict" {

@@ -20,7 +20,7 @@ public final class ShortcutRecorderControl: NSControl {
     }
 
     public override var acceptsFirstResponder: Bool {
-        true
+        isEnabled
     }
 
     public init(shortcut: ToggleShortcut) {
@@ -38,6 +38,9 @@ public final class ShortcutRecorderControl: NSControl {
     }
 
     public func beginRecording() {
+        guard isEnabled else {
+            return
+        }
         if let window, window.firstResponder !== self, !window.makeFirstResponder(self) {
             return
         }
@@ -77,6 +80,9 @@ public final class ShortcutRecorderControl: NSControl {
 
     public override func mouseDown(with event: NSEvent) {
         _ = event
+        guard isEnabled else {
+            return
+        }
         beginRecording()
     }
 
@@ -131,16 +137,31 @@ public final class ShortcutRecorderControl: NSControl {
 
     public override func draw(_ dirtyRect: NSRect) {
         _ = dirtyRect
-        let background = isRecording ? NSColor.selectedControlColor : NSColor.controlBackgroundColor
+        let background: NSColor
+        if isRecording {
+            background = NSColor.selectedControlColor
+        } else if isEnabled {
+            background = NSColor.controlBackgroundColor
+        } else {
+            background = NSColor.controlBackgroundColor.withAlphaComponent(0.55)
+        }
         background.setFill()
         bounds.insetBy(dx: 1, dy: 1).fill()
 
-        NSColor.separatorColor.setStroke()
+        let borderColor = isEnabled ? NSColor.separatorColor : NSColor.disabledControlTextColor
+        borderColor.setStroke()
         let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 5, yRadius: 5)
         border.lineWidth = 1
         border.stroke()
 
-        let textColor = isRecording ? NSColor.selectedControlTextColor : NSColor.labelColor
+        let textColor: NSColor
+        if isRecording {
+            textColor = NSColor.selectedControlTextColor
+        } else if isEnabled {
+            textColor = NSColor.labelColor
+        } else {
+            textColor = NSColor.disabledControlTextColor
+        }
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
             .foregroundColor: textColor

@@ -687,14 +687,14 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 displays: [HUDDisplayGeometry(id: 1, visibleFrame: HUDRect(x: 0, y: 0, width: 1_440, height: 900))],
                 frontmostDisplayID: 1,
                 mainDisplayID: 1,
-                panelSize: HUDSize(width: 224, height: 42)
+                panelSize: HUDSize(width: 252, height: 54)
             )
             _ = hud.present(.recording, generation: 20, placementInput: placement, shortcutReleaseHint: shortcut.copy.releaseHint)
             let hudScreenshot = evidenceRoot.appendingPathComponent("screenshots/hud-\(appearanceName)-\(contrast).png")
             let hudCaptured = hud.captureRenderedSurface(to: hudScreenshot)
             if let inspection = hud.renderInspection {
-                try assert(inspection.titlePointSize == 12 && inspection.detailPointSize == 12, "HUD typography")
-                try assert(inspection.size == .init(width: 224, height: 42), "HUD compact geometry")
+                try assert(inspection.titlePointSize == 13 && inspection.detailPointSize == 11, "HUD typography")
+                try assert(inspection.size == .init(width: 252, height: 54), "HUD recording geometry")
                 try assert(inspection.cornerRadius == 12, "HUD radius")
             } else {
                 throw DriverError.assertion("HUD render inspection")
@@ -780,7 +780,7 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 displays: [],
                 frontmostDisplayID: nil,
                 mainDisplayID: nil,
-                panelSize: .init(width: 224, height: 42)
+                panelSize: .init(width: 252, height: 54)
             )) == nil, "target disappearance fallback is explicit")
             let targetDisappearanceHandled = HUDPlacement.place(HUDPlacementInput(
                 snapshot: nil,
@@ -788,7 +788,7 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 displays: [],
                 frontmostDisplayID: nil,
                 mainDisplayID: nil,
-                panelSize: .init(width: 224, height: 42)
+                panelSize: .init(width: 252, height: 54)
             )) == nil
             let requiredRoutes = ["start", "record", "terminal", "history", "paste-again", "settings", "onboarding"]
             try assert(requiredRoutes.allSatisfy { callbacks.routeCallbacks[$0, default: 0] > 0 }, "route callbacks")

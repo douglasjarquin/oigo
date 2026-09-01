@@ -108,7 +108,7 @@ final class PopoverShellScenario: NativeUIContractScenario {
         fixture: Fixture,
         evidenceRoot: URL
     ) throws -> Receipt {
-        let shortcut = ToggleShortcut(keyCode: 49, modifiers: ToggleShortcutModifiers.command)
+        let shortcut = ToggleShortcut.fixedFn
         let healthyInputs = makeInputs(shortcut: shortcut, registration: .registered)
         let healthy = OigoPopoverPresentation.compose(
             state: OigoPresentationState.project(healthyInputs),
@@ -122,8 +122,8 @@ final class PopoverShellScenario: NativeUIContractScenario {
         guard healthy.width == fixture.width,
               healthy.sections.map(\.rawValue) == fixture.sections,
               healthy.allowsScrolling == false,
-              healthy.shortcut.holdHint == "Hold ⌘ Space to dictate",
-              healthy.shortcut.accessibilityLabel == "Command Space",
+              healthy.shortcut.holdHint == "Hold Fn to dictate",
+              healthy.shortcut.accessibilityLabel == "Fn",
               conflict.primaryAction.action == .startDictation,
               conflict.primaryAction.isEnabled,
               conflict.notice?.category == "shortcut-conflict",

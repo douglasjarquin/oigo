@@ -9,6 +9,20 @@ final class SettingsShortcutScenario: NativeUIContractScenario {
         guard arguments.defaultsSuite == "com.oigo.qa.task12" else {
             throw ContractInputError(category: "invalid-defaults-suite")
         }
+        let settingsSource = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("Sources/Oigo/SettingsWindowController.swift")
+        guard let settingsText = try? String(contentsOf: settingsSource, encoding: .utf8),
+              settingsText.contains("shortcutRecorder.heightAnchor.constraint(equalToConstant: 44)") else {
+            throw ContractInputError(category: "shortcut-recorder-hit-target-too-small")
+        }
+        guard let appDelegateSource = try? String(
+            contentsOf: URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent("Sources/Oigo/OigoAppDelegate.swift"),
+            encoding: .utf8
+        ),
+        appDelegateSource.contains("settingsWindow.showAndFocus()") else {
+            throw ContractInputError(category: "settings-window-not-activated")
+        }
         let mode = switch arguments.fixtureRoot.lastPathComponent {
         case "success": "success"
         case "failure": "failure"

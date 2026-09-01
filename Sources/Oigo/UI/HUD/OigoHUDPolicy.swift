@@ -17,10 +17,10 @@ public enum OigoHUDShellPolicy {
         switch state {
         case .preparing:
             content(
-                title: "Preparing...",
-                detail: "Getting ready to record.",
+                title: "Preparing…",
+                detail: "",
                 tone: .informational,
-                iconRole: .information
+                iconRole: .progress
             )
         case .recording:
             content(
@@ -30,7 +30,7 @@ public enum OigoHUDShellPolicy {
                 iconRole: .recording,
                 showsRecordingElapsed: true,
                 allowsPreview: true,
-                size: preview.isEmpty ? .compact : .expanded
+                size: preview.isEmpty ? .recording : .expanded
             )
         case .degradedRecording:
             content(
@@ -40,38 +40,38 @@ public enum OigoHUDShellPolicy {
                 iconRole: .attention,
                 actionability: .retryTranscription,
                 showsRecordingElapsed: true,
-                size: .compact
+                size: .recording
             )
         case .finalizing:
             content(
-                title: "Finalizing...",
-                detail: "Finishing the recording.",
+                title: "Finalizing…",
+                detail: "",
                 tone: .informational,
-                iconRole: .information
+                iconRole: .progress
             )
         case .cleaning:
             content(
-                title: "Cleaning...",
-                detail: "Applying the selected cleanup.",
+                title: "Cleaning…",
+                detail: "",
                 tone: .informational,
-                iconRole: .information
+                iconRole: .progress
             )
         case .pasting:
             content(
-                title: "Pasting...",
-                detail: "Sending the result to the current destination.",
+                title: "Pasting…",
+                detail: "",
                 tone: .informational,
-                iconRole: .information
+                iconRole: .progress
             )
         case .pasteAttempted:
             content(
                 title: "Paste attempted",
-                detail: "Clipboard retained; third-party paste result is unknown.",
+                detail: "",
                 tone: .success,
                 iconRole: .confirmation,
                 dismissal: .timed(after: ordinaryTerminalDismissal),
                 isTerminal: true,
-                size: .expanded
+                size: .compact
             )
         case .copied:
             content(
@@ -82,7 +82,7 @@ public enum OigoHUDShellPolicy {
                 actionability: .pasteAgain,
                 dismissal: .timed(after: actionableTerminalDismissal),
                 isTerminal: true,
-                size: .expanded
+                size: .terminal
             )
         case .copyOnly:
             content(
@@ -93,7 +93,7 @@ public enum OigoHUDShellPolicy {
                 actionability: .pasteAgain,
                 dismissal: .timed(after: actionableTerminalDismissal),
                 isTerminal: true,
-                size: .expanded
+                size: .terminal
             )
         case .savedRetry:
             content(
@@ -104,7 +104,7 @@ public enum OigoHUDShellPolicy {
                 actionability: .retryTranscription,
                 dismissal: .timed(after: actionableTerminalDismissal),
                 isTerminal: true,
-                size: .expanded
+                size: .terminal
             )
         case .preservedFailure:
             content(
@@ -115,7 +115,7 @@ public enum OigoHUDShellPolicy {
                 actionability: .copyAndPasteAgain,
                 dismissal: .timed(after: actionableTerminalDismissal),
                 isTerminal: true,
-                size: .expanded
+                size: .terminal
             )
         case .cleanupFallback:
             content(
@@ -126,7 +126,7 @@ public enum OigoHUDShellPolicy {
                 actionability: .pasteAgain,
                 dismissal: .timed(after: actionableTerminalDismissal),
                 isTerminal: true,
-                size: .expanded
+                size: .terminal
             )
         case .cancelledBeforeRaw:
             content(
@@ -136,7 +136,7 @@ public enum OigoHUDShellPolicy {
                 iconRole: .information,
                 dismissal: .timed(after: ordinaryTerminalDismissal),
                 isTerminal: true,
-                size: .expanded
+                size: .terminal
             )
         case .cancelledAfterRaw:
             content(
@@ -147,7 +147,7 @@ public enum OigoHUDShellPolicy {
                 actionability: .openHistory,
                 dismissal: .timed(after: actionableTerminalDismissal),
                 isTerminal: true,
-                size: .expanded
+                size: .terminal
             )
         case .interrupted:
             content(
@@ -158,7 +158,7 @@ public enum OigoHUDShellPolicy {
                 actionability: .openHistory,
                 dismissal: .timed(after: actionableTerminalDismissal),
                 isTerminal: true,
-                size: .expanded
+                size: .terminal
             )
         case .pasteAgainDestination:
             content(
@@ -167,7 +167,7 @@ public enum OigoHUDShellPolicy {
                 tone: .informational,
                 iconRole: .destination,
                 actionability: .chooseDestination,
-                size: .expanded
+                size: .terminal
             )
         case .terminal:
             content(
@@ -177,7 +177,7 @@ public enum OigoHUDShellPolicy {
                 iconRole: .confirmation,
                 dismissal: .timed(after: ordinaryTerminalDismissal),
                 isTerminal: true,
-                size: .expanded
+                size: .terminal
             )
         case .shutdown:
             content(

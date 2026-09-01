@@ -37,7 +37,7 @@ enum Task16KeyboardReleaseContracts {
               rows.count == 4 else {
             throw ContractFailure(message: "keyboard release receipt identity or isolation failed")
         }
-        try require(rows["release-before-ready"], state: "cancelled", rawBytes: 0, insertionCount: 0)
+        try require(rows["release-before-ready"], state: "complete", durableState: "completed", rawBytesAtLeast: 1, insertionCount: 1)
         try require(
             rows["release-during-recording"],
             state: "complete",
@@ -52,7 +52,8 @@ enum Task16KeyboardReleaseContracts {
             rawBytesAtLeast: 1,
             insertionCount: 0
         )
-        guard rows["release-before-ready"]?.transcriptionCancelCount == 1,
+        guard rows["release-before-ready"]?.transcriptionFinishCount == 1,
+              rows["release-before-ready"]?.transcriptionCancelCount == 0,
               rows["release-during-recording"]?.transcriptionFinishCount == 1,
               rows["release-during-recording"]?.captureStopCount == 1,
               rows["app-close-during-terminalization"]?.transcriptionCancelCount == 1 else {

@@ -22,7 +22,8 @@ extension OigoPresentationState {
         if inputs.shutdown.status != .inactive || inputs.operationGate.busyReason == .shutdown {
             return .shuttingDown
         }
-        if inputs.operationGate.busyReason != nil {
+        if let busyReason = inputs.operationGate.busyReason,
+           !isDictationLifecycleBusy(busyReason) {
             return .busyTypedReason
         }
         switch inputs.storage.status {
@@ -101,6 +102,17 @@ extension OigoPresentationState {
             return .interrupted
         case .failed:
             return terminal.failure == .insertion ? .insertionFailure : .retryRequired
+        }
+    }
+
+    private static func isDictationLifecycleBusy(
+        _ reason: OigoOperationBusyPresentationReason
+    ) -> Bool {
+        switch reason {
+        case .occupied(.dictation), .occupied(.onboardingTest):
+            true
+        case .shutdown, .occupied:
+            false
         }
     }
 

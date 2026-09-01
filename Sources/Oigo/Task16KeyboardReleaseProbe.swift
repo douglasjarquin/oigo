@@ -49,6 +49,7 @@ enum Task16KeyboardReleaseProbe {
         let capture = Task16ProbeCapture()
         let transcription = Task16ProbeTranscription(
             blocksStartup: caseName == "release-before-ready",
+            startupBlockDuration: caseName == "release-before-ready" ? .milliseconds(500) : nil,
             blocksFinish: caseName == "app-close-during-terminalization",
             cancellationText: caseName == "release-before-ready" ? "" : "preserved partial"
         )
@@ -191,6 +192,7 @@ private final class Task16ProbeCapture: AudioCapturing, @unchecked Sendable {
 
 private final class Task16ProbeTranscription: TranscriptionController, @unchecked Sendable {
     let blocksStartup: Bool
+    let startupBlockDuration: Duration?
     let blocksFinish: Bool
     let cancellationText: String
     private var session: DictationSession?
@@ -199,8 +201,14 @@ private final class Task16ProbeTranscription: TranscriptionController, @unchecke
     private(set) var startCount = 0
     private(set) var finishCount = 0
     private(set) var cancelCount = 0
-    init(blocksStartup: Bool, blocksFinish: Bool, cancellationText: String) {
+    init(
+        blocksStartup: Bool,
+        startupBlockDuration: Duration? = nil,
+        blocksFinish: Bool,
+        cancellationText: String
+    ) {
         self.blocksStartup = blocksStartup
+        self.startupBlockDuration = startupBlockDuration
         self.blocksFinish = blocksFinish
         self.cancellationText = cancellationText
     }
@@ -212,7 +220,13 @@ private final class Task16ProbeTranscription: TranscriptionController, @unchecke
     ) async throws {
         _ = format; _ = onUpdate
         startCount += 1; active = true; self.session = session; self.store = store
-        if blocksStartup { try await Task.sleep(for: .seconds(30)) }
+        if blocksStartup {
+            if let startupBlockDuration {
+                try await Task.sleep(for: startupBlockDuration)
+            } else {
+                try await Task.sleep(for: .seconds(30))
+            }
+        }
     }
     func append(_ buffer: AudioCaptureBuffer) { _ = buffer }
     func finish() async throws -> TranscriptionResult {

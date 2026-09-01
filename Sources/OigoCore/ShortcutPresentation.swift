@@ -8,8 +8,7 @@ public struct OigoShortcutCopy: Equatable, Sendable {
     public let releaseHint: String
 
     public var settingsHint: String {
-        "Click the recorder and press a shortcut. Current shortcut: " + displayName
-            + ". Validation never displaces the current working registration."
+        "Hold Fn to dictate. Double-tap Fn for hands-free mode."
     }
 
     public var activeStatus: String {
@@ -29,11 +28,11 @@ public struct OigoShortcutCopy: Equatable, Sendable {
     }
 
     public var globalTitle: String {
-        "Global Shortcut: " + displayName
+        displayName + " Dictation: Active"
     }
 
     public var activeToolTip: String {
-        "Global shortcut active: " + displayName
+        displayName + " dictation key active"
     }
 
     public var retryHint: String {
@@ -77,13 +76,16 @@ public enum OigoShortcutPresentation {
         components.append(key)
         glyphs.append(key)
         let displayName = components.joined(separator: "-")
+        let inactiveHint = shortcut == .fixedFn
+            ? displayName + " unavailable. Check permissions and restart Oigo."
+            : displayName + " inactive. Open Settings to choose another shortcut."
         return OigoShortcutCopy(
             displayName: displayName,
             compactDisplayName: glyphs.joined(),
             glyphs: glyphs,
             accessibilityLabel: components.joined(separator: " "),
             holdHint: "Hold " + glyphs.joined(separator: " ") + " to dictate",
-            inactiveHint: displayName + " inactive. Open Settings to choose another shortcut.",
+            inactiveHint: inactiveHint,
             releaseHint: "Release " + displayName + " to finish."
         )
     }
@@ -162,6 +164,8 @@ public enum OigoShortcutPresentation {
             "Delete"
         case 53:
             "Escape"
+        case 63:
+            "Fn"
         default:
             "Key \(keyCode)"
         }

@@ -23,8 +23,13 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
     private var hudState: OigoHUDState?
     private var hudGeneration: UInt64?
     private var presentationGeneration: UInt64 = 0
+    private let onPopoverWillShow: () -> Void
 
-    init(commandHandler: @escaping (OigoStatusSurfaceCommand) -> Void) {
+    init(
+        onPopoverWillShow: @escaping () -> Void = {},
+        commandHandler: @escaping (OigoStatusSurfaceCommand) -> Void
+    ) {
+        self.onPopoverWillShow = onPopoverWillShow
         self.commandHandler = commandHandler
         super.init()
 
@@ -154,6 +159,7 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
         if popover.isShown {
             popover.close()
         } else {
+            onPopoverWillShow()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
@@ -284,7 +290,8 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
                 generation: generation,
                 placementInput: placement,
                 startedAt: startedAt,
-                shortcutReleaseHint: shortcutCopy.releaseHint
+                shortcutReleaseHint: shortcutCopy.releaseHint,
+                targetApplicationName: NSWorkspace.shared.frontmostApplication?.localizedName
             ) else {
                 return
             }

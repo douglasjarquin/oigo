@@ -690,6 +690,7 @@ public final class DictationCoordinator {
             }
             currentSession = failedSession
             releaseCapture()
+            diagnostics.record("dictation startup failed: " + reason + " (" + String(describing: error) + ")")
             throw error
         }
     }
@@ -2067,6 +2068,11 @@ public struct ToggleShortcut: Codable, Equatable, Hashable, Sendable {
         self.keyCode = keyCode
         self.modifiers = modifiers
     }
+
+    public static let fixedFn = ToggleShortcut(
+        keyCode: 63,
+        modifiers: 0
+    )
 
     public static let `default` = ToggleShortcut(
         keyCode: 49,

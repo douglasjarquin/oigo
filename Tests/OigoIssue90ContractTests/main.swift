@@ -37,6 +37,7 @@ private struct OigoIssue90ContractTests {
             ("cancel-preserves-caf-prefix", testCancelPreservesCAFPrefix),
             ("interrupt-preserves-caf-prefix", testInterruptPreservesCAFPrefix),
             ("slow-speech-does-not-overflow", testSlowSpeechDoesNotOverflow),
+            ("routed-input-explicit-tap-format", testRoutedInputExplicitTapFormat),
             ("recorder-startup-interruption", testRecorderStartupInterruption),
             ("recorder-stop-after-overflow", testRecorderStopAfterOverflow),
             ("recorder-concurrent-terminalize", testRecorderConcurrentTerminalize)
@@ -579,6 +580,77 @@ private struct OigoIssue90ContractTests {
         }
     }
 
+    private static func testRoutedInputExplicitTapFormat() throws {
+        guard AVAudioApplication.shared.recordPermission == .granted else {
+            print("INCONCLUSIVE: microphone permission not granted")
+            return
+        }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &deviceID
+        ) == noErr, deviceID != 0 else {
+            print("INCONCLUSIVE: default input device unavailable")
+            return
+        }
+
+        func route(_ inputNode: AVAudioInputNode) throws {
+            guard let audioUnit = inputNode.audioUnit else {
+                throw ContractFailure(message: "input node is missing its audio unit")
+            }
+            var device = deviceID
+            let propertySize = UInt32(MemoryLayout<AudioDeviceID>.size)
+            guard AudioUnitSetProperty(
+                audioUnit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global,
+                0,
+                &device,
+                propertySize
+            ) == noErr else {
+                throw ContractFailure(message: "input device routing failed")
+            }
+        }
+
+        func start(_ engine: AVAudioEngine, tapFormat: AVAudioFormat?) throws {
+            let inputNode = engine.inputNode
+            inputNode.installTap(onBus: 0, bufferSize: 1_024, format: tapFormat) { _, _ in }
+            engine.prepare()
+            defer {
+                engine.stop()
+                inputNode.removeTap(onBus: 0)
+            }
+            try engine.start()
+        }
+
+        let nilTapEngine = AVAudioEngine()
+        try route(nilTapEngine.inputNode)
+        do {
+            try start(nilTapEngine, tapFormat: nil)
+            throw ContractFailure(message: "routed input started with a nil tap format")
+        } catch let error as NSError where error.domain == "com.apple.coreaudio.avfaudio" && error.code == -10_868 {
+        } catch {
+            throw ContractFailure(
+                message: "routed input with nil tap format failed unexpectedly: " + String(describing: error)
+            )
+        }
+
+        let explicitTapEngine = AVAudioEngine()
+        try route(explicitTapEngine.inputNode)
+        let sourceFormat = explicitTapEngine.inputNode.inputFormat(forBus: 0)
+        try start(explicitTapEngine, tapFormat: sourceFormat)
+    }
+
     private static func testRecorderStartupInterruption() throws {
         let writer = ScriptedWriter()
         let recorder = AudioRecorder(
@@ -602,6 +674,7 @@ private struct OigoIssue90ContractTests {
 
     private static func testRecorderStopAfterOverflow() throws {
         let writer = ScriptedWriter()
+        writer.blockWrites = true
         writer.blockClose = true
         let recorder = AudioRecorder(
             deviceMonitor: EmptyDeviceMonitor(),
@@ -640,9 +713,11 @@ private struct OigoIssue90ContractTests {
             }
         }
         guard overflowed else {
+            writer.unblock()
             writer.unblockClose()
             throw ContractFailure(message: "overflow was not produced")
         }
+        writer.unblock()
         guard writer.waitUntilCloseStarted(timeout: 1) else {
             writer.unblockClose()
             throw ContractFailure(message: "overflow teardown did not reach writer close")

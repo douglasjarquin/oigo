@@ -87,7 +87,7 @@ public struct OigoPopoverPresentation: Equatable, Sendable {
         state: OigoPresentationState,
         inputs: OigoPresentationInputs
     ) -> OigoPopoverPresentation {
-        let notice = noticePresentation(state.notice)
+        let notice = noticePresentation(state.notice, shortcut: inputs.shortcut.copy)
         var sections: [OigoPopoverSection] = [
             .header, .primaryAction, .shortcut, .mode, .microphone
         ]
@@ -252,7 +252,10 @@ public struct OigoPopoverPresentation: Equatable, Sendable {
         }
     }
 
-    private static func noticePresentation(_ category: OigoNotice?) -> OigoPopoverNoticePresentation? {
+    private static func noticePresentation(
+        _ category: OigoNotice?,
+        shortcut: OigoShortcutCopy
+    ) -> OigoPopoverNoticePresentation? {
         guard let category else { return nil }
         switch category {
         case .storageCritical:
@@ -279,7 +282,7 @@ public struct OigoPopoverPresentation: Equatable, Sendable {
                           "Available durable work remains in History.", .warning, .openHistory)
         case .shortcutConflict:
             return makeNotice(category, "Shortcut inactive",
-                          "The configured shortcut is unavailable. Mouse start remains available.", .warning,
+                          shortcut.displayName + " is unavailable. Mouse start remains available.", .warning,
                           .openSettings)
         case .accessibilityCopyOnly:
             return makeNotice(category, "Accessibility unavailable",

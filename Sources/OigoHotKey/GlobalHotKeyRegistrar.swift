@@ -1,3 +1,4 @@
+import AppKit
 import Carbon.HIToolbox
 import OigoCore
 
@@ -358,5 +359,126 @@ public final class CarbonGlobalShortcutRegistrar {
         retainedFailedHandles.append(handle)
         activeRegistration = nil
         _ = nextGeneration()
+    }
+}
+
+@MainActor
+public final class FnKeyMonitor {
+    public typealias Handler = @MainActor (FnShortcutGestureEdge, TimeInterval) -> Void
+
+    private let handler: Handler
+    private var globalMonitor: Any?
+    private var localMonitor: Any?
+    private var edgeDetector = FnKeyEdgeDetector()
+
+    public init(handler: @escaping Handler) {
+        self.handler = handler
+    }
+
+    public func start() {
+        guard globalMonitor == nil, localMonitor == nil else {
+            return
+        }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) {
+            [weak self] event in
+            self?.receive(event)
+        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) {
+            [weak self] event in
+            self?.receive(event)
+            return event
+        }
+    }
+
+    public var isGlobalMonitoringActive: Bool {
+        globalMonitor != nil
+    }
+
+    public func stop() {
+        if let globalMonitor {
+            NSEvent.removeMonitor(globalMonitor)
+            self.globalMonitor = nil
+        }
+        if let localMonitor {
+            NSEvent.removeMonitor(localMonitor)
+            self.localMonitor = nil
+        }
+        edgeDetector.reset()
+    }
+
+    private func receive(_ event: NSEvent) {
+        guard let edge = edgeDetector.receive(
+            keyCode: event.keyCode,
+            functionFlagSet: event.modifierFlags.contains(.function)
+        ) else {
+            return
+        }
+        handler(edge, event.timestamp)
+    }
+}
+
+public struct FnKeyEdgeDetector: Sendable {
+    private var functionKeyDown = false
+
+    public init() {}
+
+    public mutating func receive(
+        keyCode: UInt16,
+        functionFlagSet: Bool
+    ) -> FnShortcutGestureEdge? {
+        guard keyCode == UInt16(kVK_Function), functionFlagSet != functionKeyDown else {
+            return nil
+        }
+        functionKeyDown = functionFlagSet
+        return functionFlagSet ? .pressed : .released
+    }
+
+    public mutating func reset() {
+        functionKeyDown = false
+    }
+}
+
+public enum FixedFnShortcutRegistrationError: Error, Equatable, CustomStringConvertible, Sendable {
+    case nonFnShortcut
+
+    public var description: String {
+        "Only the fixed Fn shortcut is supported"
+    }
+}
+
+@MainActor
+public final class FixedFnShortcutRegistrationClient: GlobalShortcutRegistrationClient {
+    private var generation: UInt64 = 0
+
+    public private(set) var status = GlobalShortcutRegistrationStatus.inactive(
+        "Global shortcut registration is waiting for setup"
+    )
+    public private(set) var lastError: String?
+
+    public init() {}
+
+    public func register(
+        shortcut: ToggleShortcut,
+        onEvent: @escaping @MainActor (GlobalShortcutEvent) -> Void
+    ) throws {
+        _ = onEvent
+        guard shortcut == .fixedFn else {
+            throw FixedFnShortcutRegistrationError.nonFnShortcut
+        }
+        generation += 1
+        status = .active(shortcut, generation: generation)
+        lastError = nil
+    }
+
+    public func probe(shortcut: ToggleShortcut) throws {
+        guard shortcut == .fixedFn else {
+            throw FixedFnShortcutRegistrationError.nonFnShortcut
+        }
+        lastError = nil
+    }
+
+    public func unregister() throws {
+        status = .inactive("Global shortcut is not registered")
+        lastError = nil
     }
 }

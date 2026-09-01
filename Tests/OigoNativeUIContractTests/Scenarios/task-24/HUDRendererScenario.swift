@@ -75,13 +75,13 @@ final class HUDRendererScenario: NativeUIContractScenario {
         ])
         guard fixture.scenario == scenarioName,
               fixture.fixture.hasPrefix("hud-placement-"),
-              fixture.shortcutReleaseHint.contains("Command-A"),
+              fixture.shortcutReleaseHint == "Release Fn to finish.",
               fixture.radius == 12,
               fixture.currentGeneration > fixture.staleGeneration,
               fixture.states.count == 18,
               Set(fixture.states.map(\.id)) == required,
-              fixture.states.allSatisfy({ $0.width == 224 || $0.width == 280 }),
-              fixture.states.allSatisfy({ $0.height == ($0.width == 224 ? 42 : 64) }) else {
+              fixture.states.allSatisfy({ $0.width == 252 }),
+              fixture.states.allSatisfy({ [38, 54, 58].contains(Int($0.height)) }) else {
             throw ContractInputError(category: "incomplete-hud-renderer-fixture")
         }
     }
@@ -121,8 +121,10 @@ final class HUDRendererScenario: NativeUIContractScenario {
             "fixture": fixture.fixture,
             "states": fixture.states.count,
             "targetScreen": fixture.targetDisplayID,
-            "compact": "224x42",
-            "expanded": "280x64",
+            "compact": "252x38",
+            "recording": "252x54",
+            "expanded": "252x73",
+            "terminal": "252x58",
             "radius": fixture.radius,
             "previewItalicPointSize": 12,
             "screenshots": [
@@ -205,7 +207,7 @@ final class HUDRendererScenario: NativeUIContractScenario {
                 displays: displays,
                 frontmostDisplayID: 1,
                 mainDisplayID: 1,
-                panelSize: HUDSize(width: 224, height: 42)
+                panelSize: HUDSize(width: 252, height: 54)
             )
             let reference = SessionReference()
 
@@ -218,24 +220,27 @@ final class HUDRendererScenario: NativeUIContractScenario {
                 shortcutReleaseHint: fixture.shortcutReleaseHint
             ) else { exit(10) }
             let targetFrame = controller.renderedFrame
-            guard controller.renderedSize == HUDSize(width: 224, height: 42),
+            guard controller.renderedSize == HUDSize(width: 252, height: 54),
                   controller.renderedCornerRadius == fixture.radius,
                   (fixture.targetDisplayID == 2 ? targetFrame.origin.x >= 1440 : targetFrame.origin.x < 1440),
                   targetFrame.origin.y < 650,
-                  controller.resourceSnapshot.recordingTimerActive else { exit(11) }
+                  controller.resourceSnapshot.recordingTimerActive else {
+                print("HUD_INITIAL size=\(controller.renderedSize.width)x\(controller.renderedSize.height) radius=\(controller.renderedCornerRadius) frame=\(targetFrame.origin.x),\(targetFrame.origin.y) timer=\(controller.resourceSnapshot.recordingTimerActive)")
+                exit(11)
+            }
             guard let initialInspection = controller.renderInspection,
                   initialInspection.title == "Recording",
                   initialInspection.detail == fixture.shortcutReleaseHint,
-                  initialInspection.titlePointSize == 12,
-                  initialInspection.detailPointSize == 12,
+                  initialInspection.titlePointSize == 13,
+                  initialInspection.detailPointSize == 11,
                   initialInspection.previewPointSize == 12,
                   initialInspection.iconRole == .recording,
-                  initialInspection.iconTreatment == "nine-dot",
-                  initialInspection.symbolName == "circle.grid.3x3.fill",
+                  initialInspection.iconTreatment == "red-dot",
+                  initialInspection.symbolName == "circle.fill",
                   initialInspection.semanticColor == "system-red" else { exit(15) }
             guard controller.updatePreview("preview", generation: fixture.currentGeneration, at: 10) else { exit(12) }
             guard let previewInspection = controller.renderInspection,
-                  controller.renderedSize == HUDSize(width: 280, height: 64),
+                  controller.renderedSize == HUDSize(width: 252, height: 73),
                   controller.resourceSnapshot.previewCharacters > 0,
                   previewInspection.preview == "preview",
                   previewInspection.previewPointSize == 12,
@@ -250,7 +255,7 @@ final class HUDRendererScenario: NativeUIContractScenario {
 
             let screenshotRoot = URL(fileURLWithPath: CommandLine.arguments[2])
             let appearances: [(String?, String)] = [
-                (nil, "hud-controller-light.png"),
+                ("NSAppearanceNameAqua", "hud-controller-light.png"),
                 ("NSAppearanceNameDarkAqua", "hud-controller-dark.png"),
                 ("NSAppearanceNameAccessibilityHighContrastAqua", "hud-controller-increased-contrast.png")
             ]
@@ -260,7 +265,8 @@ final class HUDRendererScenario: NativeUIContractScenario {
                     .recording,
                     generation: fixture.currentGeneration,
                     startedAt: Date(),
-                    shortcutReleaseHint: fixture.shortcutReleaseHint
+                    shortcutReleaseHint: fixture.shortcutReleaseHint,
+                    targetApplicationName: "Notes"
                 ),
                 controller.updatePreview("appearance preview", generation: fixture.currentGeneration, at: 20) else { exit(17) }
                 guard controller.captureRenderedSurface(
@@ -272,7 +278,7 @@ final class HUDRendererScenario: NativeUIContractScenario {
                 generation: fixture.staleGeneration,
                 shortcutReleaseHint: fixture.shortcutReleaseHint
             ), controller.resourceSnapshot.state == .recording,
-                  controller.renderedSize == HUDSize(width: 280, height: 64) else { exit(14) }
+                  controller.renderedSize == HUDSize(width: 252, height: 73) else { exit(14) }
 
             var generation = fixture.currentGeneration + 1
             for expected in fixture.states {
@@ -295,8 +301,8 @@ final class HUDRendererScenario: NativeUIContractScenario {
                     guard let inspection = controller.renderInspection,
                           inspection.title == expectedContent.title,
                           inspection.detail == expectedContent.detail,
-                          inspection.titlePointSize == 12,
-                          inspection.detailPointSize == 12,
+                          inspection.titlePointSize == 13,
+                          inspection.detailPointSize == 11,
                           inspection.iconRole == expectedContent.iconRole,
                           inspection.iconTreatment == expectedTreatment(for: expectedContent.iconRole),
                           inspection.symbolName == expectedSymbol(for: expectedContent.iconRole),
@@ -328,7 +334,7 @@ final class HUDRendererScenario: NativeUIContractScenario {
                 displays: displays,
                 frontmostDisplayID: 1,
                 mainDisplayID: 1,
-                panelSize: HUDSize(width: 280, height: 64)
+                panelSize: HUDSize(width: 252, height: 58)
             )
             guard controller.present(
                 .savedRetry,
@@ -356,9 +362,10 @@ final class HUDRendererScenario: NativeUIContractScenario {
 
         private func expectedTreatment(for role: OigoHUDIconRole) -> String {
             switch role {
-            case .information: "small-spinner"
+            case .progress: "spinner"
+            case .information: "small-information"
             case .confirmation: "small-check"
-            case .recording: "nine-dot"
+            case .recording: "red-dot"
             case .attention: "small-attention"
             case .failure: "small-failure"
             case .destination: "small-destination"
@@ -377,9 +384,10 @@ final class HUDRendererScenario: NativeUIContractScenario {
 
         private func expectedSymbol(for role: OigoHUDIconRole) -> String {
             switch role {
-            case .information: "progress.indicator"
+            case .progress: "progress.indicator"
+            case .information: "info.circle.fill"
             case .confirmation: "checkmark"
-            case .recording: "circle.grid.3x3.fill"
+            case .recording: "circle.fill"
             case .attention: "exclamationmark.triangle.fill"
             case .failure: "xmark.octagon.fill"
             case .destination: "cursorarrow.rays"

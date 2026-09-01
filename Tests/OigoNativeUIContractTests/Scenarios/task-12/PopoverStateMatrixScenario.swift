@@ -415,7 +415,9 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
         case .storageUnavailable:
             return "Storage unavailable. Oigo cannot create durable recordings right now."
         case .shortcutInactiveConflict:
-            return "Shortcut inactive. The configured shortcut is unavailable. Mouse start remains available."
+            return "Shortcut inactive. "
+                + OigoShortcutPresentation.copy(for: .default).displayName
+                + " is unavailable. Mouse start remains available."
         case .microphonePermissionUnavailable:
             return "Microphone unavailable. Allow microphone access before starting dictation."
         case .selectedInputUnavailable:

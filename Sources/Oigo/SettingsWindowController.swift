@@ -171,6 +171,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         currentLaunchAtLoginStatus = launchAtLoginStatus
         committedShortcut = settings.globalShortcut
         shortcutRecorder = ShortcutRecorderControl(shortcut: settings.globalShortcut)
+        shortcutRecorder.isEnabled = false
+        shortcutRecorder.toolTip = "Hold Fn to dictate. Double-tap Fn for hands-free mode."
+        shortcutRecorder.setAccessibilityLabel("Fn dictation key")
         shortcutRecorder.identifier = NSUserInterfaceItemIdentifier("oigo.settings.shortcut-recorder")
         shortcutRecorder.setAccessibilityIdentifier("oigo.settings.shortcut-recorder")
 
@@ -453,8 +456,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         nextDictationNotice.textColor = MacUITokens.Colors.secondaryLabel
         nextDictationNotice.isHidden = true
 
-        let shortcutTitle = NSTextField(labelWithString: "Dictation shortcut:")
-        shortcutHelp.stringValue = committedShortcutCopy.settingsHint
+        let shortcutTitle = NSTextField(labelWithString: "Dictation key:")
+        shortcutHelp.stringValue = "Hold Fn to dictate. Double-tap Fn for hands-free mode."
         shortcutHelp.textColor = MacUITokens.Colors.secondaryLabel
         identify(shortcutHelp, as: "shortcut-help")
         identify(shortcutStatus, as: "shortcut-status")
@@ -528,6 +531,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         shortcutTitle.widthAnchor.constraint(equalToConstant: 180).isActive = true
         shortcutRow.translatesAutoresizingMaskIntoConstraints = false
         shortcutRecorder.widthAnchor.constraint(equalToConstant: 280).isActive = true
+        shortcutRecorder.heightAnchor.constraint(equalToConstant: 44).isActive = true
 
         let modeRow = row(label: modeLabel, control: modePopup)
         let localeRow = row(label: localeLabel, control: localePopup)

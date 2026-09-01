@@ -240,7 +240,7 @@ def main() -> int:
     print(
         "PASS native-design-coverage "
         f"surfaces={surfaces} hud_states={hud_states} state_matrix_rows={matrix_rows} "
-        "compact=224x42 expanded=280x64"
+        "processing=252x38 recording=252x54 preview=252x73 terminal=252x58"
     )
     return 0
 

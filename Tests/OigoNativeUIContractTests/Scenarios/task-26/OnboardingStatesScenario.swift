@@ -276,7 +276,7 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             try assertStage(controller, window: window, key: "language")
             try captureStage(controller, key: "language")
             guard let languageAction = findButton(in: content, identifier: fixture.controls.stageAction),
-                  languageAction.title == "Check speech assets" else { throw ProbeError.missingControl }
+                  languageAction.title == "Install speech assets" else { throw ProbeError.missingControl }
             languageAction.performClick(nil)
             try wait(until: {
                 self.findButton(in: content, identifier: fixture.controls.continue)?.isEnabled == true
@@ -664,7 +664,7 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
                       let popup = findPopup(in: content, identifier: "oigo.onboarding.language"),
                       popup.accessibilityLabel() as? String == "Transcription language",
                       popup.titleOfSelectedItem?.isEmpty == false,
-                      findButton(in: content, identifier: fixture.controls.stageAction)?.title == "Check speech assets" else {
+                      findButton(in: content, identifier: fixture.controls.stageAction)?.title == "Install speech assets" else {
                     throw ProbeError.stageSemanticsMismatch
                 }
                 try assertFocus(window, target: popup)
