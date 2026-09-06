@@ -84,7 +84,7 @@ function findNodeByType(nodes, type) {
 }
 
 function visibleFaq(html) {
-  return [...html.matchAll(/<summary>([\s\S]*?)<\/summary>\s*<p class="faq-answer">([\s\S]*?)<\/p>/g)].map((match) => ({
+  return [...html.matchAll(/<summary\b[^>]*>([\s\S]*?)<\/summary>\s*<p\b[^>]*\bclass="faq-answer"[^>]*>([\s\S]*?)<\/p>/g)].map((match) => ({
     question: decodeHtml(match[1].trim()),
     answer: decodeHtml(match[2].trim()),
   }));
