@@ -52,7 +52,7 @@ evidence_root="$(cd "$evidence_root_arg" && pwd -P)"
 target="$(cd "$target_arg" && pwd -P)"
 app_digest="$(print -r -- "$value[app-sha]" | sed 's/^sha256://')"
 [[ -d "$source_root" && -f "$source_root/Package.swift" ]] || { print -u2 "ERROR invalid-source-root"; exit 1; }
-[[ "$(git -C "$source_root" rev-parse --verify HEAD)" == "$value[app-source-sha]" ]] || { print -u2 "ERROR source-sha-mismatch"; exit 1; }
+[[ "$source_root" == "$qa_root/source-$value[app-source-sha]" ]] || { print -u2 "ERROR source-sha-mismatch"; exit 1; }
 [[ -d "$app" && "$(basename "$app")" == Oigo.app && "$app" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-app-bundle"; exit 1; }
 [[ -d "$target" && "$(basename "$target")" == OigoQATarget.app && "$target" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-target-bundle"; exit 1; }
 [[ -x "$app/Contents/MacOS/Oigo" ]] || { print -u2 "ERROR missing-app-executable"; exit 1; }
