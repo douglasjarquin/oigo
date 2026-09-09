@@ -44,6 +44,12 @@ app_arg="$value[app]"
 qa_root_arg="$value[qa-root]"
 evidence_root_arg="$value[evidence-root]"
 target_arg="$value[frontmost-app]"
+repository_root="$(pwd -P)"
+[[ -d "$repository_root/.git" || -f "$repository_root/.git" ]] || { print -u2 "ERROR missing-repository-root"; exit 1; }
+[[ "$(git -C "$repository_root" rev-parse --verify HEAD)" == "$value[app-source-sha]" ]] || {
+    print -u2 "ERROR repository-sha-mismatch"
+    exit 1
+}
 source_root="$(cd "$source_root_arg" && pwd -P)"
 app="$(cd "$app_arg" && pwd -P)"
 qa_root="$(cd "$qa_root_arg" && pwd -P)"
@@ -58,6 +64,41 @@ app_digest="$(print -r -- "$value[app-sha]" | sed 's/^sha256://')"
     print -u2 "ERROR evidence-root-outside-qa-root"
     exit 1
 }
+result_output=""
+if [[ -n "${value[result-output]-}" ]]; then
+    result_output_arg="$value[result-output]"
+    result_dir_arg="${result_output_arg:h}"
+    [[ -d "$result_dir_arg" && ! -L "$result_dir_arg" ]] || {
+        print -u2 "ERROR missing-result-output-parent"
+        exit 1
+    }
+    result_dir="$(cd "$result_dir_arg" && pwd -P)"
+    result_output="$result_dir/${result_output_arg:t}"
+    [[ "$result_output" == "$qa_root/evidence"/* \
+        || "$result_output" == "$repository_root/.omo/evidence/bring-pr-149-home"/* ]] || {
+        print -u2 "ERROR result-outside-approved-evidence"
+        exit 1
+    }
+    [[ ! -e "$result_output" && ! -L "$result_output" ]] || {
+        print -u2 "ERROR result-output-exists"
+        exit 1
+    }
+fi
+jsonl_output=""
+if [[ -n "${value[jsonl-output]-}" ]]; then
+    jsonl_output_arg="$value[jsonl-output]"
+    jsonl_dir_arg="${jsonl_output_arg:h}"
+    [[ -d "$jsonl_dir_arg" && ! -L "$jsonl_dir_arg" ]] || {
+        print -u2 "ERROR missing-jsonl-output-parent"
+        exit 1
+    }
+    jsonl_dir="$(cd "$jsonl_dir_arg" && pwd -P)"
+    jsonl_output="$jsonl_dir/${jsonl_output_arg:t}"
+    [[ "$jsonl_output" == "$repository_root/.omo/evidence/bring-pr-149-home"/* ]] || {
+        print -u2 "ERROR jsonl-outside-repository-evidence"
+        exit 1
+    }
+fi
 mkdir -p "$evidence_root"
 [[ -d "$app" && "$(basename "$app")" == Oigo.app && "$app" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-app-bundle"; exit 1; }
 [[ -d "$target" && "$(basename "$target")" == OigoQATarget.app && "$target" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-target-bundle"; exit 1; }
@@ -67,9 +108,6 @@ actual_app_digest="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$app" | sed -
 [[ "$actual_app_digest" == "$app_digest" ]] || { print -u2 "ERROR app-sha-mismatch"; exit 1; }
 
 runner_marker="$qa_root/native-qa-marker.json"
-repository_root="$(jq -r '.repository // empty' "$runner_marker" 2>/dev/null || true)"
-[[ -n "$repository_root" && -d "$repository_root" ]] || { print -u2 "ERROR missing-repository-marker"; exit 1; }
-repository_root="$(cd "$repository_root" && pwd -P)"
 atomic_write() {
     local destination="$1"
     local temporary
@@ -196,35 +234,13 @@ zsh "$source_root/Scripts/oigo-qa-write-evidence.sh" \
     --source-sha "$value[app-source-sha]" --app-sha "$app_digest" \
     --scenario "$scenario" --payload-file "$payload" >/dev/null
 
-if [[ -n "${value[result-output]-}" ]]; then
-    result_output_arg="$value[result-output]"
-    result_dir_arg="${result_output_arg:h}"
-    [[ -d "$result_dir_arg" && ! -L "$result_dir_arg" ]] || {
-        print -u2 "ERROR missing-result-output-parent"
-        exit 1
-    }
-    result_dir="$(cd "$result_dir_arg" && pwd -P)"
-    result_output="$result_dir/${result_output_arg:t}"
-    [[ "$result_output" == "$qa_root/evidence"/* \
-        || "$result_output" == "$repository_root/.omo/evidence/bring-pr-149-home"/* ]] || {
-        print -u2 "ERROR result-outside-approved-evidence"
-        exit 1
-    }
-    [[ ! -e "$result_output" && ! -L "$result_output" ]] || {
-        print -u2 "ERROR result-output-exists"
-        exit 1
-    }
+if [[ -n "$result_output" ]]; then
     temporary="$(mktemp "$result_dir/.oigo-result.XXXXXX")"
     cp "$receipt" "$temporary"
     /usr/bin/ruby -e 'File.open(ARGV.fetch(0), "r") { |file| file.fsync }' "$temporary"
     mv -f "$temporary" "$result_output"
 fi
 if [[ -n "${value[jsonl-output]-}" ]]; then
-    jsonl_output="${value[jsonl-output]:A}"
-    [[ "$jsonl_output" == "$repository_root/.omo/evidence/bring-pr-149-home"/* ]] || {
-        print -u2 "ERROR jsonl-outside-repository-evidence"
-        exit 1
-    }
     row="$evidence_root/native-qa-row.json"
     jq -n --arg scenario "$scenario" --arg result "$result" --arg category "$category" \
         '{scenario:$scenario,result:$result,category:$category}' > "$row"
