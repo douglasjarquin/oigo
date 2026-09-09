@@ -21,12 +21,28 @@ done
 source_root="${value[source-root]:A}"
 qa_root_logical="$(cd "${value[qa-root]}" && pwd -L)"
 qa_root="$(cd "${value[qa-root]}" && pwd -P)"
-[[ "$qa_root_logical" == "$qa_root" ]] || { print -u2 "ERROR symlinked-qa-root"; exit 1; }
+normalize_tmp_alias() {
+    local path="$1"
+    if [[ "$path" == /tmp ]]; then
+        print -r -- /private/tmp
+    elif [[ "$path" == /tmp/* ]]; then
+        print -r -- "/private${path}"
+    else
+        print -r -- "$path"
+    fi
+}
+[[ "$(normalize_tmp_alias "$qa_root_logical")" == "$qa_root" ]] || {
+    print -u2 "ERROR symlinked-qa-root"
+    exit 1
+}
 evidence_parent_arg="${value[evidence-root]:h}"
 [[ -d "$evidence_parent_arg" && ! -L "$evidence_parent_arg" ]] || { print -u2 "ERROR unsafe-evidence-parent"; exit 1; }
 evidence_parent_logical="$(cd "$evidence_parent_arg" && pwd -L)"
 evidence_parent="$(cd "$evidence_parent_arg" && pwd -P)"
-[[ "$evidence_parent_logical" == "$evidence_parent" ]] || { print -u2 "ERROR symlinked-evidence-parent"; exit 1; }
+[[ "$(normalize_tmp_alias "$evidence_parent_logical")" == "$evidence_parent" ]] || {
+    print -u2 "ERROR symlinked-evidence-parent"
+    exit 1
+}
 evidence_root="$evidence_parent/${value[evidence-root]:t}"
 [[ "$evidence_root" == "$qa_root/evidence" || "$evidence_root" == "$qa_root/evidence"/* ]] || { print -u2 "ERROR evidence-root-outside-qa-root"; exit 1; }
 [[ ! -L "$evidence_root" ]] || { print -u2 "ERROR symlinked-evidence-root"; exit 1; }
