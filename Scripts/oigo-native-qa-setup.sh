@@ -78,15 +78,11 @@ atomic_write() {
     mv "$temporary" "$destination"
 }
 chflags nouchg "$qa_root/native-qa-marker.json" 2>/dev/null || true
-atomic_write "$qa_root/native-qa-marker.json" <<EOF
-$(jq -n --arg qa_root "$qa_root" --arg repository "$source_root" --arg attempt_dir "$evidence_root" --arg source_sha "$source_sha" --arg source_tree_sha "$source_copy_sha" --arg app_sha "$staged_app_sha" --arg target_bundle_id "$target_id" --arg target_field_id "$target_field" --arg target_bundle_sha "$target_bundle_sha" '{schema:1,qa_root:\$qa_root,repository:\$repository,attempt_dir:\$attempt_dir,source_sha:\$source_sha,source_tree_sha:\$source_tree_sha,app_sha:\$app_sha,target_bundle_id:\$target_bundle_id,target_field_id:\$target_field_id,target_bundle_sha:\$target_bundle_sha}')
-EOF
+atomic_write "$qa_root/native-qa-marker.json" <<< "$(jq -n --arg qa_root "$qa_root" --arg repository "$source_root" --arg attempt_dir "$evidence_root" --arg source_sha "$source_sha" --arg source_tree_sha "$source_copy_sha" --arg app_sha "$staged_app_sha" --arg target_bundle_id "$target_id" --arg target_field_id "$target_field" --arg target_bundle_sha "$target_bundle_sha" '{schema:1,qa_root:$qa_root,repository:$repository,attempt_dir:$attempt_dir,source_sha:$source_sha,source_tree_sha:$source_tree_sha,app_sha:$app_sha,target_bundle_id:$target_bundle_id,target_field_id:$target_field,target_bundle_sha:$target_bundle_sha}')"
 chflags nouchg "$qa_root/native-qa-marker.json" 2>/dev/null || true
 chmod 444 "$qa_root/native-qa-marker.json"
 chflags uchg "$qa_root/native-qa-marker.json" 2>/dev/null || true
-atomic_write "$qa_root/fixtures/metadata/fixture-metadata.json" <<EOF
-$(jq -n --arg source_sha "$source_sha" --arg app_sha "$staged_app_sha" '{schema:1,source_sha:\$source_sha,app_sha:\$app_sha,fixtures:"external-public-ui-only"}')
-EOF
+atomic_write "$qa_root/fixtures/metadata/fixture-metadata.json" <<< "$(jq -n --arg source_sha "$source_sha" --arg app_sha "$staged_app_sha" '{schema:1,source_sha:$source_sha,app_sha:$app_sha,fixtures:"external-public-ui-only"}')"
 atomic_write "$evidence_root/setup-receipt.txt" <<EOF
 SOURCE_SHA=$source_sha
 APP_BUNDLE_SHA=$staged_app_sha
