@@ -19,10 +19,10 @@ for key in source-root source-sha qa-root evidence-root; do
 done
 
 source_root="${value[source-root]:A}"
-qa_root="$(cd "${value[qa-root]}" && pwd -P)"
+qa_root="$(cd "${value[qa-root]}" && pwd -L)"
 evidence_parent_arg="${value[evidence-root]:h}"
 [[ -d "$evidence_parent_arg" && ! -L "$evidence_parent_arg" ]] || { print -u2 "ERROR unsafe-evidence-parent"; exit 1; }
-evidence_root="$(cd "$evidence_parent_arg" && pwd -P)/${value[evidence-root]:t}"
+evidence_root="$(cd "$evidence_parent_arg" && pwd -L)/${value[evidence-root]:t}"
 [[ "$evidence_root" == "$qa_root/evidence" || "$evidence_root" == "$qa_root/evidence"/* ]] || { print -u2 "ERROR evidence-root-outside-qa-root"; exit 1; }
 [[ ! -L "$evidence_root" ]] || { print -u2 "ERROR symlinked-evidence-root"; exit 1; }
 source_sha="${value[source-sha]}"
