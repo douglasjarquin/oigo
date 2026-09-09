@@ -28,7 +28,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private let paneContainer = NSView()
     private var paneViews: [OigoSettingsPane: NSView] = [:]
     private var selectedPane: OigoSettingsPane
-    private var committedSettings: OigoSettings
+    var committedSettings: OigoSettings
     private let shortcutRecorder: ShortcutRecorderControl
     private let loadSupportedLocales: () async -> [String]
     private let inputPopup = NSPopUpButton()
@@ -48,7 +48,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private let shortcutStatus = NSTextField(wrappingLabelWithString: "")
     private let shortcutHelp = NSTextField(wrappingLabelWithString: "")
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
-    private let dictationMessage = NSTextField(wrappingLabelWithString: "")
+    let dictationMessage = NSTextField(wrappingLabelWithString: "")
     private let registrationStatus: () -> GlobalShortcutRegistrationStatus
     private let registrationError: () -> String?
     private let validateShortcut: (ToggleShortcut) -> OigoShortcutValidation
@@ -67,7 +67,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private let saveDictionary: (DictionaryDocument) -> String?
     private let previewDictionary: (String) -> String
     private let addStarterTerms: () -> (DictionaryDocument, String?)
-    private var dictionaryEntries: [DictionaryEntry]
+    var dictionaryEntries: [DictionaryEntry]
     private var committedDictionaryEntries: [DictionaryEntry]
     private let dictionaryTable = NSTableView()
     private let dictionaryMessage = NSTextField(wrappingLabelWithString: "")
@@ -85,9 +85,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private var selectedInput: OigoInputSelection
     private var selectedInputChannel: Int
     private var inputDevices: [OigoInputDevice]
-    private var localeSelection: OigoLocaleSelectionState
+    var localeSelection: OigoLocaleSelectionState
     private var localeMenuIdentifiers: [String] = []
-    private var isCheckingLocale = false
+    var isCheckingLocale = false
     private var isDismissed = false
     private var saveTask: Task<Void, Never>?
     private var localeLoadTask: Task<Void, Never>?
@@ -754,7 +754,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         commitChangedSettings()
     }
 
-    private func syncLocalePopup() {
+    func syncLocalePopup() {
         let items = localeSelection.menuItems
         localeMenuIdentifiers = items.map(\.identifier)
         localePopup.removeAllItems()
@@ -846,54 +846,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
                 registrationError() ?? message
             )
         }
-    }
-
-    func task28BeginLocaleSaveForTesting(_ identifier: String) -> OigoLocaleAssetReadiness? {
-        if !localeSelection.hasLoadedSupported {
-            localeSelection.loadSupported(["en-US", "es-MX"])
-        }
-        localeSelection.select(identifier)
-        syncLocalePopup()
-        dictationMessage.stringValue = localeSelection.statusMessage
-        guard let request = localeSelection.beginAssetRequest(status: .installing) else {
-            return nil
-        }
-        isCheckingLocale = true
-        return request
-    }
-
-    @discardableResult
-    func task28CompleteLocaleSaveForTesting(
-        _ request: OigoLocaleAssetReadiness,
-        status: OigoLocaleAssetStatus
-    ) -> Bool {
-        let applied = localeSelection.applyAssetResult(
-            localeIdentifier: request.localeIdentifier,
-            generation: request.generation,
-            status: status
-        )
-        isCheckingLocale = false
-        guard applied, localeSelection.canConfirm,
-              let locale = localeSelection.selectedIdentifier else {
-            if applied {
-                localeSelection.abandonUncommitted()
-                syncLocalePopup()
-            }
-            _ = finishSave(
-                committedSettings,
-                languageUnappliedMessage: "Settings saved. Dictation language was not changed."
-            )
-            return false
-        }
-        guard finishSave(committedSettings.with(localeIdentifier: locale), languageUnappliedMessage: nil) else {
-            return false
-        }
-        _ = localeSelection.confirm()
-        return true
-    }
-
-    func task28DictionaryEntriesForTesting() -> [DictionaryEntry] {
-        dictionaryEntries
     }
 
     @objc private func refreshPermissionStates() {
@@ -1092,7 +1044,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     @discardableResult
-    private func finishSave(_ settings: OigoSettings, languageUnappliedMessage: String?) -> Bool {
+    func finishSave(_ settings: OigoSettings, languageUnappliedMessage: String?) -> Bool {
         guard !isDismissed, isPresented() else {
             return false
         }
