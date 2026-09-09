@@ -37,13 +37,18 @@ home="$(cd "$home" && pwd -P)"
 export HOME="$home" CFFIXED_USER_HOME="$home" CFPREFERENCES_AVOID_DAEMON=1
 
 settings='{"globalShortcut":{"keyCode":49,"modifiers":768},"localeIdentifier":"en_US","defaultMode":"instant","showVolatilePreview":true,"audioRetention":"oneDay","keepSuccessfulAudioIndefinitely":false,"launchAtLogin":false,"selectedInput":{"systemDefault":{}},"selectedInputChannel":0}'
-encoded="$(printf '%s' "$settings" | base64)"
+encoded="$(printf '%s' "$settings" | xxd -p -c 9999)"
 if [[ "$mode" == "write-default" ]]; then
     defaults write "$bundle_id" oigo.settings.v1 -data "$encoded"
 fi
-stored="$(defaults read "$bundle_id" oigo.settings.v1 2>/dev/null || true)"
+stored="$(defaults export "$bundle_id" - 2>/dev/null | awk '
+    /<key>oigo\.settings\.v1<\/key>/ { in_data=1; next }
+    in_data == 1 && /<data>/ { in_data=2; next }
+    in_data == 2 && /<\/data>/ { exit }
+    in_data == 2 { printf "%s", $0 }
+')"
 [[ -n "$stored" ]] || { print -u2 "ERROR shortcut-unavailable"; exit 1; }
-decoded="$(printf '%s' "$stored" | tr -d ' <>' | xxd -r -p 2>/dev/null || true)"
+decoded="$(printf '%s' "$stored" | tr -d '[:space:]' | base64 -D 2>/dev/null || true)"
 observed_key="$(jq -r '.globalShortcut.keyCode // empty' <<< "$decoded" 2>/dev/null || true)"
 observed_modifiers="$(jq -r '.globalShortcut.modifiers // empty' <<< "$decoded" 2>/dev/null || true)"
 [[ "$observed_key" == "$key_code" && "$observed_modifiers" == "768" ]] || {

@@ -39,16 +39,24 @@ target_field="$(/usr/libexec/PlistBuddy -c 'Print :OigoQATargetFieldIdentifier' 
 }
 mkdir -p "$qa_root" "$evidence_root" "$qa_root/app" "$qa_root/home/Library/Preferences" "$qa_root/fixtures/metadata" "$qa_root/session" "$qa_root/targets"
 source_copy="$qa_root/source-$source_sha"
-[[ ! -e "$source_copy" ]] || { print -u2 "ERROR source-copy-exists"; exit 1; }
-mkdir -p "$source_copy"
-git -C "$source_root" archive "$source_sha" | tar -x -C "$source_copy"
+if [[ ! -e "$source_copy" ]]; then
+    mkdir -p "$source_copy"
+    git -C "$source_root" archive "$source_sha" | tar -x -C "$source_copy"
+elif [[ ! -f "$source_copy/Package.swift" ]]; then
+    print -u2 "ERROR invalid-source-copy"
+    exit 1
+fi
 staged_app="$qa_root/app/Oigo.app"
-[[ ! -e "$staged_app" ]] || { print -u2 "ERROR staged-app-exists"; exit 1; }
-/usr/bin/ditto "$app_bundle" "$staged_app"
+if [[ ! -e "$staged_app" ]]; then
+    /usr/bin/ditto "$app_bundle" "$staged_app"
+fi
 source_app_sha="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$app_bundle" | sed -n 's/^APP_BUNDLE_SHA=//p')"
 staged_app_sha="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$staged_app" | sed -n 's/^APP_BUNDLE_SHA=//p')"
 [[ -n "$source_app_sha" && "$staged_app_sha" == "$source_app_sha" ]] || { print -u2 "ERROR staged-app-sha-mismatch"; exit 1; }
-/usr/bin/ditto "$target_bundle" "$qa_root/targets/OigoQATarget.app"
+staged_target="$qa_root/targets/OigoQATarget.app"
+if [[ "$target_bundle" != "$staged_target" ]]; then
+    /usr/bin/ditto "$target_bundle" "$staged_target"
+fi
 /usr/bin/xcrun swiftc "$source_copy/Scripts/oigo-qa-ax-driver.swift" -framework AppKit -framework ApplicationServices -o "$qa_root/oigo-qa-ax-driver"
 /usr/bin/xcrun swiftc "$source_copy/Scripts/oigo-native-key-event-driver.swift" -framework ApplicationServices -o "$qa_root/oigo-native-key-event-driver"
 /usr/bin/xcrun swiftc "$source_copy/Scripts/oigo-native-permission-preflight.swift" -framework AVFoundation -framework ApplicationServices -framework CoreGraphics -framework Speech -o "$qa_root/oigo-native-permission-preflight"
