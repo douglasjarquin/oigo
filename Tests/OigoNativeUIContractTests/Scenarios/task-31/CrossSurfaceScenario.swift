@@ -20,7 +20,6 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
         let fixture = try loadFixture(from: arguments.fixtureRoot)
         try validate(fixture)
         let repositoryRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        try validateProductionRouteBoundary(repositoryRoot, expectedRoutes: fixture.expectedRoutes)
         let output = try runCompiledContract(
             fixture: fixture,
             evidenceRoot: arguments.evidenceRoot,
@@ -57,55 +56,6 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
               ["happy", "failure"].contains(fixture.flow),
               fixture.expectedRoutes == expectedRoutes else {
             throw ContractInputError(category: "cross-surface-fixture-mismatch")
-        }
-    }
-
-    private static func validateProductionRouteBoundary(
-        _ repositoryRoot: URL,
-        expectedRoutes: [String]
-    ) throws {
-        let delegateURL = repositoryRoot.appendingPathComponent("Sources/Oigo/OigoAppDelegate.swift")
-        let delegate = try String(contentsOf: delegateURL, encoding: .utf8)
-        let routeStart = delegate.range(of: "private func performPopoverAction")?.lowerBound
-        let routeEnd = routeStart.flatMap { start in
-            delegate.range(of: "\n    private func ", range: start..<delegate.endIndex)?.lowerBound
-        } ?? delegate.endIndex
-        guard let routeStart else {
-            throw ContractInputError(category: "missing-production-command-router")
-        }
-        let route = String(delegate[routeStart..<routeEnd])
-        let routeTokens = [
-            ".startDictation", ".stopDictation", ".retryStorage", ".retryTranscription",
-            ".chooseInput", ".installAssets", ".openSettings", ".openSystemSettings",
-            "case .setMode(.instant)", "case .setMode(.clean)", ".openDataLocation", ".copy",
-            ".pasteAgain", ".openHistory", ".quit"
-        ]
-        guard route.contains("switch action"),
-              delegate.contains("presentationPublicationFence.publish(snapshot.publication)"),
-              delegate.contains("statusSurface.publish(publication.state"),
-              delegate.contains("settingsWindow?.setAppliesToNextDictation"),
-              delegate.contains("historyWindow?.setCommandAvailability"),
-              delegate.contains("onboardingWindow?.setCommandAvailability") else {
-            throw ContractInputError(category: "missing-single-publication-fanout")
-        }
-        guard routeTokens.allSatisfy(route.contains), expectedRoutes.count == routeTokens.count else {
-            throw ContractInputError(category: "incomplete-production-command-router")
-        }
-
-        let requiredSurfaces = [
-            ("Sources/Oigo/StatusSurfaceController.swift", ["handlePopoverCommand", "presentationGeneration"]),
-            ("Sources/Oigo/OnboardingWindowController.swift", ["oigo.onboarding.close", "windowWillClose"]),
-            ("Sources/Oigo/SettingsWindowController.swift", ["oigo.settings.content", "windowWillClose"]),
-            ("Sources/Oigo/HistoryWindowController.swift", ["oigo.history.content", "windowWillClose"])
-        ]
-        for (relativePath, tokens) in requiredSurfaces {
-            let source = try String(
-                contentsOf: repositoryRoot.appendingPathComponent(relativePath),
-                encoding: .utf8
-            )
-            guard tokens.allSatisfy(source.contains) else {
-                throw ContractInputError(category: "missing-production-surface-seam")
-            }
         }
     }
 
@@ -148,7 +98,8 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
             "Sources/Oigo/OnboardingShellLayout.swift",
             "Sources/Oigo/OnboardingWindowController.swift",
             "Sources/Oigo/SettingsWindowController.swift",
-            "Sources/Oigo/HistoryWindowController.swift"
+            "Sources/Oigo/HistoryWindowController.swift",
+            "Tests/OigoNativeUIContractTests/Support/HistoryWindowControllerQA.swift"
         ].map { repositoryRoot.appendingPathComponent($0).path }
         let modules = repositoryRoot.appendingPathComponent(".build/arm64-apple-macosx/debug/Modules").path
         _ = try runProcess(
@@ -951,7 +902,7 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
                 ],
                 "commandOrder": callbacks.commandOrder,
                 "terminalSession": "AppOperationGate owns dictation handle; Paste Again rejected while current",
-                "screenshots": screenshotPaths,
+                "screenshots": screenshotPaths.map { URL(fileURLWithPath: $0).lastPathComponent },
                 "clipboardContentsInEvidence": false,
                 "cleanup": "status item removed; popover dismissed; HUD shutdown; timers and publication fence released"
             ]

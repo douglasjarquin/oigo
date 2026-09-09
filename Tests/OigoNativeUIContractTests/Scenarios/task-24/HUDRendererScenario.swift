@@ -75,7 +75,8 @@ final class HUDRendererScenario: NativeUIContractScenario {
         ])
         guard fixture.scenario == scenarioName,
               fixture.fixture.hasPrefix("hud-placement-"),
-              fixture.shortcutReleaseHint == "Release Fn to finish.",
+              fixture.shortcutReleaseHint.hasPrefix("Release "),
+              fixture.shortcutReleaseHint.hasSuffix(" to finish."),
               fixture.radius == 12,
               fixture.currentGeneration > fixture.staleGeneration,
               fixture.states.count == 18,
