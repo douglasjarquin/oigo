@@ -61,7 +61,7 @@ actual_app_digest="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$app" | sed -
 [[ "$actual_app_digest" == "$app_digest" ]] || { print -u2 "ERROR app-sha-mismatch"; exit 1; }
 
 runner_marker="$qa_root/native-qa-marker.json"
-jq -n --arg attempt_dir "$evidence_root" --arg qa_root "$qa_root" --arg source_sha "$value[app-source-sha]" --arg app_sha "$app_digest" --arg scenario "$scenario" \
+jq -n --arg attempt_dir "$evidence_root" --arg qa_root "$qa_root" --arg source_sha "$value[app-source-sha]" --arg app_sha "$value[app-sha]" --arg scenario "$scenario" \
     '{schema:1,attempt_dir:$attempt_dir,qa_root:$qa_root,source_sha:$source_sha,app_sha:$app_sha,scenario:$scenario}' > "$runner_marker"
 
 set +e
