@@ -1103,9 +1103,11 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
     @_spi(Testing)
     public static func testRoutedTapFormat(
         outputFormat: AVAudioFormat,
-        selectedChannel: Int
+        selectedChannel: Int,
+        installTap: (AVAudioFormat) throws -> Void = { _ in }
     ) throws -> AudioCaptureFormat {
         let format = try tapSourceFormat(outputFormat, selectedChannel: selectedChannel)
+        try installTap(format)
         return AudioCaptureFormat(
             sampleRate: format.sampleRate,
             channelCount: Int(format.channelCount)

@@ -609,11 +609,17 @@ private struct OigoIssue90ContractTests {
                 events.append("format")
                 tapFormat = try AudioRecorder.testRoutedTapFormat(
                     outputFormat: routedSourceFormat,
-                    selectedChannel: 0
+                    selectedChannel: 0,
+                    installTap: { format in
+                        guard format == routedSourceFormat else {
+                            throw ContractFailure(message: "tap installer received a different routed format")
+                        }
+                        events.append("install")
+                    }
                 )
             }
         )
-        guard events == ["route", "format"] else {
+        guard events == ["route", "format", "install"] else {
             throw ContractFailure(message: "tap format was resolved before the selected device was routed")
         }
         guard tapFormat == AudioCaptureFormat(sampleRate: 16_000, channelCount: 1) else {
