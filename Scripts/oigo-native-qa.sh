@@ -64,6 +64,12 @@ app_digest="$(print -r -- "$value[app-sha]" | sed 's/^sha256://')"
     print -u2 "ERROR evidence-root-outside-qa-root"
     exit 1
 }
+if [[ -e "$evidence_root" || -L "$evidence_root" ]]; then
+    [[ -d "$evidence_root" && ! -L "$evidence_root" && "$(cd "$evidence_root" && pwd -P)" == "$evidence_root" ]] || {
+        print -u2 "ERROR symlinked-evidence-root"
+        exit 1
+    }
+fi
 result_output=""
 if [[ -n "${value[result-output]-}" ]]; then
     result_output_arg="$value[result-output]"
@@ -103,6 +109,12 @@ mkdir -p "$evidence_root"
 [[ -d "$app" && "$(basename "$app")" == Oigo.app && "$app" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-app-bundle"; exit 1; }
 [[ -d "$target" && "$(basename "$target")" == OigoQATarget.app && "$target" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-target-bundle"; exit 1; }
 [[ -x "$app/Contents/MacOS/Oigo" ]] || { print -u2 "ERROR missing-app-executable"; exit 1; }
+target_bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$target/Contents/Info.plist" 2>/dev/null || true)"
+target_field_id="$(/usr/libexec/PlistBuddy -c 'Print :OigoQATargetFieldIdentifier' "$target/Contents/Info.plist" 2>/dev/null || true)"
+[[ "$target_bundle_id" == com.oigo.qa.target && "$target_field_id" == "$value[target-field-id]" && -x "$target/Contents/MacOS/OigoQATarget" ]] || {
+    print -u2 "ERROR invalid-target-identity"
+    exit 1
+}
 [[ -x "$qa_root/oigo-qa-ax-driver" && -x "$qa_root/oigo-native-key-event-driver" ]] || { print -u2 "ERROR missing-external-driver"; exit 1; }
 actual_app_digest="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$app" | sed -n 's/^APP_BUNDLE_SHA=sha256://p')"
 [[ "$actual_app_digest" == "$app_digest" ]] || { print -u2 "ERROR app-sha-mismatch"; exit 1; }
@@ -162,6 +174,10 @@ if (( preflight_status == 2 )); then
 elif [[ "$scenario" != public-dictation ]]; then
     category="$scenario"
 else
+    HOME="$qa_root/home" zsh "$source_root/Scripts/oigo-native-qa-shortcut.sh" \
+        --home "$qa_root/home" --bundle-id com.oigo.app --read \
+        --expect-key-code "$value[event-key-code]" --expect-modifiers "$value[event-modifiers]" \
+        > "$evidence_root/shortcut-readback.txt"
     ax="$qa_root/oigo-qa-ax-driver"
     key_driver="$qa_root/oigo-native-key-event-driver"
     set +e

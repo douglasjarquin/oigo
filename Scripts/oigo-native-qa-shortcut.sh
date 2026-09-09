@@ -27,16 +27,30 @@ done
     print -u2 "ERROR missing-argument"
     exit 64
 }
-[[ "$bundle_id" == "com.oigo.app" && "$key_code" =~ '^[0-9]+$' && "$modifiers" == "shift,command" ]] || {
+[[ "$bundle_id" == "com.oigo.app" && "$key_code" =~ '^[0-9]+$' ]] || {
     print -u2 "ERROR invalid-shortcut"
     exit 64
 }
+modifier_value=0
+typeset -A seen_modifier
+for modifier in ${(s:,:)modifiers}; do
+    [[ -z "${seen_modifier[$modifier]-}" ]] || { print -u2 "ERROR invalid-shortcut"; exit 64; }
+    seen_modifier[$modifier]=1
+    case "$modifier" in
+        command) modifier_value=$((modifier_value + 256)) ;;
+        shift) modifier_value=$((modifier_value + 512)) ;;
+        option) modifier_value=$((modifier_value + 2048)) ;;
+        control) modifier_value=$((modifier_value + 4096)) ;;
+        *) print -u2 "ERROR invalid-shortcut"; exit 64 ;;
+    esac
+done
+[[ "$modifier_value" -gt 0 ]] || { print -u2 "ERROR invalid-shortcut"; exit 64; }
 mkdir -p "$home/Library/Preferences"
 home="$(cd "$home" && pwd -P)"
 [[ "${HOME:A}" == "$home" ]] || { print -u2 "ERROR nonisolated-home"; exit 1; }
 export HOME="$home" CFFIXED_USER_HOME="$home" CFPREFERENCES_AVOID_DAEMON=1
 
-settings='{"globalShortcut":{"keyCode":49,"modifiers":768},"localeIdentifier":"en_US","defaultMode":"instant","showVolatilePreview":true,"audioRetention":"oneDay","keepSuccessfulAudioIndefinitely":false,"launchAtLogin":false,"selectedInput":{"systemDefault":{}},"selectedInputChannel":0}'
+settings="$(jq -cn --argjson keyCode "$key_code" --argjson modifiers "$modifier_value" '{globalShortcut:{keyCode:$keyCode,modifiers:$modifiers},localeIdentifier:"en_US",defaultMode:"instant",showVolatilePreview:true,audioRetention:"oneDay",keepSuccessfulAudioIndefinitely:false,launchAtLogin:false,selectedInput:{systemDefault:{}},selectedInputChannel:0}')"
 encoded="$(printf '%s' "$settings" | xxd -p -c 9999)"
 if [[ "$mode" == "write-default" ]]; then
     defaults write "$bundle_id" oigo.settings.v1 -data "$encoded"
@@ -51,7 +65,7 @@ stored="$(defaults export "$bundle_id" - 2>/dev/null | awk '
 decoded="$(printf '%s' "$stored" | tr -d '[:space:]' | base64 -D 2>/dev/null || true)"
 observed_key="$(jq -r '.globalShortcut.keyCode // empty' <<< "$decoded" 2>/dev/null || true)"
 observed_modifiers="$(jq -r '.globalShortcut.modifiers // empty' <<< "$decoded" 2>/dev/null || true)"
-[[ "$observed_key" == "$key_code" && "$observed_modifiers" == "768" ]] || {
+[[ "$observed_key" == "$key_code" && "$observed_modifiers" == "$modifier_value" ]] || {
     print -u2 "ERROR shortcut-mismatch"
     exit 1
 }

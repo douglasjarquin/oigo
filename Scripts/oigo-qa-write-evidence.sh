@@ -147,6 +147,10 @@ if ! jq -e 'type == "object"' "$payload_file" >/dev/null 2>&1; then
     print -u2 "ERROR invalid-evidence-payload"
     exit 1
 fi
+if ! jq -e 'type == "object" and ([keys[]] | all(. as $key | ["scenario","result","category","profile","preflight_exit","sequence_hash","initial_target_hash","final_target_hash","session_status","session_raw_bytes","session_audio_bytes","sequence","native_pass","state_mutated"] | index($key) != null))' "$payload_file" >/dev/null 2>&1; then
+    print -u2 "ERROR unsupported-evidence-fields"
+    exit 1
+fi
 if LC_ALL=C rg -i '/Users/|raw[_ -]?transcript|clipboard[_ -]?contents?|focused[_ -]?field[_ -]?content|audio[_ -]?contents?|user[_ -]?name' "$payload_file" >/dev/null; then
     print -u2 "ERROR unredacted-evidence"
     exit 1
@@ -162,6 +166,7 @@ jq -n \
     --arg recorded_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --slurpfile payload "$payload_file" \
     '{schema:1,verdict:$verdict,source_sha:$source_sha,app_sha:$app_sha,scenario:$scenario,recorded_at:$recorded_at,details:$payload[0]}' > "$temporary"
+/usr/bin/ruby -e 'File.open(ARGV.fetch(0), "r") { |file| file.fsync }' "$temporary"
 mv "$temporary" "$output"
 trap - EXIT INT TERM
 print "EVIDENCE_WRITTEN=${output#$attempt_dir/}"
