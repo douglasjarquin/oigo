@@ -76,7 +76,7 @@ private final class PopoverStatesGalleryViewController: NSViewController {
             preconditionFailure("missing committed shortcut gallery fixture")
         }
         committedShortcut = ProcessInfo.processInfo.environment["OIGO_GALLERY_FIXED_FN"] == "1"
-            ? .fixedFn
+            ? .default
             : fixture.shortcut
         selectedRow = fixture.shortcut.keyCode == 255
             ? "shortcut-inactive-conflict" : "storage-ready-idle"

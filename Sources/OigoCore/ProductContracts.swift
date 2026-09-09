@@ -280,7 +280,7 @@ public struct OigoSettings: Codable, Equatable, Sendable {
     }
 
     public init(
-        globalShortcut: ToggleShortcut = .fixedFn,
+        globalShortcut: ToggleShortcut = .default,
         localeIdentifier: String = Locale.current.identifier,
         defaultMode: OigoProcessingMode = .instant,
         showVolatilePreview: Bool = true,
@@ -456,7 +456,7 @@ public final class OigoSettingsStore {
         var settings = OigoSettings.default
         var loadedLegacyShortcut = false
         if defaults.data(forKey: "globalToggleShortcut") != nil {
-            settings.globalShortcut = ToggleShortcut.fixedFn
+            settings.globalShortcut = ToggleShortcut.default
             loadedLegacyShortcut = true
         }
         if let rawMode = defaults.string(forKey: "transcriptCleanupMode"),
@@ -470,7 +470,7 @@ public final class OigoSettingsStore {
     }
 
     private func migrate(_ settings: OigoSettings) -> OigoSettings {
-        settings.with(globalShortcut: ToggleShortcut.fixedFn)
+        settings
     }
 
     public func save(_ settings: OigoSettings) throws {
@@ -927,10 +927,10 @@ public enum OigoShortcutValidator {
         _ shortcut: ToggleShortcut,
         occupied: [ToggleShortcut]
     ) -> OigoShortcutValidation {
-        guard shortcut == .fixedFn || shortcut.modifiers & ToggleShortcutModifiers.supportedMask != 0 else {
+        guard shortcut.modifiers & ToggleShortcutModifiers.supportedMask != 0 else {
             return .invalid("Choose at least one supported modifier for the global shortcut")
         }
-        guard shortcut == .fixedFn || shortcut.modifiers & ~ToggleShortcutModifiers.supportedMask == 0 else {
+        guard shortcut.modifiers & ~ToggleShortcutModifiers.supportedMask == 0 else {
             return .invalid("Choose only supported modifiers for the global shortcut")
         }
         guard !occupied.contains(shortcut) else {

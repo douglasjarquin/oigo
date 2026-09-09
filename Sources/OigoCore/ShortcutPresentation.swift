@@ -8,7 +8,7 @@ public struct OigoShortcutCopy: Equatable, Sendable {
     public let releaseHint: String
 
     public var settingsHint: String {
-        "Hold Fn to dictate. Double-tap Fn for hands-free mode."
+        holdHint + "."
     }
 
     public var activeStatus: String {
@@ -76,9 +76,7 @@ public enum OigoShortcutPresentation {
         components.append(key)
         glyphs.append(key)
         let displayName = components.joined(separator: "-")
-        let inactiveHint = shortcut == .fixedFn
-            ? displayName + " unavailable. Check permissions and restart Oigo."
-            : displayName + " inactive. Open Settings to choose another shortcut."
+        let inactiveHint = displayName + " inactive. Open Settings to choose another shortcut."
         return OigoShortcutCopy(
             displayName: displayName,
             compactDisplayName: glyphs.joined(),

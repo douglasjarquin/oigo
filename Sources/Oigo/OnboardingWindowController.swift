@@ -164,9 +164,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.storageHealth = storageHealth
         committedShortcut = globalShortcut
         shortcutRecorder = ShortcutRecorderControl(shortcut: globalShortcut)
-        shortcutRecorder.isEnabled = false
-        shortcutRecorder.toolTip = "Hold Fn to dictate. Double-tap Fn for hands-free mode."
-        shortcutRecorder.setAccessibilityLabel("Fn dictation key")
+        shortcutRecorder.isEnabled = true
+        shortcutRecorder.toolTip = globalShortcut.copy.settingsHint
+        shortcutRecorder.setAccessibilityLabel("Dictation shortcut")
 
         let window = OigoUtilityWindow(
             contentRect: NSRect(
@@ -381,7 +381,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         shortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
         shortcutRecorder.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.shortcut-recorder")
         shortcutRecorder.setAccessibilityIdentifier("oigo.onboarding.shortcut-recorder")
-        shortcutRecorder.setAccessibilityLabel("Fn dictation key")
+        shortcutRecorder.setAccessibilityLabel("Dictation shortcut")
         languagePopup.identifier = NSUserInterfaceItemIdentifier("oigo.onboarding.language")
         languagePopup.setAccessibilityIdentifier("oigo.onboarding.language")
         languagePopup.setAccessibilityLabel("Transcription language")
@@ -698,7 +698,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         case .microphoneAndLanguage:
             "Choose what Oigo listens to and which language it transcribes."
         case .shortcutAndInsertion:
-            "Hold Fn to dictate, or double-tap Fn for hands-free mode. Accessibility enables automatic paste."
+            committedShortcutCopy.settingsHint + " Accessibility enables automatic paste."
         case .tryIt:
             "One real dictation, end to end, into a field Oigo owns."
         case .done:

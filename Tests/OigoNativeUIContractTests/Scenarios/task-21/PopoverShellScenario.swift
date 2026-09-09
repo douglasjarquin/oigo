@@ -108,7 +108,7 @@ final class PopoverShellScenario: NativeUIContractScenario {
         fixture: Fixture,
         evidenceRoot: URL
     ) throws -> Receipt {
-        let shortcut = ToggleShortcut.fixedFn
+        let shortcut = ToggleShortcut.default
         let healthyInputs = makeInputs(shortcut: shortcut, registration: .registered)
         let healthy = OigoPopoverPresentation.compose(
             state: OigoPresentationState.project(healthyInputs),

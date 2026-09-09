@@ -251,17 +251,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var productionShortcutBridge = GlobalShortcutProductionBridge(
         operations: shortcutBridge
     )
-    private lazy var fnKeyMonitor = FnKeyMonitor { [weak self] edge, timestamp in
-        self?.handleFnKey(edge, timestamp: timestamp)
-    }
-    private var fnShortcutGesture = FnShortcutGestureController()
-    private var fnReleaseTask: Task<Void, Never>?
     private lazy var shortcutRegistration = AppShortcutRegistrationController(
-        committedShortcut: ToggleShortcut.fixedFn,
-        registrar: fixedFnShortcutRegistration,
+        committedShortcut: settings.globalShortcut,
+        registrar: shortcutRegistrar,
         onRegisteredEvent: { [weak self] event in self?.handleGlobalShortcut(event) }
     )
-    private let fixedFnShortcutRegistration = FixedFnShortcutRegistrationClient()
     private lazy var statusSurface = StatusSurfaceController(
         onPopoverWillShow: { [weak self] in
             self?.refreshPermissionPresentation()
@@ -492,9 +486,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         _ = sender
         speechAssetCheckTask?.cancel()
         speechAssetCheckTask = nil
-        fnReleaseTask?.cancel()
-        fnReleaseTask = nil
-        fnKeyMonitor.stop()
         presentationPublicationFence.shutdown()
         do {
             try shortcutRegistration.shutdown()
@@ -932,10 +923,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 storageReady: isShortcutStorageReady,
                 onboardingComplete: isSetupReady
             )
-            shortcutRegistration.registrationStatus.isActive ? fnKeyMonitor.start() : fnKeyMonitor.stop()
             resetShortcutInput()
         } catch {
-            fnKeyMonitor.stop()
             NSLog("Oigo could not register the global toggle shortcut: %@", Self.failureReason(for: error))
             resetShortcutInput()
             updateSurface()
@@ -1031,56 +1020,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         if event.edge == .pressed {
             keyboardStartupBoundaries?.observe(.globalPressed)
         }
-        let edge: FnShortcutGestureEdge = switch event.edge {
-        case .pressed: .pressed
-        case .released: .released
-        }
-        applyFnShortcutGesture(
-            edge,
-            timestamp: ProcessInfo.processInfo.systemUptime,
-            event: event
-        )
-    }
-
-    private func handleFnKey(_ edge: FnShortcutGestureEdge, timestamp: TimeInterval) {
-        let globalEdge: GlobalShortcutEdge = switch edge {
-        case .pressed: .pressed
-        case .released: .released
-        }
-        applyFnShortcutGesture(
-            edge,
-            timestamp: timestamp,
-            event: GlobalShortcutEvent(
-                edge: globalEdge,
-                generation: lastKeyboardStartupGeneration
-            )
-        )
-    }
-
-    private func applyFnShortcutGesture(
-        _ edge: FnShortcutGestureEdge,
-        timestamp: TimeInterval,
-        event: GlobalShortcutEvent
-    ) {
-        let result = fnShortcutGesture.receive(
-            edge,
-            at: timestamp
-        )
-        switch result {
-        case .start:
-            applyShortcutIntent(.pressed, from: event)
-        case .releaseDeferred:
-            scheduleDeferredFnRelease(generation: event.generation)
-        case .enterHandsFree:
-            fnReleaseTask?.cancel()
-            fnReleaseTask = nil
-            shortcutFeedbackDetail = "Hands-free mode"
-            updateSurface()
-        case .stop:
-            applyShortcutIntent(.released, from: event)
-        case .ignored:
-            break
-        }
+        applyShortcutIntent(event.edge, from: event)
     }
 
     private func applyShortcutIntent(_ edge: GlobalShortcutEdge, from event: GlobalShortcutEvent) {
@@ -1090,38 +1030,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func resetShortcutInput() {
-        fnReleaseTask?.cancel()
-        fnReleaseTask = nil
-        fnShortcutGesture.reset()
         shortcutBridge.reset()
-    }
-
-    private func scheduleDeferredFnRelease(generation: UInt64) {
-        fnReleaseTask?.cancel()
-        fnReleaseTask = Task { @MainActor [weak self] in
-            let delay = FnShortcutGestureController.doubleTapInterval + 0.02
-            do {
-                try await Task.sleep(for: .seconds(delay))
-            } catch {
-                return
-            }
-            guard let self else {
-                return
-            }
-            fnReleaseTask = nil
-            guard let result = fnShortcutGesture.advance(
-                to: ProcessInfo.processInfo.systemUptime
-            ) else {
-                return
-            }
-            guard result == .stop else {
-                return
-            }
-            applyShortcutIntent(
-                .released,
-                from: GlobalShortcutEvent(edge: .released, generation: generation)
-            )
-        }
     }
 
     private func startKeyboardDictation() {
@@ -1139,10 +1048,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             resetShortcutInput()
             updateSurface()
             return
-        }
-        if accessibilityPermissionState() != .granted, !fnKeyMonitor.isGlobalMonitoringActive {
-            shortcutFeedbackDetail =
-                "Allow Accessibility so Oigo can detect Fn release while you type in other apps."
         }
         startDictation(kind: onboardingAllowsTest ? .onboardingTest : .dictation)
     }
@@ -3027,7 +2932,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .active:
             if let error {
                 return (
-                    "Fn Dictation Active - Open Settings…",
+                    committedShortcutCopy.globalTitle + " - Open Settings…",
                     committedShortcutCopy.activeToolTip + ". Last registration error: " + error
                 )
             }
@@ -3037,7 +2942,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             )
         case .inactive(let message):
             return (
-                "Fn Dictation Unavailable - Open Settings…",
+                committedShortcutCopy.displayName + " Dictation Unavailable - Open Settings…",
                 committedShortcutCopy.unavailableMessage(error ?? message)
             )
         }
