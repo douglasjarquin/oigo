@@ -123,12 +123,19 @@ if ! jq -e 'type == "object" and (.attempt_dir | type == "string")' "$run_marker
 fi
 attempt_dir="$(jq -r .attempt_dir "$run_marker")"
 attempt_dir="$(cd "$attempt_dir" && pwd -P)"
-output="${output:A}"
-if [[ "$output" != "$attempt_dir"/* ]]; then
+output_arg="$output"
+output_parent_arg="${output_arg:h}"
+if [[ ! -d "$output_parent_arg" || -L "$output_parent_arg" ]]; then
+    print -u2 "ERROR unsafe-evidence-parent"
+    exit 1
+fi
+output_parent="$(cd "$output_parent_arg" && pwd -P)"
+if [[ "$output_parent" != "$attempt_dir" ]]; then
     print -u2 "ERROR outside-evidence-root"
     exit 1
 fi
-if [[ -e "$output" ]]; then
+output="$output_parent/${output_arg:t}"
+if [[ -e "$output" || -L "$output" ]]; then
     print -u2 "ERROR evidence-exists"
     exit 1
 fi

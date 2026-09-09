@@ -46,6 +46,7 @@ set +e
     --profile "${value[profile]}" --source-root "$source_root" --source-sha "${value[app-source-sha]}" \
     --manifest-sha "$manifest_sha" --app "$app" --target "$target" \
     --ax-driver "$qa_root/oigo-qa-ax-driver" --key-driver "$qa_root/oigo-native-key-event-driver" \
+    --evidence-root "$evidence_root" \
     --output "$evidence_root/permission-profile-receipt.txt" > "$evidence_root/permission-profile-helper.log" 2>&1
 profile_status=$?
 set -e

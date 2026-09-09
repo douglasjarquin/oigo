@@ -30,6 +30,7 @@ struct OigoIssue82ContractTests {
             ("recorder rejection", testRecorderRejection),
             ("app bridge release during startup", testAppBridgeReleaseDuringStartup),
             ("native QA permission mechanism", testNativeQAPermissionMechanism),
+            ("native QA destination confinement", testNativeQADestinationConfinement),
             ("native QA target field classification", testNativeQATargetFieldClassification),
             ("app bridge processing feedback", testAppBridgeProcessingFeedback),
             ("production bridge", testProductionBridge),

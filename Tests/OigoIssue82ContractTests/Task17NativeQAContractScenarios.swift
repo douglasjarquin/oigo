@@ -52,6 +52,65 @@ extension OigoIssue82ContractTests {
         }
     }
 
+    static func testNativeQADestinationConfinement() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-task17-destination-" + UUID().uuidString, isDirectory: true)
+        let evidence = root.appendingPathComponent("evidence", isDirectory: true)
+        let rejected = root.appendingPathComponent("rejected", isDirectory: true)
+        let app = root.appendingPathComponent("Oigo.app", isDirectory: true)
+        let target = root.appendingPathComponent("OigoQATarget.app", isDirectory: true)
+        let axDriver = root.appendingPathComponent("oigo-qa-ax-driver")
+        let keyDriver = root.appendingPathComponent("oigo-native-key-event-driver")
+        try FileManager.default.createDirectory(at: evidence, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: rejected, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: target.appendingPathComponent("Contents", isDirectory: true), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let appInfo = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>com.oigo.app</string></dict></plist>"
+        let targetInfo = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>com.oigo.qa.target</string></dict></plist>"
+        try appInfo.write(to: app.appendingPathComponent("Contents/Info.plist"), atomically: true, encoding: .utf8)
+        try targetInfo.write(to: target.appendingPathComponent("Contents/Info.plist"), atomically: true, encoding: .utf8)
+        try runTask17Process(
+            executable: "/usr/bin/xcrun",
+            arguments: ["swiftc", "Scripts/oigo-qa-ax-driver.swift", "-framework", "AppKit", "-framework", "ApplicationServices", "-o", axDriver.path],
+            expectedStatus: 0
+        )
+        try runTask17Process(
+            executable: "/usr/bin/xcrun",
+            arguments: ["swiftc", "Scripts/oigo-native-key-event-driver.swift", "-framework", "ApplicationServices", "-o", keyDriver.path],
+            expectedStatus: 0
+        )
+        let manifestSHA = try runTask17Process(
+            executable: "/bin/sh",
+            arguments: ["-c", "shasum -a 256 Scripts/oigo-native-qa-permission-profiles.tsv | awk '{print $1}'"],
+            expectedStatus: 0
+        ).output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rejectedOutput = rejected.appendingPathComponent("receipt.txt")
+        let result = try runTask17Process(
+            executable: "/bin/zsh",
+            arguments: [
+                "Scripts/oigo-native-qa-permission-profile-receipt.sh",
+                "--profile", "oigo-native-qa-pass",
+                "--source-root", FileManager.default.currentDirectoryPath,
+                "--source-sha", String(repeating: "a", count: 40),
+                "--manifest-sha", manifestSHA,
+                "--app", app.path,
+                "--target", target.path,
+                "--ax-driver", axDriver.path,
+                "--key-driver", keyDriver.path,
+                "--evidence-root", evidence.path,
+                "--output", rejectedOutput.path
+            ],
+            expectedStatus: nil
+        )
+        guard result.status == 1,
+              result.output.contains("ERROR output-outside-evidence-root"),
+              !FileManager.default.fileExists(atPath: rejectedOutput.path) else {
+            throw ContractFailure(message: "permission receipt helper accepted an unapproved destination")
+        }
+    }
+
     static func testNativeQATargetFieldClassification() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("oigo-task17-target-field-" + UUID().uuidString, isDirectory: true)

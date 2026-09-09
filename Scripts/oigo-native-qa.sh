@@ -198,12 +198,20 @@ zsh "$source_root/Scripts/oigo-qa-write-evidence.sh" \
 
 if [[ -n "${value[result-output]-}" ]]; then
     result_output_arg="$value[result-output]"
-    result_dir="$(dirname "$result_output_arg")"
-    mkdir -p "$result_dir"
-    result_output="$(cd "$result_dir" && pwd -P)/$(basename "$result_output_arg")"
+    result_dir_arg="${result_output_arg:h}"
+    [[ -d "$result_dir_arg" && ! -L "$result_dir_arg" ]] || {
+        print -u2 "ERROR missing-result-output-parent"
+        exit 1
+    }
+    result_dir="$(cd "$result_dir_arg" && pwd -P)"
+    result_output="$result_dir/${result_output_arg:t}"
     [[ "$result_output" == "$qa_root/evidence"/* \
         || "$result_output" == "$repository_root/.omo/evidence/bring-pr-149-home"/* ]] || {
         print -u2 "ERROR result-outside-approved-evidence"
+        exit 1
+    }
+    [[ ! -e "$result_output" && ! -L "$result_output" ]] || {
+        print -u2 "ERROR result-output-exists"
         exit 1
     }
     temporary="$(mktemp "$result_dir/.oigo-result.XXXXXX")"

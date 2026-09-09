@@ -6,7 +6,7 @@ typeset -A value
 while (( $# > 0 )); do
     [[ $# -ge 2 && "$2" != --* ]] || { print -u2 "ERROR malformed-arguments"; exit 64; }
     key="${1#--}"
-    [[ "$key" == (profile|source-root|source-sha|manifest-sha|app|target|ax-driver|key-driver|output) ]] || {
+    [[ "$key" == (profile|source-root|source-sha|manifest-sha|app|target|ax-driver|key-driver|evidence-root|output) ]] || {
         print -u2 "ERROR unknown-argument"
         exit 64
     }
@@ -14,7 +14,7 @@ while (( $# > 0 )); do
     value[$key]="$2"
     shift 2
 done
-for key in profile source-root source-sha manifest-sha app target ax-driver key-driver output; do
+for key in profile source-root source-sha manifest-sha app target ax-driver key-driver evidence-root output; do
     [[ -n "${value[$key]-}" ]] || { print -u2 "ERROR missing-argument"; exit 64; }
 done
 source_root="${value[source-root]:A}"
@@ -55,12 +55,23 @@ actual_key_source_sha="$(shasum -a 256 "$source_root/$key_source" | awk '{print 
     print -u2 "ERROR driver-source-sha-mismatch"
     exit 1
 }
-output="${value[output]:A}"
-output_parent="${output:h}"
-[[ -d "$output_parent" && ! -L "$output_parent" && "$(stat -f '%u' "$output_parent")" == "$(id -u)" ]] || {
+evidence_root="${value[evidence-root]:A}"
+[[ -d "$evidence_root" && ! -L "$evidence_root" ]] || {
+    print -u2 "ERROR unsafe-evidence-root"
+    exit 1
+}
+output_arg="${value[output]}"
+output_parent_arg="${output_arg:h}"
+[[ -d "$output_parent_arg" && ! -L "$output_parent_arg" ]] || {
     print -u2 "ERROR unsafe-output-parent"
     exit 1
 }
+output_parent="$(cd "$output_parent_arg" && pwd -P)"
+[[ "$output_parent" == "$evidence_root" && "$(stat -f '%u' "$output_parent")" == "$(id -u)" ]] || {
+    print -u2 "ERROR output-outside-evidence-root"
+    exit 1
+}
+output="$output_parent/${output_arg:t}"
 [[ ! -e "$output" ]] || { print -u2 "ERROR receipt-exists"; exit 1; }
 body="$(mktemp "${output:h}/.permission-profile-body.XXXXXX")"
 temporary="$(mktemp "${output:h}/.permission-profile-receipt.XXXXXX")"
