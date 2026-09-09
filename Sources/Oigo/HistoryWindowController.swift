@@ -33,17 +33,17 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private var transcriptLoadGeneration: UInt64 = 0
     private var cleanAgainOverride = true
     private var toolbarItemsByIdentifier: [NSToolbarItem.Identifier: NSToolbarItem] = [:]
-    private weak var mainRegionView: NSSplitView?
-    private let moreMenu = NSMenu(title: "More")
-    private let loadMoreButton = NSButton(title: "Load More", target: nil, action: nil)
-    private let loadingLabel = NSTextField(labelWithString: "")
-    private let tableView = NSTableView()
-    private let detailTitle = NSTextField(labelWithString: "No session selected")
-    private let detailStatus = NSTextField(labelWithString: "")
-    private let transcriptView = NSTextView()
+    weak var mainRegionView: NSSplitView?
+    let moreMenu = NSMenu(title: "More")
+    let loadMoreButton = NSButton(title: "Load More", target: nil, action: nil)
+    let loadingLabel = NSTextField(labelWithString: "")
+    let tableView = NSTableView()
+    let detailTitle = NSTextField(labelWithString: "No session selected")
+    let detailStatus = NSTextField(labelWithString: "")
+    let transcriptView = NSTextView()
     private let failureLabel = NSTextField(labelWithString: "")
     private let messageLabel = NSTextField(labelWithString: "")
-    private let transcriptVersionPopup = NSPopUpButton()
+    let transcriptVersionPopup = NSPopUpButton()
 
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -379,60 +379,6 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private var selectedTranscriptSource: SessionTextSource = .raw
-
-    func task29TableViewForTesting() -> NSTableView { tableView }
-    func task29MoreMenuTitlesForTesting() -> [String] {
-        moreMenu.items.filter { !$0.isSeparatorItem }.map(\.title)
-    }
-    func task29MoreMenuItemForTesting(title: String) -> NSMenuItem? {
-        moreMenu.item(withTitle: title)
-    }
-    func task29MoreMenuSnapshotForTesting() -> [(identifier: String, title: String, isEnabled: Bool)] {
-        moreMenu.items.filter { !$0.isSeparatorItem }.map {
-            (identifier: $0.identifier?.rawValue ?? "", title: $0.title, isEnabled: $0.isEnabled)
-        }
-    }
-    func task29MeasuredGeometryForTesting() -> (toolbarHeight: CGFloat, mainRegionHeight: CGFloat) {
-        guard window?.toolbar != nil,
-              let toolbarView = task29ToolbarView(),
-              let platterView = task29ToolbarPlatter(in: toolbarView),
-              let mainRegionView else {
-            return (0, 0)
-        }
-        return (toolbarView.bounds.height - platterView.frame.minY, mainRegionView.frame.height)
-    }
-    private func task29ToolbarView() -> NSView? {
-        guard let root = window?.contentView?.superview else { return nil }
-        return task29View(named: "NSToolbarView", in: root)
-    }
-    private func task29ToolbarPlatter(in view: NSView) -> NSView? {
-        task29View(named: "NSToolbarPlatterView", in: view)
-    }
-    private func task29View(named name: String, in view: NSView) -> NSView? {
-        guard NSStringFromClass(type(of: view)) == name else {
-            for child in view.subviews {
-                if let result = task29View(named: name, in: child) { return result }
-            }
-            return nil
-        }
-        return view
-    }
-    func task29DetailSnapshotForTesting() -> (title: String, status: String, transcript: String, selectorEnabled: [Bool]) {
-        (
-            detailTitle.stringValue,
-            detailStatus.stringValue,
-            transcriptView.string,
-            (0..<transcriptVersionPopup.numberOfItems).map { transcriptVersionPopup.item(at: $0)?.isEnabled ?? false }
-        )
-    }
-    func task29SelectSourceForTesting(_ source: SessionTextSource) {
-        selectedTranscriptSource = source
-        transcriptVersionPopup.selectItem(at: source == .raw ? 0 : source == .normalized ? 1 : 2)
-        updateDetail(for: selectedEntry)
-    }
-    func task29LoadingLabelForTesting() -> String { loadingLabel.stringValue }
-    func task29LoadMoreButtonForTesting() -> NSButton { loadMoreButton }
-    func task30InvokePasteAgainForTesting() { pasteAgainAction() }
 
     private func configureWindow() {
         guard let contentView = window?.contentView else {
