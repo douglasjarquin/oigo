@@ -733,7 +733,10 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             )
         }
         let inputConfiguration = preparation.configuration
-        let sourceFormat = inputNode.inputFormat(forBus: 0)
+        let sourceFormat = try Self.tapSourceFormat(
+            from: inputNode,
+            selectedChannel: preparation.selectedChannel
+        )
         guard sourceFormat.sampleRate == inputConfiguration.sampleRate,
               sourceFormat.channelCount == inputConfiguration.channelCount else {
             throw AudioRecorderError.invalidInputFormat
@@ -931,16 +934,10 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                     try inputRouter.route(inputNode: inputNode, to: device.deviceID)
                 },
                 inspect: { _ in
-                    guard let configuration = Self.inputConfiguration(for: inputNode) else {
-                        throw AudioRecorderError.invalidInputFormat
-                    }
-                    guard OigoInputChannelPolicy.isValid(
-                        channel,
-                        channelCount: Int(configuration.channelCount)
-                    ) else {
-                        throw AudioRecorderError.selectedChannelUnavailable
-                    }
-                    inputConfiguration = configuration
+                    inputConfiguration = try Self.inputConfiguration(
+                        for: inputNode,
+                        selectedChannel: channel
+                    )
                 }
             )
             guard let inputConfiguration else {
@@ -976,15 +973,10 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             }
         }
         try inputRouter.route(inputNode: inputNode, to: device.deviceID)
-        guard let configuration = Self.inputConfiguration(for: inputNode) else {
-            throw AudioRecorderError.invalidInputFormat
-        }
-        guard OigoInputChannelPolicy.isValid(
-            preparedInput.selectedChannel,
-            channelCount: Int(configuration.channelCount)
-        ) else {
-            throw AudioRecorderError.selectedChannelUnavailable
-        }
+        let configuration = try Self.inputConfiguration(
+            for: inputNode,
+            selectedChannel: preparedInput.selectedChannel
+        )
         lock.lock()
         activeDeviceUID = device.uid
         lock.unlock()
@@ -1069,18 +1061,54 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         let selectedChannel: Int
     }
 
-    private static func inputConfiguration(
-        for inputNode: AVAudioInputNode
-    ) -> InputConfiguration? {
-        let format = inputNode.inputFormat(forBus: 0)
+    private static func tapSourceFormat(
+        _ format: AVAudioFormat,
+        selectedChannel: Int
+    ) throws -> AVAudioFormat {
         guard format.sampleRate.isFinite,
               format.sampleRate > 0,
               format.channelCount > 0 else {
-            return nil
+            throw AudioRecorderError.invalidInputFormat
         }
+        guard OigoInputChannelPolicy.isValid(
+            selectedChannel,
+            channelCount: Int(format.channelCount)
+        ) else {
+            throw AudioRecorderError.selectedChannelUnavailable
+        }
+        return format
+    }
+
+    private static func tapSourceFormat(
+        from inputNode: AVAudioInputNode,
+        selectedChannel: Int
+    ) throws -> AVAudioFormat {
+        try tapSourceFormat(
+            inputNode.outputFormat(forBus: 0),
+            selectedChannel: selectedChannel
+        )
+    }
+
+    private static func inputConfiguration(
+        for inputNode: AVAudioInputNode,
+        selectedChannel: Int
+    ) throws -> InputConfiguration {
+        let format = try tapSourceFormat(from: inputNode, selectedChannel: selectedChannel)
         return InputConfiguration(
             sampleRate: format.sampleRate,
             channelCount: format.channelCount
+        )
+    }
+
+    @_spi(Testing)
+    public static func testRoutedTapFormat(
+        outputFormat: AVAudioFormat,
+        selectedChannel: Int
+    ) throws -> AudioCaptureFormat {
+        let format = try tapSourceFormat(outputFormat, selectedChannel: selectedChannel)
+        return AudioCaptureFormat(
+            sampleRate: format.sampleRate,
+            channelCount: Int(format.channelCount)
         )
     }
 
