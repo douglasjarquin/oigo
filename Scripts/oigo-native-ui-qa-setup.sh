@@ -19,10 +19,15 @@ for key in source-root source-sha qa-root evidence-root; do
 done
 
 source_root="${value[source-root]:A}"
-qa_root="$(cd "${value[qa-root]}" && pwd -L)"
+qa_root_logical="$(cd "${value[qa-root]}" && pwd -L)"
+qa_root="$(cd "${value[qa-root]}" && pwd -P)"
+[[ "$qa_root_logical" == "$qa_root" ]] || { print -u2 "ERROR symlinked-qa-root"; exit 1; }
 evidence_parent_arg="${value[evidence-root]:h}"
 [[ -d "$evidence_parent_arg" && ! -L "$evidence_parent_arg" ]] || { print -u2 "ERROR unsafe-evidence-parent"; exit 1; }
-evidence_root="$(cd "$evidence_parent_arg" && pwd -L)/${value[evidence-root]:t}"
+evidence_parent_logical="$(cd "$evidence_parent_arg" && pwd -L)"
+evidence_parent="$(cd "$evidence_parent_arg" && pwd -P)"
+[[ "$evidence_parent_logical" == "$evidence_parent" ]] || { print -u2 "ERROR symlinked-evidence-parent"; exit 1; }
+evidence_root="$evidence_parent/${value[evidence-root]:t}"
 [[ "$evidence_root" == "$qa_root/evidence" || "$evidence_root" == "$qa_root/evidence"/* ]] || { print -u2 "ERROR evidence-root-outside-qa-root"; exit 1; }
 [[ ! -L "$evidence_root" ]] || { print -u2 "ERROR symlinked-evidence-root"; exit 1; }
 source_sha="${value[source-sha]}"
@@ -40,6 +45,7 @@ mkdir -p "$qa_root/evidence" "$qa_root/fixtures/native/task-20" \
     "$qa_root/fixtures/metadata"
 marker="$qa_root/native-ui-qa-marker.json"
 run_uuid="$(uuidgen)"
+chflags nouchg "$marker" 2>/dev/null || true
 jq -n \
     --arg qa_root "$qa_root" \
     --arg repository "$source_root" \
@@ -47,7 +53,11 @@ jq -n \
     --arg attempt_dir "$evidence_root" \
     --arg run_uuid "$run_uuid" \
     '{schema:1,qa_root:$qa_root,repository:$repository,source_sha:$source_sha,attempt_dir:$attempt_dir,run_uuid:$run_uuid}' \
-    > "$marker"
+    > "$marker.tmp"
+/usr/bin/ruby -e 'File.open(ARGV.fetch(0), "r") { |file| file.fsync }' "$marker.tmp"
+mv "$marker.tmp" "$marker"
+chmod 444 "$marker"
+chflags uchg "$marker" 2>/dev/null || true
 jq -n --arg source_sha "$source_sha" \
     '{schema:1,source_sha:$source_sha,fixtures:"deterministic-ui-only"}' \
     > "$qa_root/fixtures/metadata/fixture-metadata.json"

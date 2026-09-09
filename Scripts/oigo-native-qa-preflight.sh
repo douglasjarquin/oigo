@@ -35,11 +35,11 @@ target_field="$(/usr/libexec/PlistBuddy -c 'Print :OigoQATargetFieldIdentifier' 
     exit 1
 }
 [[ "$app" == "$qa_root"/* && "$target" == "$qa_root"/* ]] || { print -u2 "ERROR bundle-outside-qa-root"; exit 1; }
-mkdir -p "$evidence_root"
 manifest="$source_root/Scripts/oigo-native-qa-permission-profiles.tsv"
 manifest_sha="$(shasum -a 256 "$manifest" | awk '{print $1}')"
 profile_row="$(awk -F '\t' -v profile="${value[profile]}" '$1 == profile { print; found++ } END { if (found != 1) exit 1 }' "$manifest")" || { print -u2 "ERROR unknown-profile"; exit 64; }
 IFS=$'\t' read -r _ expected_account expected_uid _ _ _ _ _ _ _ _ expected_microphone expected_speech expected_accessibility expected_assets expected_input <<< "$profile_row"
+mkdir -p "$evidence_root"
 
 set +e
 "$source_root/Scripts/oigo-native-qa-permission-profile-receipt.sh" \

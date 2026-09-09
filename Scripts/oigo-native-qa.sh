@@ -115,7 +115,6 @@ if [[ -n "${value[jsonl-output]-}" ]]; then
     }
     [[ ! -L "$jsonl_output" ]] || { print -u2 "ERROR symlinked-jsonl-output"; exit 1; }
 fi
-mkdir -p "$evidence_root"
 [[ -d "$app" && "$(basename "$app")" == Oigo.app && "$app" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-app-bundle"; exit 1; }
 [[ -d "$target" && "$(basename "$target")" == OigoQATarget.app && "$target" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-target-bundle"; exit 1; }
 [[ -x "$app/Contents/MacOS/Oigo" ]] || { print -u2 "ERROR missing-app-executable"; exit 1; }
@@ -129,6 +128,7 @@ target_bundle_sha="$(shasum -a 256 "$target/Contents/Info.plist" "$target/Conten
 [[ -x "$qa_root/oigo-qa-ax-driver" && -x "$qa_root/oigo-native-key-event-driver" ]] || { print -u2 "ERROR missing-external-driver"; exit 1; }
 actual_app_digest="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$app" | sed -n 's/^APP_BUNDLE_SHA=sha256://p')"
 [[ "$actual_app_digest" == "$app_digest" ]] || { print -u2 "ERROR app-sha-mismatch"; exit 1; }
+mkdir -p "$evidence_root"
 
 atomic_write() {
     local destination="$1"
