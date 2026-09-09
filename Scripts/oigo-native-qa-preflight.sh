@@ -24,17 +24,17 @@ evidence_root="${value[evidence-root]:A}"
 target="${value[frontmost-app]:A}"
 [[ -d "$source_root" && "$source_root" == "$qa_root/source-${value[app-source-sha]}" ]] || { print -u2 "ERROR source-sha-mismatch"; exit 1; }
 [[ -f "$qa_root/native-qa-marker.json" && -d "$app" && -d "$target" ]] || { print -u2 "ERROR invalid-qa-root"; exit 1; }
-[[ "$evidence_root" == "$qa_root/evidence" || "$evidence_root" == "$qa_root/evidence"/* ]] || {
-    print -u2 "ERROR evidence-root-outside-qa-root"
-    exit 1
-}
-[[ "$app" == "$qa_root"/* && "$target" == "$qa_root"/* ]] || { print -u2 "ERROR bundle-outside-qa-root"; exit 1; }
 [[ "${value[app-source-sha]}" =~ '^[0-9a-f]{40}$' && "${value[app-sha]}" =~ '^sha256:[0-9a-f]{64}$' ]] || { print -u2 "ERROR invalid-sha"; exit 1; }
 jq -e --arg qa_root "$qa_root" --arg source_sha "${value[app-source-sha]}" --arg app_sha "${value[app-sha]}" '.qa_root == $qa_root and .source_sha == $source_sha and .app_sha == $app_sha' "$qa_root/native-qa-marker.json" >/dev/null || { print -u2 "ERROR invalid-native-qa-marker"; exit 1; }
 actual_app_sha="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$app" | sed -n 's/^APP_BUNDLE_SHA=//p')"
 [[ "$actual_app_sha" == "${value[app-sha]}" ]] || { print -u2 "ERROR app-sha-mismatch"; exit 1; }
 target_field="$(/usr/libexec/PlistBuddy -c 'Print :OigoQATargetFieldIdentifier' "$target/Contents/Info.plist" 2>/dev/null || true)"
 [[ "$target_field" == "${value[target-field-id]}" ]] || { print -u2 "ERROR target-field-mismatch"; exit 1; }
+[[ "$evidence_root" == "$qa_root/evidence" || "$evidence_root" == "$qa_root/evidence"/* ]] || {
+    print -u2 "ERROR evidence-root-outside-qa-root"
+    exit 1
+}
+[[ "$app" == "$qa_root"/* && "$target" == "$qa_root"/* ]] || { print -u2 "ERROR bundle-outside-qa-root"; exit 1; }
 mkdir -p "$evidence_root"
 manifest="$source_root/Scripts/oigo-native-qa-permission-profiles.tsv"
 manifest_sha="$(shasum -a 256 "$manifest" | awk '{print $1}')"
