@@ -75,6 +75,7 @@ final class PasteAgainScenario: NativeUIContractScenario {
             ] + [
                 repositoryRoot.appendingPathComponent("Sources/Oigo/OigoUtilityWindow.swift").path,
                 repositoryRoot.appendingPathComponent("Sources/Oigo/HistoryWindowController.swift").path,
+                repositoryRoot.appendingPathComponent("Tests/OigoNativeUIContractTests/Support/HistoryWindowControllerQA.swift").path,
                 driver.path,
                 "-framework", "AppKit",
                 "-framework", "ApplicationServices",

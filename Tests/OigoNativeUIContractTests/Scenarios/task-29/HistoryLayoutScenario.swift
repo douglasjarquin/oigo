@@ -103,7 +103,8 @@ final class HistoryLayoutScenario: NativeUIContractScenario {
         try contractDriver.write(to: driver, atomically: true, encoding: .utf8)
         let sourceFiles = [
             repositoryRoot.appendingPathComponent("Sources/Oigo/OigoUtilityWindow.swift"),
-            repositoryRoot.appendingPathComponent("Sources/Oigo/HistoryWindowController.swift")
+            repositoryRoot.appendingPathComponent("Sources/Oigo/HistoryWindowController.swift"),
+            repositoryRoot.appendingPathComponent("Tests/OigoNativeUIContractTests/Support/HistoryWindowControllerQA.swift")
         ]
         _ = try runProcess(
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),

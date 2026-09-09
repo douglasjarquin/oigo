@@ -13,7 +13,8 @@ enum SettingsPanesRuntimeContract {
         try contractDriver.write(to: driver, atomically: true, encoding: .utf8)
         let sources = [
             repositoryRoot.appendingPathComponent("Sources/Oigo/OigoUtilityWindow.swift"),
-            repositoryRoot.appendingPathComponent("Sources/Oigo/SettingsWindowController.swift")
+            repositoryRoot.appendingPathComponent("Sources/Oigo/SettingsWindowController.swift"),
+            repositoryRoot.appendingPathComponent("Tests/OigoNativeUIContractTests/Support/SettingsWindowControllerQA.swift")
         ]
         let compile = Process()
         compile.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
