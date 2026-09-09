@@ -53,6 +53,10 @@ target="$(cd "$target_arg" && pwd -P)"
 app_digest="$(print -r -- "$value[app-sha]" | sed 's/^sha256://')"
 [[ -d "$source_root" && -f "$source_root/Package.swift" ]] || { print -u2 "ERROR invalid-source-root"; exit 1; }
 [[ "$source_root" == "$qa_root/source-$value[app-source-sha]" ]] || { print -u2 "ERROR source-sha-mismatch"; exit 1; }
+[[ "$evidence_root" == "$qa_root/evidence" || "$evidence_root" == "$qa_root/evidence"/* ]] || {
+    print -u2 "ERROR evidence-root-outside-qa-root"
+    exit 1
+}
 [[ -d "$app" && "$(basename "$app")" == Oigo.app && "$app" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-app-bundle"; exit 1; }
 [[ -d "$target" && "$(basename "$target")" == OigoQATarget.app && "$target" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-target-bundle"; exit 1; }
 [[ -x "$app/Contents/MacOS/Oigo" ]] || { print -u2 "ERROR missing-app-executable"; exit 1; }
@@ -61,8 +65,20 @@ actual_app_digest="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$app" | sed -
 [[ "$actual_app_digest" == "$app_digest" ]] || { print -u2 "ERROR app-sha-mismatch"; exit 1; }
 
 runner_marker="$qa_root/native-qa-marker.json"
-jq -n --arg attempt_dir "$evidence_root" --arg qa_root "$qa_root" --arg source_sha "$value[app-source-sha]" --arg app_sha "$value[app-sha]" --arg scenario "$scenario" \
-    '{schema:1,attempt_dir:$attempt_dir,qa_root:$qa_root,source_sha:$source_sha,app_sha:$app_sha,scenario:$scenario}' > "$runner_marker"
+repository_root="$(jq -r '.repository // empty' "$runner_marker" 2>/dev/null || true)"
+[[ -n "$repository_root" && -d "$repository_root" ]] || { print -u2 "ERROR missing-repository-marker"; exit 1; }
+repository_root="$(cd "$repository_root" && pwd -P)"
+atomic_write() {
+    local destination="$1"
+    local temporary
+    temporary="$(mktemp "${destination:h}/.oigo-runner.XXXXXX")"
+    cat > "$temporary"
+    /usr/bin/ruby -e 'File.open(ARGV.fetch(0), "r") { |file| file.fsync }' "$temporary"
+    mv "$temporary" "$destination"
+}
+atomic_write "$runner_marker" <<EOF
+$(jq -n --arg attempt_dir "$evidence_root" --arg qa_root "$qa_root" --arg repository "$repository_root" --arg source_sha "$value[app-source-sha]" --arg app_sha "$value[app-sha]" --arg scenario "$scenario" '{schema:1,attempt_dir:$attempt_dir,qa_root:$qa_root,repository:$repository,source_sha:$source_sha,app_sha:$app_sha,scenario:$scenario}')
+EOF
 
 set +e
 zsh "$source_root/Scripts/oigo-native-qa-preflight.sh" \
@@ -84,7 +100,6 @@ say_pid=""
 cleanup() {
     if [[ -n "$app_pid" ]]; then kill "$app_pid" 2>/dev/null || true; wait "$app_pid" 2>/dev/null || true; fi
     if [[ -n "$say_pid" ]]; then kill "$say_pid" 2>/dev/null || true; wait "$say_pid" 2>/dev/null || true; fi
-    pgrep -f "$target/Contents/MacOS/OigoQATarget" | while read -r process_id; do kill "$process_id" 2>/dev/null || true; done
 }
 trap cleanup EXIT INT TERM
 
@@ -139,8 +154,9 @@ fi
 
 sequence_hash="sha256:$(shasum -a 256 "$sequence_file" | awk '{print $1}')"
 payload="$evidence_root/native-qa-payload.json"
-jq -n --arg scenario "$scenario" --arg result "$result" --arg category "$category" --arg profile "$value[profile]" --arg sequence_hash "$sequence_hash" --argjson preflight_status "$preflight_status" \
-    '{scenario:$scenario,result:$result,category:$category,profile:$profile,preflight_exit:$preflight_status,sequence_hash:$sequence_hash,sequence:["key-down","say","preview-wait","key-up"],native_pass:($result == "PASS"),state_mutated:false}' > "$payload"
+atomic_write "$payload" <<EOF
+$(jq -n --arg scenario "$scenario" --arg result "$result" --arg category "$category" --arg profile "$value[profile]" --arg sequence_hash "$sequence_hash" --argjson preflight_status "$preflight_status" '{scenario:$scenario,result:$result,category:$category,profile:$profile,preflight_exit:$preflight_status,sequence_hash:$sequence_hash,sequence:["key-down","say","preview-wait","key-up"],native_pass:($result == "PASS"),state_mutated:false}')
+EOF
 receipt="$evidence_root/native-qa-receipt.json"
 zsh "$source_root/Scripts/oigo-qa-write-evidence.sh" \
     --run-marker "$runner_marker" --output "$receipt" --verdict "$result" \
@@ -152,15 +168,21 @@ if [[ -n "${value[result-output]-}" ]]; then
     result_dir="$(dirname "$result_output_arg")"
     mkdir -p "$result_dir"
     result_output="$(cd "$result_dir" && pwd -P)/$(basename "$result_output_arg")"
+    [[ "$result_output" == "$qa_root/evidence"/* ]] || { print -u2 "ERROR result-outside-qa-root"; exit 1; }
     temporary="$(mktemp "$result_dir/.oigo-result.XXXXXX")"
     cp "$receipt" "$temporary"
     /usr/bin/ruby -e 'File.open(ARGV.fetch(0), "r") { |file| file.fsync }' "$temporary"
     mv -f "$temporary" "$result_output"
 fi
 if [[ -n "${value[jsonl-output]-}" ]]; then
+    jsonl_output="${value[jsonl-output]:A}"
+    [[ "$jsonl_output" == "$repository_root/.omo/evidence/bring-pr-149-home"/* ]] || {
+        print -u2 "ERROR jsonl-outside-repository-evidence"
+        exit 1
+    }
     row="$evidence_root/native-qa-row.json"
     jq -n --arg scenario "$scenario" --arg result "$result" --arg category "$category" \
         '{scenario:$scenario,result:$result,category:$category}' > "$row"
-    zsh "$source_root/Scripts/oigo-native-qa-profile-dispatch.sh" --input "$row" --output "$value[jsonl-output]" >/dev/null
+    zsh "$source_root/Scripts/oigo-native-qa-profile-dispatch.sh" --input "$row" --output "$jsonl_output" >/dev/null
 fi
 print "$result $scenario category=$category"

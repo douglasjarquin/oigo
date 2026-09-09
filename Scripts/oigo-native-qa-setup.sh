@@ -30,6 +30,11 @@ target_bundle="${value[target-bundle]:A}"
 [[ "$(git -C "$source_root" rev-parse --verify HEAD)" == "$source_sha" ]] || { print -u2 "ERROR source-sha-mismatch"; exit 1; }
 [[ -d "$app_bundle" && "${app_bundle:t}" == "Oigo.app" ]] || { print -u2 "ERROR invalid-app-bundle"; exit 1; }
 [[ -d "$target_bundle" ]] || { print -u2 "ERROR missing-target-bundle"; exit 1; }
+[[ "$evidence_root" == "$qa_root/evidence" || "$evidence_root" == "$qa_root/evidence"/* ]] || {
+    print -u2 "ERROR evidence-root-outside-qa-root"
+    exit 1
+}
+[[ "$target_bundle" == "$qa_root"/* ]] || { print -u2 "ERROR target-outside-qa-root"; exit 1; }
 app_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_bundle/Contents/Info.plist" 2>/dev/null || true)"
 target_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$target_bundle/Contents/Info.plist" 2>/dev/null || true)"
 target_field="$(/usr/libexec/PlistBuddy -c 'Print :OigoQATargetFieldIdentifier' "$target_bundle/Contents/Info.plist" 2>/dev/null || true)"
@@ -59,10 +64,24 @@ fi
 /usr/bin/xcrun swiftc "$source_copy/Scripts/oigo-native-key-event-driver.swift" -framework ApplicationServices -o "$qa_root/oigo-native-key-event-driver"
 /usr/bin/xcrun swiftc "$source_copy/Scripts/oigo-native-permission-preflight.swift" -framework AVFoundation -framework ApplicationServices -framework CoreGraphics -framework Speech -o "$qa_root/oigo-native-permission-preflight"
 HOME="$qa_root/home" zsh "$source_copy/Scripts/oigo-native-qa-shortcut.sh" --home "$qa_root/home" --bundle-id com.oigo.app --write-default --key-code 49 --modifiers shift,command > "$evidence_root/shortcut-setup.txt"
-jq -n --arg qa_root "$qa_root" --arg source_sha "$source_sha" --arg app_sha "$staged_app_sha" --arg target_bundle_id "$target_id" --arg target_field_id "$target_field" '{schema:1,qa_root:$qa_root,source_sha:$source_sha,app_sha:$app_sha,target_bundle_id:$target_bundle_id,target_field_id:$target_field_id}' > "$qa_root/native-qa-marker.json"
-jq -n --arg source_sha "$source_sha" --arg app_sha "$staged_app_sha" '{schema:1,source_sha:$source_sha,app_sha:$app_sha,fixtures:"external-public-ui-only"}' > "$qa_root/fixtures/metadata/fixture-metadata.json"
-print "SOURCE_SHA=$source_sha" > "$evidence_root/setup-receipt.txt"
-print "APP_BUNDLE_SHA=$staged_app_sha" >> "$evidence_root/setup-receipt.txt"
-print "STAGED_APP=$staged_app" >> "$evidence_root/setup-receipt.txt"
-print "STAGED_TARGET=$qa_root/targets/OigoQATarget.app" >> "$evidence_root/setup-receipt.txt"
+atomic_write() {
+    local destination="$1"
+    local temporary
+    temporary="$(mktemp "${destination:h}/.oigo-setup.XXXXXX")"
+    cat > "$temporary"
+    /usr/bin/ruby -e 'File.open(ARGV.fetch(0), "r") { |file| file.fsync }' "$temporary"
+    mv "$temporary" "$destination"
+}
+atomic_write "$qa_root/native-qa-marker.json" <<EOF
+$(jq -n --arg qa_root "$qa_root" --arg repository "$source_root" --arg source_sha "$source_sha" --arg app_sha "$staged_app_sha" --arg target_bundle_id "$target_id" --arg target_field_id "$target_field" '{schema:1,qa_root:$qa_root,repository:$repository,source_sha:$source_sha,app_sha:$app_sha,target_bundle_id:$target_bundle_id,target_field_id:$target_field_id}')
+EOF
+atomic_write "$qa_root/fixtures/metadata/fixture-metadata.json" <<EOF
+$(jq -n --arg source_sha "$source_sha" --arg app_sha "$staged_app_sha" '{schema:1,source_sha:$source_sha,app_sha:$app_sha,fixtures:"external-public-ui-only"}')
+EOF
+atomic_write "$evidence_root/setup-receipt.txt" <<EOF
+SOURCE_SHA=$source_sha
+APP_BUNDLE_SHA=$staged_app_sha
+STAGED_APP=$staged_app
+STAGED_TARGET=$qa_root/targets/OigoQATarget.app
+EOF
 print "QA_SETUP_READY=$qa_root"
