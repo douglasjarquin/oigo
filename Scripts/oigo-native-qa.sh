@@ -199,7 +199,11 @@ if [[ -n "${value[result-output]-}" ]]; then
     result_dir="$(dirname "$result_output_arg")"
     mkdir -p "$result_dir"
     result_output="$(cd "$result_dir" && pwd -P)/$(basename "$result_output_arg")"
-    [[ "$result_output" == "$qa_root/evidence"/* ]] || { print -u2 "ERROR result-outside-qa-root"; exit 1; }
+    [[ "$result_output" == "$qa_root/evidence"/* \
+        || "$result_output" == "$repository_root/.omo/evidence/bring-pr-149-home"/* ]] || {
+        print -u2 "ERROR result-outside-approved-evidence"
+        exit 1
+    }
     temporary="$(mktemp "$result_dir/.oigo-result.XXXXXX")"
     cp "$receipt" "$temporary"
     /usr/bin/ruby -e 'File.open(ARGV.fetch(0), "r") { |file| file.fsync }' "$temporary"
