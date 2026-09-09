@@ -28,6 +28,8 @@ target_bundle="${value[target-bundle]:A}"
     exit 1
 }
 [[ "$(git -C "$source_root" rev-parse --verify HEAD)" == "$source_sha" ]] || { print -u2 "ERROR source-sha-mismatch"; exit 1; }
+git -C "$source_root" diff --quiet HEAD -- || { print -u2 "ERROR dirty-source"; exit 1; }
+git -C "$source_root" diff --cached --quiet || { print -u2 "ERROR staged-source"; exit 1; }
 [[ -d "$app_bundle" && "${app_bundle:t}" == "Oigo.app" ]] || { print -u2 "ERROR invalid-app-bundle"; exit 1; }
 [[ -d "$target_bundle" ]] || { print -u2 "ERROR missing-target-bundle"; exit 1; }
 [[ "$evidence_root" == "$qa_root/evidence" || "$evidence_root" == "$qa_root/evidence"/* ]] || {
@@ -75,12 +77,15 @@ atomic_write() {
     /usr/bin/ruby -e 'File.open(ARGV.fetch(0), "r") { |file| file.fsync }' "$temporary"
     mv "$temporary" "$destination"
 }
+chflags nouchg "$qa_root/native-qa-marker.json" 2>/dev/null || true
 atomic_write "$qa_root/native-qa-marker.json" <<EOF
-$(jq -n --arg qa_root "$qa_root" --arg repository "$source_root" --arg attempt_dir "$evidence_root" --arg source_sha "$source_sha" --arg source_tree_sha "$source_copy_sha" --arg app_sha "$staged_app_sha" --arg target_bundle_id "$target_id" --arg target_field_id "$target_field" --arg target_bundle_sha "$target_bundle_sha" '{schema:1,qa_root:$qa_root,repository:$repository,attempt_dir:$attempt_dir,source_sha:$source_sha,source_tree_sha:$source_tree_sha,app_sha:$app_sha,target_bundle_id:$target_bundle_id,target_field_id:$target_field_id,target_bundle_sha:$target_bundle_sha}')
+$(jq -n --arg qa_root "$qa_root" --arg repository "$source_root" --arg attempt_dir "$evidence_root" --arg source_sha "$source_sha" --arg source_tree_sha "$source_copy_sha" --arg app_sha "$staged_app_sha" --arg target_bundle_id "$target_id" --arg target_field_id "$target_field" --arg target_bundle_sha "$target_bundle_sha" '{schema:1,qa_root:\$qa_root,repository:\$repository,attempt_dir:\$attempt_dir,source_sha:\$source_sha,source_tree_sha:\$source_tree_sha,app_sha:\$app_sha,target_bundle_id:\$target_bundle_id,target_field_id:\$target_field_id,target_bundle_sha:\$target_bundle_sha}')
 EOF
+chflags nouchg "$qa_root/native-qa-marker.json" 2>/dev/null || true
 chmod 444 "$qa_root/native-qa-marker.json"
+chflags uchg "$qa_root/native-qa-marker.json" 2>/dev/null || true
 atomic_write "$qa_root/fixtures/metadata/fixture-metadata.json" <<EOF
-$(jq -n --arg source_sha "$source_sha" --arg app_sha "$staged_app_sha" '{schema:1,source_sha:$source_sha,app_sha:$app_sha,fixtures:"external-public-ui-only"}')
+$(jq -n --arg source_sha "$source_sha" --arg app_sha "$staged_app_sha" '{schema:1,source_sha:\$source_sha,app_sha:\$app_sha,fixtures:"external-public-ui-only"}')
 EOF
 atomic_write "$evidence_root/setup-receipt.txt" <<EOF
 SOURCE_SHA=$source_sha

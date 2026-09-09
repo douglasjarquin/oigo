@@ -50,6 +50,8 @@ repository_root="$(pwd -P)"
     print -u2 "ERROR repository-sha-mismatch"
     exit 1
 }
+git -C "$repository_root" diff --quiet HEAD -- || { print -u2 "ERROR dirty-repository"; exit 1; }
+git -C "$repository_root" diff --cached --quiet || { print -u2 "ERROR staged-repository"; exit 1; }
 source_root="$(cd "$source_root_arg" && pwd -P)"
 app="$(cd "$app_arg" && pwd -P)"
 qa_root="$(cd "$qa_root_arg" && pwd -P)"
@@ -198,6 +200,8 @@ else
         HOME="$qa_root/home" CFFIXED_USER_HOME="$qa_root/home" CFPREFERENCES_AVOID_DAEMON=1 \
             "$app/Contents/MacOS/Oigo" > "$evidence_root/oigo.log" 2>&1 &
         app_pid=$!
+        "$ax" --app "$target" --field-id "$value[target-field-id]" --focus --require-focused --frontmost-checkpoint before-key-down \
+            >> "$evidence_root/target-focus.log" 2>&1
         "$key_driver" --key-code "$value[event-key-code]" --modifiers "$value[event-modifiers]" --edge down >> "$sequence_file"
         print key-down >> "$sequence_file"
         /usr/bin/say -v Samantha "Open the Oigo settings window" > "$evidence_root/say.log" 2>&1 &

@@ -147,7 +147,7 @@ if ! jq -e 'type == "object"' "$payload_file" >/dev/null 2>&1; then
     print -u2 "ERROR invalid-evidence-payload"
     exit 1
 fi
-if ! jq -e 'type == "object" and ([keys[]] | all(. as $key | ["scenario","result","category","profile","preflight_exit","sequence_hash","initial_target_hash","final_target_hash","session_status","session_raw_bytes","session_audio_bytes","sequence","native_pass","state_mutated"] | index($key) != null))' "$payload_file" >/dev/null 2>&1; then
+if ! jq -e 'type == "object" and ([keys[]] | all(. as $key | ["scenario","result","category","profile","preflight_exit","sequence_hash","initial_target_hash","final_target_hash","session_status","session_raw_bytes","session_audio_bytes","sequence","native_pass","state_mutated"] | index($key) != null)) and (.scenario | type == "string") and (.result | type == "string") and (.category | type == "string") and (.profile | type == "string") and (.preflight_exit | type == "number") and (.sequence_hash | type == "string") and (.initial_target_hash | type == "string") and (.final_target_hash | type == "string") and (.session_status | type == "string") and (.session_raw_bytes | type == "number") and (.session_audio_bytes | type == "number") and (.sequence | type == "array") and (.native_pass | type == "boolean") and (.state_mutated | type == "boolean")' "$payload_file" >/dev/null 2>&1; then
     print -u2 "ERROR unsupported-evidence-fields"
     exit 1
 fi
