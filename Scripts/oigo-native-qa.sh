@@ -47,8 +47,9 @@ target_arg="$value[frontmost-app]"
 source_root="$(cd "$source_root_arg" && pwd -P)"
 app="$(cd "$app_arg" && pwd -P)"
 qa_root="$(cd "$qa_root_arg" && pwd -P)"
-mkdir -p "$evidence_root_arg"
-evidence_root="$(cd "$evidence_root_arg" && pwd -P)"
+evidence_parent_arg="$(dirname "$evidence_root_arg")"
+[[ -d "$evidence_parent_arg" ]] || { print -u2 "ERROR missing-evidence-parent"; exit 1; }
+evidence_root="$(cd "$evidence_parent_arg" && pwd -P)/$(basename "$evidence_root_arg")"
 target="$(cd "$target_arg" && pwd -P)"
 app_digest="$(print -r -- "$value[app-sha]" | sed 's/^sha256://')"
 [[ -d "$source_root" && -f "$source_root/Package.swift" ]] || { print -u2 "ERROR invalid-source-root"; exit 1; }
@@ -57,6 +58,7 @@ app_digest="$(print -r -- "$value[app-sha]" | sed 's/^sha256://')"
     print -u2 "ERROR evidence-root-outside-qa-root"
     exit 1
 }
+mkdir -p "$evidence_root"
 [[ -d "$app" && "$(basename "$app")" == Oigo.app && "$app" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-app-bundle"; exit 1; }
 [[ -d "$target" && "$(basename "$target")" == OigoQATarget.app && "$target" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-target-bundle"; exit 1; }
 [[ -x "$app/Contents/MacOS/Oigo" ]] || { print -u2 "ERROR missing-app-executable"; exit 1; }

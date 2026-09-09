@@ -56,7 +56,12 @@ actual_key_source_sha="$(shasum -a 256 "$source_root/$key_source" | awk '{print 
     exit 1
 }
 output="${value[output]:A}"
-mkdir -p "${output:h}"
+output_parent="${output:h}"
+[[ -d "$output_parent" && ! -L "$output_parent" && "$(stat -f '%u' "$output_parent")" == "$(id -u)" ]] || {
+    print -u2 "ERROR unsafe-output-parent"
+    exit 1
+}
+[[ ! -e "$output" ]] || { print -u2 "ERROR receipt-exists"; exit 1; }
 body="$(mktemp "${output:h}/.permission-profile-body.XXXXXX")"
 temporary="$(mktemp "${output:h}/.permission-profile-receipt.XXXXXX")"
 trap 'rm -f "$body" "$temporary"' EXIT INT TERM
