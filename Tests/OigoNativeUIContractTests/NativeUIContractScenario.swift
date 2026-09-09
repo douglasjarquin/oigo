@@ -25,19 +25,16 @@ struct ContractArguments {
         ) != nil else {
             throw ContractInputError(category: "invalid-defaults-suite")
         }
-        let taskNumber = try taskNumber(for: defaultsSuite)
         let taskRootIdentifier = "task-" + defaultsSuite.suffix(2)
-        let evidenceTaskIdentifier = "task-\(taskNumber)"
 
         let fixtureRoot = canonicalURL(try required("fixture-root", in: values))
         guard let qaRoot = markedQARoot(containing: fixtureRoot) else {
             throw ContractInputError(category: "invalid-fixture-root")
         }
-        let repositoryRoot = qaRoot.deletingLastPathComponent().deletingLastPathComponent()
-        let approvedEvidenceRoot = repositoryRoot
-            .appendingPathComponent(".omo/evidence/oigo-shortcut-transcription-design-fidelity", isDirectory: true)
+        _ = try validateRunMarker(at: qaRoot)
+        let approvedEvidenceRoot = qaRoot
+            .appendingPathComponent("evidence", isDirectory: true)
             .standardizedFileURL.resolvingSymlinksInPath()
-        try validateRunMarker(at: qaRoot, evidenceRoot: approvedEvidenceRoot)
         let approvedFixtureRoot = qaRoot
             .appendingPathComponent("fixtures/native/\(taskRootIdentifier)", isDirectory: true)
             .standardizedFileURL.resolvingSymlinksInPath()
@@ -45,38 +42,7 @@ struct ContractArguments {
             throw ContractInputError(category: "invalid-fixture-root")
         }
         let evidenceRoot = canonicalURL(try required("evidence-root", in: values))
-        var approvedTaskEvidenceRoots = [approvedEvidenceRoot
-            .appendingPathComponent(evidenceTaskIdentifier, isDirectory: true)
-            .standardizedFileURL.resolvingSymlinksInPath()]
-        if scenario == "component-contracts", taskNumber == 6 {
-            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
-                .appendingPathComponent("task-19", isDirectory: true)
-                .standardizedFileURL.resolvingSymlinksInPath())
-        }
-        if scenario == "identity", taskNumber == 9 {
-            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
-                .appendingPathComponent("task-20", isDirectory: true)
-                .standardizedFileURL.resolvingSymlinksInPath())
-        }
-        if scenario == "keyboard-startup", taskNumber == 5 {
-            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
-                .appendingPathComponent("task-15", isDirectory: true)
-                .standardizedFileURL.resolvingSymlinksInPath())
-        }
-        if scenario == "popover-state-matrix", taskNumber == 12 {
-            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
-                .appendingPathComponent("task-22", isDirectory: true)
-                .standardizedFileURL.resolvingSymlinksInPath())
-        }
-        if scenario == "settings-panes", taskNumber == 18 {
-            approvedTaskEvidenceRoots.append(approvedEvidenceRoot
-                .appendingPathComponent("task-28", isDirectory: true)
-                .standardizedFileURL.resolvingSymlinksInPath())
-        }
-        approvedTaskEvidenceRoots.append(approvedEvidenceRoot
-            .appendingPathComponent("task-32", isDirectory: true)
-            .standardizedFileURL.resolvingSymlinksInPath())
-        guard approvedTaskEvidenceRoots.contains(where: { isWithin(evidenceRoot, of: $0) }) else {
+        guard isWithin(evidenceRoot, of: approvedEvidenceRoot) else {
             throw ContractInputError(category: "outside-evidence-root")
         }
         guard isDirectory(fixtureRoot) else {
@@ -173,13 +139,6 @@ struct ContractArguments {
         candidate.path == root.path || candidate.path.hasPrefix(root.path + "/")
     }
 
-    private static func taskNumber(for defaultsSuite: String) throws -> Int {
-        guard let taskNumber = Int(defaultsSuite.suffix(2)) else {
-            throw ContractInputError(category: "invalid-defaults-suite")
-        }
-        return taskNumber
-    }
-
     private static func isDirectory(_ url: URL) -> Bool {
         var directory = ObjCBool(false)
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &directory) && directory.boolValue
@@ -188,8 +147,7 @@ struct ContractArguments {
     private static func markedQARoot(containing url: URL) -> URL? {
         var candidate = url
         while candidate.path != "/" {
-            if candidate.lastPathComponent == "oigo-shortcut-transcription-design-fidelity.qa",
-               candidate.deletingLastPathComponent().lastPathComponent == "T" {
+            if FileManager.default.fileExists(atPath: candidate.appendingPathComponent("native-ui-qa-marker.json").path) {
                 return candidate
             }
             candidate.deleteLastPathComponent()
@@ -197,20 +155,22 @@ struct ContractArguments {
         return nil
     }
 
-    private static func validateRunMarker(at qaRoot: URL, evidenceRoot: URL) throws {
-        let repositoryRoot = qaRoot.deletingLastPathComponent().deletingLastPathComponent()
-        let marker = qaRoot.appendingPathComponent("run.json")
+    private static func validateRunMarker(at qaRoot: URL) throws -> URL {
+        let marker = qaRoot.appendingPathComponent("native-ui-qa-marker.json")
         guard let data = try? Data(contentsOf: marker),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               object["qa_root"] as? String == qaRoot.path,
-              object["attempt_dir"] as? String == evidenceRoot.path,
-              object["repository"] as? String == repositoryRoot.path,
-              object["reviewed_plan_sha"] as? String == "4b7cf8d3e0e323b5b3d7e0f17467e5b99901682b81255ad5f06c33ad2e42a198",
-              object["execution_base_sha"] as? String == "a8315736e9b9ebb8c8e0a4bd6caa987eb67b2c37",
+              let repository = object["repository"] as? String,
+              let sourceSHA = object["source_sha"] as? String,
+              sourceSHA.range(of: #"^[0-9a-f]{40}$"#, options: .regularExpression) != nil,
+              let attemptDirectory = object["attempt_dir"] as? String,
+              attemptDirectory.hasPrefix(qaRoot.path + "/"),
               let runUUID = object["run_uuid"] as? String,
-              UUID(uuidString: runUUID) != nil else {
+              UUID(uuidString: runUUID) != nil,
+              repository.hasPrefix("/") else {
             throw ContractInputError(category: "invalid-run-marker")
         }
+        return URL(fileURLWithPath: repository).standardizedFileURL.resolvingSymlinksInPath()
     }
 }
 
