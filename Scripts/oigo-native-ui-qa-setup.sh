@@ -44,6 +44,7 @@ evidence_parent="$(cd "$evidence_parent_arg" && pwd -P)"
     exit 1
 }
 evidence_root="$evidence_parent/${value[evidence-root]:t}"
+evidence_root_logical="$evidence_parent_logical/${value[evidence-root]:t}"
 [[ "$evidence_root" == "$qa_root/evidence" || "$evidence_root" == "$qa_root/evidence"/* ]] || { print -u2 "ERROR evidence-root-outside-qa-root"; exit 1; }
 [[ ! -L "$evidence_root" ]] || { print -u2 "ERROR symlinked-evidence-root"; exit 1; }
 source_sha="${value[source-sha]}"
@@ -63,10 +64,10 @@ marker="$qa_root/native-ui-qa-marker.json"
 run_uuid="$(uuidgen)"
 chflags nouchg "$marker" 2>/dev/null || true
 jq -n \
-    --arg qa_root "$qa_root" \
+    --arg qa_root "$qa_root_logical" \
     --arg repository "$source_root" \
     --arg source_sha "$source_sha" \
-    --arg attempt_dir "$evidence_root" \
+    --arg attempt_dir "$evidence_root_logical" \
     --arg run_uuid "$run_uuid" \
     '{schema:1,qa_root:$qa_root,repository:$repository,source_sha:$source_sha,attempt_dir:$attempt_dir,run_uuid:$run_uuid}' \
     > "$marker.tmp"
