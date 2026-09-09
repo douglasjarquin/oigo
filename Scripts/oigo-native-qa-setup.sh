@@ -51,6 +51,8 @@ elif [[ ! -f "$source_copy/Package.swift" ]]; then
     print -u2 "ERROR invalid-source-copy"
     exit 1
 fi
+source_copy_sha="$source_root/Scripts/oigo-source-tree-sha256.sh"
+source_copy_sha="$(zsh "$source_copy_sha" "$source_copy")"
 staged_app="$qa_root/app/Oigo.app"
 /usr/bin/ditto "$app_bundle" "$staged_app"
 source_app_sha="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$app_bundle" | sed -n 's/^APP_BUNDLE_SHA=//p')"
@@ -60,6 +62,7 @@ staged_target="$qa_root/targets/OigoQATarget.app"
 if [[ "$target_bundle" != "$staged_target" ]]; then
     /usr/bin/ditto "$target_bundle" "$staged_target"
 fi
+target_bundle_sha="$(shasum -a 256 "$staged_target/Contents/Info.plist" "$staged_target/Contents/MacOS/OigoQATarget" | shasum -a 256 | awk '{print "sha256:" $1}')"
 /usr/bin/xcrun swiftc "$source_copy/Scripts/oigo-qa-ax-driver.swift" -framework AppKit -framework ApplicationServices -o "$qa_root/oigo-qa-ax-driver"
 /usr/bin/xcrun swiftc "$source_copy/Scripts/oigo-native-key-event-driver.swift" -framework ApplicationServices -o "$qa_root/oigo-native-key-event-driver"
 /usr/bin/xcrun swiftc "$source_copy/Scripts/oigo-native-permission-preflight.swift" -framework AVFoundation -framework ApplicationServices -framework CoreGraphics -framework Speech -o "$qa_root/oigo-native-permission-preflight"
@@ -73,8 +76,9 @@ atomic_write() {
     mv "$temporary" "$destination"
 }
 atomic_write "$qa_root/native-qa-marker.json" <<EOF
-$(jq -n --arg qa_root "$qa_root" --arg repository "$source_root" --arg source_sha "$source_sha" --arg app_sha "$staged_app_sha" --arg target_bundle_id "$target_id" --arg target_field_id "$target_field" '{schema:1,qa_root:$qa_root,repository:$repository,source_sha:$source_sha,app_sha:$app_sha,target_bundle_id:$target_bundle_id,target_field_id:$target_field_id}')
+$(jq -n --arg qa_root "$qa_root" --arg repository "$source_root" --arg attempt_dir "$evidence_root" --arg source_sha "$source_sha" --arg source_tree_sha "$source_copy_sha" --arg app_sha "$staged_app_sha" --arg target_bundle_id "$target_id" --arg target_field_id "$target_field" --arg target_bundle_sha "$target_bundle_sha" '{schema:1,qa_root:$qa_root,repository:$repository,attempt_dir:$attempt_dir,source_sha:$source_sha,source_tree_sha:$source_tree_sha,app_sha:$app_sha,target_bundle_id:$target_bundle_id,target_field_id:$target_field_id,target_bundle_sha:$target_bundle_sha}')
 EOF
+chmod 444 "$qa_root/native-qa-marker.json"
 atomic_write "$qa_root/fixtures/metadata/fixture-metadata.json" <<EOF
 $(jq -n --arg source_sha "$source_sha" --arg app_sha "$staged_app_sha" '{schema:1,source_sha:$source_sha,app_sha:$app_sha,fixtures:"external-public-ui-only"}')
 EOF

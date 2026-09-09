@@ -60,6 +60,13 @@ target="$(cd "$target_arg" && pwd -P)"
 app_digest="$(print -r -- "$value[app-sha]" | sed 's/^sha256://')"
 [[ -d "$source_root" && -f "$source_root/Package.swift" ]] || { print -u2 "ERROR invalid-source-root"; exit 1; }
 [[ "$source_root" == "$qa_root/source-$value[app-source-sha]" ]] || { print -u2 "ERROR source-sha-mismatch"; exit 1; }
+runner_marker="$qa_root/native-qa-marker.json"
+[[ -f "$runner_marker" && ! -L "$runner_marker" ]] || { print -u2 "ERROR missing-native-qa-marker"; exit 1; }
+marker_source_tree_sha="$(jq -r '.source_tree_sha // empty' "$runner_marker")"
+[[ -n "$marker_source_tree_sha" && "$marker_source_tree_sha" == "$(zsh "$repository_root/Scripts/oigo-source-tree-sha256.sh" "$source_root")" ]] || {
+    print -u2 "ERROR source-tree-sha-mismatch"
+    exit 1
+}
 [[ "$evidence_root" == "$qa_root/evidence" || "$evidence_root" == "$qa_root/evidence"/* ]] || {
     print -u2 "ERROR evidence-root-outside-qa-root"
     exit 1
@@ -104,6 +111,7 @@ if [[ -n "${value[jsonl-output]-}" ]]; then
         print -u2 "ERROR jsonl-outside-repository-evidence"
         exit 1
     }
+    [[ ! -L "$jsonl_output" ]] || { print -u2 "ERROR symlinked-jsonl-output"; exit 1; }
 fi
 mkdir -p "$evidence_root"
 [[ -d "$app" && "$(basename "$app")" == Oigo.app && "$app" == "$qa_root"/* ]] || { print -u2 "ERROR invalid-app-bundle"; exit 1; }
@@ -111,7 +119,8 @@ mkdir -p "$evidence_root"
 [[ -x "$app/Contents/MacOS/Oigo" ]] || { print -u2 "ERROR missing-app-executable"; exit 1; }
 target_bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$target/Contents/Info.plist" 2>/dev/null || true)"
 target_field_id="$(/usr/libexec/PlistBuddy -c 'Print :OigoQATargetFieldIdentifier' "$target/Contents/Info.plist" 2>/dev/null || true)"
-[[ "$target_bundle_id" == com.oigo.qa.target && "$target_field_id" == "$value[target-field-id]" && -x "$target/Contents/MacOS/OigoQATarget" ]] || {
+target_bundle_sha="$(shasum -a 256 "$target/Contents/Info.plist" "$target/Contents/MacOS/OigoQATarget" | shasum -a 256 | awk '{print "sha256:" $1}')"
+[[ "$target_bundle_id" == com.oigo.qa.target && "$target_field_id" == "$value[target-field-id]" && -x "$target/Contents/MacOS/OigoQATarget" && "$target_bundle_sha" == "$(jq -r '.target_bundle_sha // empty' "$runner_marker")" ]] || {
     print -u2 "ERROR invalid-target-identity"
     exit 1
 }
@@ -119,7 +128,6 @@ target_field_id="$(/usr/libexec/PlistBuddy -c 'Print :OigoQATargetFieldIdentifie
 actual_app_digest="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$app" | sed -n 's/^APP_BUNDLE_SHA=sha256://p')"
 [[ "$actual_app_digest" == "$app_digest" ]] || { print -u2 "ERROR app-sha-mismatch"; exit 1; }
 
-runner_marker="$qa_root/native-qa-marker.json"
 atomic_write() {
     local destination="$1"
     local temporary
@@ -128,10 +136,6 @@ atomic_write() {
     /usr/bin/ruby -e 'File.open(ARGV.fetch(0), "r") { |file| file.fsync }' "$temporary"
     mv "$temporary" "$destination"
 }
-atomic_write "$runner_marker" <<EOF
-$(jq -n --arg attempt_dir "$evidence_root" --arg qa_root "$qa_root" --arg repository "$repository_root" --arg source_sha "$value[app-source-sha]" --arg app_sha "$value[app-sha]" --arg scenario "$scenario" '{schema:1,attempt_dir:$attempt_dir,qa_root:$qa_root,repository:$repository,source_sha:$source_sha,app_sha:$app_sha,scenario:$scenario}')
-EOF
-
 set +e
 zsh "$source_root/Scripts/oigo-native-qa-preflight.sh" \
     --profile "$value[profile]" --source-root "$source_root" --app "$app" \

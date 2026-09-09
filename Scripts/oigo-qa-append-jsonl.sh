@@ -14,8 +14,12 @@ while (( $# > 0 )); do
 done
 [[ -n "$input" && -n "$output" ]] || { print -u2 "ERROR missing-argument"; exit 64; }
 [[ -f "$input" ]] || { print -u2 "ERROR missing-input"; exit 1; }
-output="${output:A}"
-mkdir -p "${output:h}"
+output_arg="$output"
+output_parent_arg="${output_arg:h}"
+[[ -d "$output_parent_arg" && ! -L "$output_parent_arg" ]] || { print -u2 "ERROR unsafe-output-parent"; exit 1; }
+output_parent="$(cd "$output_parent_arg" && pwd -P)"
+output="$output_parent/${output_arg:t}"
+[[ ! -L "$output" ]] || { print -u2 "ERROR symlinked-output"; exit 1; }
 lock="$output.lock"
 mkdir "$lock" 2>/dev/null || { print -u2 "ERROR output-locked"; exit 1; }
 temporary="$(mktemp "${output:h}/.jsonl-row.XXXXXX")"
