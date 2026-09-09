@@ -107,6 +107,16 @@ result=INCONCLUSIVE
 category=not-run
 sequence_file="$evidence_root/physical-sequence.log"
 : > "$sequence_file"
+initial_target_hash=""
+final_target_hash=""
+session_status=""
+session_raw_bytes=0
+session_audio_bytes=0
+session_root="$qa_root/home/Library/Application Support/Oigo/Sessions"
+before_session_count=0
+if [[ -d "$session_root" ]]; then
+    before_session_count="$(find "$session_root" -type f -name session.json | wc -l | tr -d ' ')"
+fi
 if (( preflight_status == 2 )); then
     category=profile-precondition
 elif [[ "$scenario" != public-dictation ]]; then
@@ -118,10 +128,13 @@ else
     "$ax" --app "$target" --field-id "$value[target-field-id]" --focus --require-focused --frontmost-checkpoint before-dictation \
         > "$evidence_root/target-focus.log" 2>&1
     focus_status=$?
+    initial_target_output="$("$ax" --app "$target" --field-id "$value[target-field-id]" --no-activate --read-value 2>&1)"
+    initial_target_status=$?
     set -e
-    if (( focus_status != 0 )); then
+    if (( focus_status != 0 || initial_target_status != 0 )); then
         category=target-focus
     else
+        /usr/bin/pbcopy </dev/null
         HOME="$qa_root/home" CFFIXED_USER_HOME="$qa_root/home" CFPREFERENCES_AVOID_DAEMON=1 \
             "$app/Contents/MacOS/Oigo" > "$evidence_root/oigo.log" 2>&1 &
         app_pid=$!
@@ -142,10 +155,28 @@ else
         target_status=$?
         set -e
         target_bytes="$(printf '%s' "$target_output" | sed -n 's/.* value=//p' | wc -c | tr -d ' ')"
+        initial_target_hash="sha256:$(printf '%s' "$initial_target_output" | shasum -a 256 | awk '{print $1}')"
+        final_target_hash="sha256:$(printf '%s' "$target_output" | shasum -a 256 | awk '{print $1}')"
         clipboard_bytes="$(pbpaste 2>/dev/null | wc -c | tr -d ' ')"
-        if (( target_status == 0 && target_bytes > 1 && clipboard_bytes > 0 )); then
-            result=PASS
-            category=public-dictation-complete
+        after_session_count=0
+        newest_session=""
+        if [[ -d "$session_root" ]]; then
+            after_session_count="$(find "$session_root" -type f -name session.json | wc -l | tr -d ' ')"
+            newest_session="$(find "$session_root" -type f -name session.json -exec stat -f '%m %N' {} + | sort -nr | head -1 | cut -d ' ' -f2-)"
+        fi
+        if [[ -n "$newest_session" && "$after_session_count" -gt "$before_session_count" ]]; then
+            session_status="$(jq -r '.state // empty' "$newest_session" 2>/dev/null || true)"
+            session_raw_bytes="$(jq -r '.rawTextByteCount // 0' "$newest_session" 2>/dev/null || print 0)"
+            session_audio_bytes="$(jq -r '.audioByteCount // 0' "$newest_session" 2>/dev/null || print 0)"
+        fi
+        if (( target_status == 0 && target_bytes > 1 && clipboard_bytes > 0 )) \
+            && [[ "$initial_target_hash" != "$final_target_hash" ]]; then
+            if [[ "$session_status" == completed && "$session_raw_bytes" -gt 0 && "$session_audio_bytes" -gt 0 ]]; then
+                result=PASS
+                category=public-dictation-complete
+            else
+                category=finalization-or-durable-session-not-observed
+            fi
         else
             category=finalization-or-insertion-not-observed
         fi
@@ -155,7 +186,7 @@ fi
 sequence_hash="sha256:$(shasum -a 256 "$sequence_file" | awk '{print $1}')"
 payload="$evidence_root/native-qa-payload.json"
 atomic_write "$payload" <<EOF
-$(jq -n --arg scenario "$scenario" --arg result "$result" --arg category "$category" --arg profile "$value[profile]" --arg sequence_hash "$sequence_hash" --argjson preflight_status "$preflight_status" '{scenario:$scenario,result:$result,category:$category,profile:$profile,preflight_exit:$preflight_status,sequence_hash:$sequence_hash,sequence:["key-down","say","preview-wait","key-up"],native_pass:($result == "PASS"),state_mutated:false}')
+$(jq -n --arg scenario "$scenario" --arg result "$result" --arg category "$category" --arg profile "$value[profile]" --arg sequence_hash "$sequence_hash" --arg initial_target_hash "${initial_target_hash-}" --arg final_target_hash "${final_target_hash-}" --arg session_status "${session_status-}" --argjson session_raw_bytes "${session_raw_bytes:-0}" --argjson session_audio_bytes "${session_audio_bytes:-0}" --argjson preflight_status "$preflight_status" '{scenario:$scenario,result:$result,category:$category,profile:$profile,preflight_exit:$preflight_status,sequence_hash:$sequence_hash,initial_target_hash:$initial_target_hash,final_target_hash:$final_target_hash,session_status:$session_status,session_raw_bytes:$session_raw_bytes,session_audio_bytes:$session_audio_bytes,sequence:["key-down","say","preview-wait","key-up"],native_pass:($result == "PASS"),state_mutated:false}')
 EOF
 receipt="$evidence_root/native-qa-receipt.json"
 zsh "$source_root/Scripts/oigo-qa-write-evidence.sh" \
