@@ -47,9 +47,7 @@ elif [[ ! -f "$source_copy/Package.swift" ]]; then
     exit 1
 fi
 staged_app="$qa_root/app/Oigo.app"
-if [[ ! -e "$staged_app" ]]; then
-    /usr/bin/ditto "$app_bundle" "$staged_app"
-fi
+/usr/bin/ditto "$app_bundle" "$staged_app"
 source_app_sha="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$app_bundle" | sed -n 's/^APP_BUNDLE_SHA=//p')"
 staged_app_sha="$("$source_root/Scripts/oigo-bundle-sha256.sh" "$staged_app" | sed -n 's/^APP_BUNDLE_SHA=//p')"
 [[ -n "$source_app_sha" && "$staged_app_sha" == "$source_app_sha" ]] || { print -u2 "ERROR staged-app-sha-mismatch"; exit 1; }
