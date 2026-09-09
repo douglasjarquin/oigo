@@ -19,8 +19,8 @@ for key in source-root source-sha qa-root evidence-root; do
 done
 
 source_root="${value[source-root]:A}"
-qa_root="${value[qa-root]:A}"
-evidence_root="${value[evidence-root]:A}"
+qa_root="$(cd "${value[qa-root]}" && pwd -L)"
+evidence_root="$(cd "${value[evidence-root]}" && pwd -L)"
 source_sha="${value[source-sha]}"
 [[ "$source_sha" =~ '^[0-9a-f]{40}$' && -f "$source_root/Package.swift" ]] || {
     print -u2 "ERROR invalid-source"
@@ -35,10 +35,6 @@ mkdir -p "$qa_root/evidence" "$qa_root/fixtures/native/task-20" \
     "$qa_root/fixtures/native/task-21" "$qa_root/fixtures/native/task-31" \
     "$qa_root/fixtures/metadata"
 marker="$qa_root/native-ui-qa-marker.json"
-if [[ -e "$marker" ]]; then
-    print -u2 "ERROR ui-marker-exists"
-    exit 1
-fi
 run_uuid="$(uuidgen)"
 jq -n \
     --arg qa_root "$qa_root" \

@@ -148,7 +148,7 @@ struct ContractArguments {
         var candidate = url
         while candidate.path != "/" {
             if FileManager.default.fileExists(atPath: candidate.appendingPathComponent("native-ui-qa-marker.json").path) {
-                return candidate
+                return candidate.standardizedFileURL.resolvingSymlinksInPath()
             }
             candidate.deleteLastPathComponent()
         }
@@ -158,14 +158,21 @@ struct ContractArguments {
     private static func validateRunMarker(at qaRoot: URL) throws -> URL {
         let marker = qaRoot.appendingPathComponent("native-ui-qa-marker.json")
         guard let data = try? Data(contentsOf: marker),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              object["qa_root"] as? String == qaRoot.path,
-              let repository = object["repository"] as? String,
-              let sourceSHA = object["source_sha"] as? String,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ContractInputError(category: "invalid-run-marker")
+        }
+        let markerQARoot = object["qa_root"] as? String
+        let repository = object["repository"] as? String
+        let sourceSHA = object["source_sha"] as? String
+        let attemptDirectory = object["attempt_dir"] as? String
+        let runUUID = object["run_uuid"] as? String
+        guard markerQARoot == qaRoot.path,
+              let repository,
+              let sourceSHA,
               sourceSHA.range(of: #"^[0-9a-f]{40}$"#, options: .regularExpression) != nil,
-              let attemptDirectory = object["attempt_dir"] as? String,
+              let attemptDirectory,
               attemptDirectory.hasPrefix(qaRoot.path + "/"),
-              let runUUID = object["run_uuid"] as? String,
+              let runUUID,
               UUID(uuidString: runUUID) != nil,
               repository.hasPrefix("/") else {
             throw ContractInputError(category: "invalid-run-marker")
