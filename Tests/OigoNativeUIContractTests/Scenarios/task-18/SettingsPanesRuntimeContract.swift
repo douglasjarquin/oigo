@@ -13,7 +13,6 @@ enum SettingsPanesRuntimeContract {
         try contractDriver.write(to: driver, atomically: true, encoding: .utf8)
         let sources = [
             repositoryRoot.appendingPathComponent("Sources/Oigo/OigoUtilityWindow.swift"),
-            repositoryRoot.appendingPathComponent("Sources/Oigo/Task8ControlObservation.swift"),
             repositoryRoot.appendingPathComponent("Sources/Oigo/SettingsWindowController.swift")
         ]
         let compile = Process()

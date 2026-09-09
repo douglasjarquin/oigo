@@ -11,150 +11,6 @@ import OigoInsertion
 import OigoHotKey
 import OigoPresentation
 
-private enum OigoQAFailureProvider: String {
-    case accessibilityDenied = "accessibility-denied"
-    case microphoneDenied = "microphone-denied"
-    case speechUnavailable = "speech-unavailable"
-    case inputUnavailable = "input-unavailable"
-    case assetsUnavailable = "assets-unavailable"
-    case audioStartFailure = "audio-start-failure"
-}
-
-private struct OigoQALaunchConfiguration {
-    let scenario: String
-    let fixtureRoot: URL
-    let qaRoot: URL
-    let caseName: String?
-    let failureProvider: OigoQAFailureProvider?
-
-    static func load(environment: [String: String]) throws -> OigoQALaunchConfiguration? {
-        guard environment["OIGO_QA_MODE"] == "1" else { return nil }
-        guard let scenario = environment["OIGO_QA_SCENARIO"],
-              let fixture = environment["OIGO_QA_FIXTURE_ROOT"],
-              let markerPath = environment["OIGO_QA_RUN_MARKER"] else {
-            throw OigoQAInputError.invalidLaunchContract
-        }
-        let rows = [
-            "global-shortcut-baseline": "fixtures/native/task-01",
-            "keyboard-release-lifecycle": "fixtures/native/task-16",
-            "global-shortcut": "fixtures/native/task-17",
-            "failure": "fixtures/native/task-33/failures",
-            "all": "fixtures/native/task-33"
-        ]
-        guard let relativeFixture = rows[scenario] else {
-            throw OigoQAInputError.invalidScenario
-        }
-        let marker = URL(fileURLWithPath: markerPath).standardizedFileURL.resolvingSymlinksInPath()
-        guard marker.lastPathComponent == "run.json",
-              let data = try? Data(contentsOf: marker),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let recordedRoot = object["qa_root"] as? String,
-              object["reviewed_plan_sha"] as? String == "4b7cf8d3e0e323b5b3d7e0f17467e5b99901682b81255ad5f06c33ad2e42a198",
-              object["execution_base_sha"] as? String == "a8315736e9b9ebb8c8e0a4bd6caa987eb67b2c37" else {
-            throw OigoQAInputError.invalidRunMarker
-        }
-        let qaRoot = URL(fileURLWithPath: recordedRoot).standardizedFileURL.resolvingSymlinksInPath()
-        guard marker == qaRoot.appendingPathComponent("run.json") else {
-            throw OigoQAInputError.invalidRunMarker
-        }
-        let fixtureRoot = URL(fileURLWithPath: fixture).standardizedFileURL.resolvingSymlinksInPath()
-        guard fixtureRoot == qaRoot.appendingPathComponent(relativeFixture, isDirectory: true)
-            .standardizedFileURL.resolvingSymlinksInPath() else {
-            throw OigoQAInputError.invalidFixtureRoot
-        }
-        let caseName = environment["OIGO_QA_CASE"]
-        let failureProvider = caseName.flatMap(OigoQAFailureProvider.init(rawValue:))
-        guard caseName == nil || caseName == "seed-onboarding" || failureProvider != nil else {
-            throw OigoQAInputError.invalidFailureProvider
-        }
-        return OigoQALaunchConfiguration(
-            scenario: scenario,
-            fixtureRoot: fixtureRoot,
-            qaRoot: qaRoot,
-            caseName: caseName,
-            failureProvider: failureProvider
-        )
-    }
-
-    func prepareIsolatedDefaults() {
-        if caseName == "seed-onboarding" {
-            OigoOnboardingStore().markCompleted()
-        }
-    }
-
-    func record(_ checkpoint: String, details: [String: Any] = [:]) {
-        guard scenario == "global-shortcut" || scenario == "all" else { return }
-        let output = qaRoot.appendingPathComponent("session/native-qa/oigo-checkpoints.jsonl")
-        do {
-            try FileManager.default.createDirectory(
-                at: output.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            var object = details
-            object["checkpoint"] = checkpoint
-            let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-            if !FileManager.default.fileExists(atPath: output.path) {
-                FileManager.default.createFile(atPath: output.path, contents: nil)
-            }
-            let handle = try FileHandle(forWritingTo: output)
-            try handle.seekToEnd()
-            try handle.write(contentsOf: data + Data([0x0a]))
-            try handle.close()
-        } catch {
-            FileHandle.standardError.write(Data("ERROR qa-checkpoint-write\n".utf8))
-        }
-    }
-
-    @MainActor
-    func captureOwnedView(_ view: NSView) throws -> URL {
-        let directory = qaRoot.appendingPathComponent("session/captures/" + scenario, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let output = directory.appendingPathComponent("settings.png")
-        view.layoutSubtreeIfNeeded()
-        let scale = view.window?.backingScaleFactor ?? 2
-        guard let bitmap = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: Int(view.bounds.width * scale),
-            pixelsHigh: Int(view.bounds.height * scale),
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ), let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
-            throw OigoQAInputError.captureFailed
-        }
-        bitmap.size = view.bounds.size
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = context
-        context.cgContext.scaleBy(x: scale, y: scale)
-        NSColor.windowBackgroundColor.setFill()
-        view.bounds.fill()
-        view.displayIgnoringOpacity(view.bounds, in: context)
-        NSGraphicsContext.restoreGraphicsState()
-        guard let data = bitmap.representation(using: .png, properties: [:]) else {
-            throw OigoQAInputError.captureFailed
-        }
-        try data.write(to: output, options: .atomic)
-        return output
-    }
-
-    static func screenRecordingAvailableForFutureCase() -> Bool {
-        CGPreflightScreenCaptureAccess()
-    }
-}
-
-private enum OigoQAInputError: Error {
-    case invalidLaunchContract
-    case invalidScenario
-    case invalidRunMarker
-    case invalidFixtureRoot
-    case invalidFailureProvider
-    case captureFailed
-}
-
 @MainActor
 private final class DestinationHandoffWaiter {
     private var observer: NSObjectProtocol?
@@ -376,7 +232,6 @@ private final class OigoInjectedLaunchAtLoginClient: OigoLaunchAtLoginClient {
 @available(macOS 26.0, *)
 @MainActor
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
-    private var qaLaunchConfiguration: OigoQALaunchConfiguration?
     private let coordinator = DictationCoordinator()
     private let performanceInstrumentation: PerformanceInstrumentation = OSLogPerformanceInstrumentation()
     private let deviceMonitor = SystemAudioDeviceMonitor()
@@ -608,16 +463,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
-        do {
-            qaLaunchConfiguration = try OigoQALaunchConfiguration.load(
-                environment: ProcessInfo.processInfo.environment
-            )
-            qaLaunchConfiguration?.prepareIsolatedDefaults()
-            qaLaunchConfiguration?.record("app-launch")
-        } catch {
-            FileHandle.standardError.write(Data("ERROR invalid-qa-launch-contract\n".utf8))
-            Darwin.exit(64)
-        }
         NSApp.setActivationPolicy(.accessory)
         installApplicationMenu()
         startInputDeviceInventoryMonitor()
@@ -636,16 +481,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             showOnboarding(support)
         }
         updateSurface()
-        if let qaLaunchConfiguration {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.openSettings()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    guard let view = self?.settingsWindow?.window?.contentView else { return }
-                    _ = try? qaLaunchConfiguration.captureOwnedView(view)
-                }
-            }
-        }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -1195,9 +1030,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         performanceInstrumentation.mark(.shortcutReceived)
         if event.edge == .pressed {
             keyboardStartupBoundaries?.observe(.globalPressed)
-            qaLaunchConfiguration?.record("key-down-received")
-        } else {
-            qaLaunchConfiguration?.record("key-up-received")
         }
         let edge: FnShortcutGestureEdge = switch event.edge {
         case .pressed: .pressed
@@ -1509,8 +1341,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     lastSession = persistedSession
                     bindOnboardingTestSession(persistedSession.id)
                     keyboardStartupBoundaries?.observe(.durableSession)
-                    qaLaunchConfiguration?.record("durable-session")
-                    try throwInjectedQAFailureIfNeeded()
                     let speech = keyboardStartupSpeechBoundary()
                     let requestedLocaleIdentifier = settings.localeIdentifier.isEmpty
                         ? Locale.current.identifier
@@ -1566,7 +1396,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     )
                     recordingStartedAt = Date()
                     keyboardStartupBoundaries?.observe(.recording)
-                    qaLaunchConfiguration?.record("recording")
                     return startedSession
                 }
                 pendingSessionBoundary = nil
@@ -1768,14 +1597,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 insertionSource: decision.insertionSource,
                 cleanupFallbackReason: decision.fallbackReason?.description
             )
-            qaLaunchConfiguration?.record(
-                "durable-raw-persistence",
-                details: ["nonempty": (lastSession?.metadata.rawTextByteCount ?? 0) > 0]
-            )
-            qaLaunchConfiguration?.record(
-                "dispatch-acknowledgement",
-                details: ["acknowledged": result.outcome == .dispatched || result.outcome == .pasted]
-            )
             reportOnboardingTest(
                 session: lastSession,
                 store: store,
@@ -1794,7 +1615,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 refreshHistory()
             }
             scheduleIdleMaintenance(.sessionTerminal)
-            qaLaunchConfiguration?.record("terminalization")
             updateSurface()
         } catch is CancellationError {
             await coordinator.cancelActiveWork()
@@ -3223,29 +3043,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    static func task8StatusObservation(
-        status: GlobalShortcutRegistrationStatus,
-        shortcut: ToggleShortcut,
-        error: String?
-    ) -> Task8StatusObservation {
-        let copy = presentationShortcutCopy(
-            status,
-            committedShortcutCopy: shortcut.copy,
-            error: error,
-            feedback: nil
-        )
-        let statusButton = NSButton(title: copy.title, target: nil, action: nil)
-        statusButton.toolTip = copy.toolTip
-        statusButton.setAccessibilityLabel(copy.title + ". " + copy.toolTip)
-        let menuItem = NSMenuItem(title: copy.title, action: nil, keyEquivalent: "")
-        return Task8StatusObservation(
-            title: statusButton.title,
-            toolTip: statusButton.toolTip ?? "",
-            menuTitle: menuItem.title,
-            accessibilityLabel: statusButton.accessibilityLabel() ?? ""
-        )
-    }
-
     @objc private func toggleLaunchAtLogin() {
         let status = launchAtLoginController.status
         if status == .requiresApproval {
@@ -3653,9 +3450,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         if let keyboardStartupBoundaries {
             return keyboardStartupBoundaries.inputDevices()
         }
-        if qaLaunchConfiguration?.failureProvider == .inputUnavailable {
-            return []
-        }
         return (try? deviceInventoryMonitor.currentDevices()) ?? []
     }
 
@@ -3715,7 +3509,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         shortcutFeedbackDetail = copy
         historyWindow?.showMessage(copy)
         observeKeyboardTerminalization(generation: generation ?? lastKeyboardStartupGeneration)
-        qaLaunchConfiguration?.record("terminalization", details: ["category": category])
         updateSurface()
     }
 
@@ -3921,10 +3714,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             return validation
         }
         settings = previousSettings.with(globalShortcut: candidate)
-        qaLaunchConfiguration?.record(
-            "settings-save",
-            details: ["key_code": candidate.keyCode, "modifiers": candidate.modifiers]
-        )
         updateSurface()
         return .available
     }
@@ -4264,25 +4053,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         if let settingsPermissionStates {
             return settingsPermissionStates().0
         }
-        if qaLaunchConfiguration?.failureProvider == .microphoneDenied {
-            return .denied
-        }
         return Self.currentMicrophonePermissionState()
-    }
-
-    private func throwInjectedQAFailureIfNeeded() throws {
-        switch qaLaunchConfiguration?.failureProvider {
-        case .speechUnavailable:
-            throw AudioRecorderError.captureFailed("qa-provider:speech-unavailable")
-        case .inputUnavailable:
-            return
-        case .assetsUnavailable:
-            throw AudioRecorderError.captureFailed("qa-provider:assets-unavailable")
-        case .audioStartFailure:
-            throw AudioRecorderError.engineStartFailed("qa-provider:audio-start-failure")
-        case .accessibilityDenied, .microphoneDenied, .none:
-            return
-        }
     }
 
     private static func currentMicrophonePermissionState() -> OigoPermissionState {
@@ -4301,9 +4072,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func accessibilityPermissionState() -> OigoPermissionState {
         if let settingsPermissionStates {
             return settingsPermissionStates().1
-        }
-        if qaLaunchConfiguration?.failureProvider == .accessibilityDenied {
-            return .denied
         }
         return Self.currentAccessibilityPermissionState()
     }

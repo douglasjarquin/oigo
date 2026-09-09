@@ -442,6 +442,7 @@ public final class OigoHUDController {
         previewLabel.maximumNumberOfLines = 1
         previewLabel.preferredMaxLayoutWidth = 216
         previewLabel.setAccessibilityRole(.staticText)
+        previewLabel.setAccessibilityIdentifier("oigo.hud.preview")
 
         let titleRow = NSStackView(views: [elapsedLabel, titleLabel])
         titleRow.orientation = .horizontal

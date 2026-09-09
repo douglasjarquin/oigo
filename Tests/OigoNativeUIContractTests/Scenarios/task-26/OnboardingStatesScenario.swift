@@ -38,7 +38,6 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             "Sources/Oigo/OnboardingShellMetrics.swift",
             "Sources/Oigo/OnboardingShellLayout.swift",
             "Sources/Oigo/OigoUtilityWindow.swift",
-            "Sources/Oigo/Task8ControlObservation.swift",
             "Sources/Oigo/OnboardingWindowController.swift",
             "Sources/Oigo/OnboardingShellContractFactory.swift",
             "Sources/OigoHotKey/ShortcutFormatter.swift",
@@ -216,6 +215,13 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
         let h105: [String]
     }
 
+    struct ControlObservation: Equatable {
+        let status: String
+        let hint: String
+        let recorderDisplay: String
+        let recorderAccessibilityValue: String
+    }
+
     @MainActor
     final class Delegate: NSObject, NSApplicationDelegate {
     let fixture: Fixture
@@ -334,7 +340,7 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             }
             let sessionID = UUID()
             guard let generation = factory.testGenerations.last else { throw ProbeError.missingGeneration }
-            let staleObservation = controller.task8ShortcutObservation()
+            let staleObservation = try observe(controller)
             let staleSettings = factory.settingsStore.load()
             controller.applyTestCompletion(
                 generation: generation &+ 1,
@@ -342,7 +348,7 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
                 report: productionReport(sessionID: sessionID),
                 selectedInsertionText: "stale completion"
             )
-            let afterStaleObservation = controller.task8ShortcutObservation()
+            let afterStaleObservation = try observe(controller)
             guard afterStaleObservation.status == staleObservation.status,
                   afterStaleObservation.hint == staleObservation.hint,
                   afterStaleObservation.recorderDisplay == staleObservation.recorderDisplay,
@@ -457,7 +463,7 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             try sendClick(in: tryContent, identifier: fixture.controls.stageAction)
             try wait(until: { tryFactory.testGenerations.count == 1 })
             let testGeneration = tryFactory.testGenerations[0]
-            let closedObservation = tryController.task8ShortcutObservation()
+            let closedObservation = try observe(tryController)
             tryController.window?.close()
             guard tryFactory.testCancelCount >= 1 else { throw ProbeError.cleanupMismatch }
             let staleSessionID = UUID()
@@ -467,7 +473,7 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
                 report: productionReport(sessionID: staleSessionID),
                 selectedInsertionText: "stale completion"
             )
-            guard sameObservation(tryController.task8ShortcutObservation(), closedObservation),
+            guard try observe(tryController) == closedObservation,
                   tryFactory.testCancelCount >= 1,
                   tryFactory.settingsStore.load() == trySettings else { throw ProbeError.cleanupMismatch }
             let reopened = tryFactory.makeController(initialStep: .testDictation)
@@ -716,11 +722,19 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             (allViews(root).first { $0.accessibilityIdentifier() == identifier }?.accessibilityLabel() as? String) ?? ""
         }
 
-        func sameObservation(_ lhs: Task8ControlObservation, _ rhs: Task8ControlObservation) -> Bool {
-            lhs.status == rhs.status
-                && lhs.hint == rhs.hint
-                && lhs.recorderDisplay == rhs.recorderDisplay
-                && lhs.recorderAccessibilityValue == rhs.recorderAccessibilityValue
+        func observe(_ controller: OnboardingWindowController) throws -> ControlObservation {
+            guard let content = controller.window?.contentView,
+                  let recorder = allViews(content).first(where: {
+                      $0.accessibilityIdentifier() == "oigo.onboarding.shortcut-recorder"
+                  }) as? ShortcutRecorderControl else {
+                throw ProbeError.missingControl
+            }
+            return ControlObservation(
+                status: visibleText(in: content, identifier: "oigo.onboarding.status"),
+                hint: visibleText(in: content, identifier: "oigo.onboarding.body"),
+                recorderDisplay: recorder.displayValue,
+                recorderAccessibilityValue: recorder.accessibilityValue() as? String ?? ""
+            )
         }
 
         func sendClick(in content: NSView, identifier: String) throws {

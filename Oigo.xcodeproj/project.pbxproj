@@ -20,14 +20,7 @@
         A00000010000000000000070 /* libOigoIdentity.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000070 /* libOigoIdentity.a */; };
         A00000010000000000000071 /* libOigoPresentation.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000055 /* libOigoPresentation.a */; };
         A00000010000000000000068 /* HistoryPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000056 /* HistoryPresentation.swift */; };
-        A00000010000000000000069 /* Task8ShortcutConsumerProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000057 /* Task8ShortcutConsumerProbe.swift */; };
-        A0000001000000000000006A /* Task11OnboardingShortcutProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000058 /* Task11OnboardingShortcutProbe.swift */; };
-        A0000001000000000000006B /* Task12SettingsShortcutProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000059 /* Task12SettingsShortcutProbe.swift */; };
-        A0000001000000000000006C /* Task15KeyboardStartupProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000005A /* Task15KeyboardStartupProbe.swift */; };
-        A0000001000000000000006D /* Task16KeyboardReleaseProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000005B /* Task16KeyboardReleaseProbe.swift */; };
-        A0000001000000000000006E /* Task16KeyboardReleaseReceipt.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000005C /* Task16KeyboardReleaseReceipt.swift */; };
         A0000001000000000000006F /* AppShortcutRegistrationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001000000000000005D /* AppShortcutRegistrationController.swift */; };
-        A00000010000000000000072 /* Task8ControlObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000072 /* Task8ControlObservation.swift */; };
         A00000010000000000000073 /* OigoUtilityWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000073 /* OigoUtilityWindow.swift */; };
         A00000010000000000000074 /* OnboardingShellLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000074 /* OnboardingShellLayout.swift */; };
         A00000010000000000000075 /* OnboardingShellMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000075 /* OnboardingShellMetrics.swift */; };
@@ -272,14 +265,7 @@
         B00000010000000000000053 /* OigoNativeUIContractTests */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = OigoNativeUIContractTests; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000029 /* GlobalShortcutRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutRegistration.swift; sourceTree = "<group>"; };
         B00000010000000000000056 /* HistoryPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryPresentation.swift; sourceTree = "<group>"; };
-        B00000010000000000000057 /* Task8ShortcutConsumerProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Task8ShortcutConsumerProbe.swift; sourceTree = "<group>"; };
-        B00000010000000000000058 /* Task11OnboardingShortcutProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Task11OnboardingShortcutProbe.swift; sourceTree = "<group>"; };
-        B00000010000000000000059 /* Task12SettingsShortcutProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Task12SettingsShortcutProbe.swift; sourceTree = "<group>"; };
-        B0000001000000000000005A /* Task15KeyboardStartupProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Task15KeyboardStartupProbe.swift; sourceTree = "<group>"; };
-        B0000001000000000000005B /* Task16KeyboardReleaseProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Task16KeyboardReleaseProbe.swift; sourceTree = "<group>"; };
-        B0000001000000000000005C /* Task16KeyboardReleaseReceipt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Task16KeyboardReleaseReceipt.swift; sourceTree = "<group>"; };
         B0000001000000000000005D /* AppShortcutRegistrationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcutRegistrationController.swift; sourceTree = "<group>"; };
-        B00000010000000000000072 /* Task8ControlObservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Task8ControlObservation.swift; sourceTree = "<group>"; };
         B00000010000000000000073 /* OigoUtilityWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OigoUtilityWindow.swift; sourceTree = "<group>"; };
         B00000010000000000000074 /* OnboardingShellLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingShellLayout.swift; sourceTree = "<group>"; };
         B00000010000000000000075 /* OnboardingShellMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingShellMetrics.swift; sourceTree = "<group>"; };
@@ -467,7 +453,6 @@
                 B00000010000000000000001 /* main.swift */,
                 B00000010000000000000002 /* OigoAppDelegate.swift */,
                 B00000010000000000000003 /* StatusSurfaceController.swift */,
-                B00000010000000000000072 /* Task8ControlObservation.swift */,
                 B00000010000000000000073 /* OigoUtilityWindow.swift */,
                 B00000010000000000000074 /* OnboardingShellLayout.swift */,
                 B00000010000000000000075 /* OnboardingShellMetrics.swift */,
@@ -476,12 +461,6 @@
                 B00000010000000000000020 /* HistoryWindowController.swift */,
                 B00000010000000000000024 /* LaunchAtLoginService.swift */,
                 B00000010000000000000025 /* OnboardingWindowController.swift */,
-                B00000010000000000000057 /* Task8ShortcutConsumerProbe.swift */,
-                B00000010000000000000058 /* Task11OnboardingShortcutProbe.swift */,
-                B00000010000000000000059 /* Task12SettingsShortcutProbe.swift */,
-                B0000001000000000000005A /* Task15KeyboardStartupProbe.swift */,
-                B0000001000000000000005B /* Task16KeyboardReleaseProbe.swift */,
-                B0000001000000000000005C /* Task16KeyboardReleaseReceipt.swift */,
             );
             path = Sources/Oigo;
             sourceTree = "<group>";
@@ -948,7 +927,6 @@
                 A00000010000000000000001 /* main.swift in Sources */,
                 A00000010000000000000002 /* OigoAppDelegate.swift in Sources */,
                 A00000010000000000000003 /* StatusSurfaceController.swift in Sources */,
-                A00000010000000000000072 /* Task8ControlObservation.swift in Sources */,
                 A00000010000000000000073 /* OigoUtilityWindow.swift in Sources */,
                 A00000010000000000000074 /* OnboardingShellLayout.swift in Sources */,
                 A00000010000000000000075 /* OnboardingShellMetrics.swift in Sources */,
@@ -957,12 +935,6 @@
                 A00000010000000000000023 /* HistoryWindowController.swift in Sources */,
                 A00000010000000000000027 /* LaunchAtLoginService.swift in Sources */,
                 A00000010000000000000028 /* OnboardingWindowController.swift in Sources */,
-                A00000010000000000000069 /* Task8ShortcutConsumerProbe.swift in Sources */,
-                A0000001000000000000006A /* Task11OnboardingShortcutProbe.swift in Sources */,
-                A0000001000000000000006B /* Task12SettingsShortcutProbe.swift in Sources */,
-                A0000001000000000000006C /* Task15KeyboardStartupProbe.swift in Sources */,
-                A0000001000000000000006D /* Task16KeyboardReleaseProbe.swift in Sources */,
-                A0000001000000000000006E /* Task16KeyboardReleaseReceipt.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };

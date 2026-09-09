@@ -176,6 +176,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         shortcutRecorder.setAccessibilityLabel("Fn dictation key")
         shortcutRecorder.identifier = NSUserInterfaceItemIdentifier("oigo.settings.shortcut-recorder")
         shortcutRecorder.setAccessibilityIdentifier("oigo.settings.shortcut-recorder")
+        shortcutHelp.setAccessibilityIdentifier("oigo.settings.shortcut-help")
+        shortcutStatus.setAccessibilityIdentifier("oigo.settings.shortcut-status")
 
         let window = OigoUtilityWindow(
             contentRect: NSRect(x: 0, y: 0, width: Self.shellWidth, height: 640),
@@ -844,16 +846,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
                 registrationError() ?? message
             )
         }
-    }
-
-    func task8ShortcutObservation() -> Task8ControlObservation {
-        updateShortcutStatus()
-        return Task8ControlObservation(
-            status: shortcutStatus.stringValue,
-            hint: shortcutHelp.stringValue,
-            recorderDisplay: shortcutRecorder.displayValue,
-            recorderAccessibilityValue: shortcutRecorder.accessibilityValue() as? String ?? ""
-        )
     }
 
     func task28BeginLocaleSaveForTesting(_ identifier: String) -> OigoLocaleAssetReadiness? {

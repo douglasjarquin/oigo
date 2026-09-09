@@ -38,19 +38,17 @@ final class OnboardingShellScenario: NativeUIContractScenario {
         let metricsSource = repositoryRoot.appendingPathComponent("Sources/Oigo/OnboardingShellMetrics.swift")
         let layoutSource = repositoryRoot.appendingPathComponent("Sources/Oigo/OnboardingShellLayout.swift")
         let utilityWindowSource = repositoryRoot.appendingPathComponent("Sources/Oigo/OigoUtilityWindow.swift")
-        let task8ObservationSource = repositoryRoot.appendingPathComponent("Sources/Oigo/Task8ControlObservation.swift")
         let factorySource = repositoryRoot.appendingPathComponent("Sources/Oigo/OnboardingShellContractFactory.swift")
         guard let source = try? String(contentsOf: controllerSource, encoding: .utf8),
               source.contains("OigoOnboardingShellLayout.install("),
               FileManager.default.fileExists(atPath: metricsSource.path),
               FileManager.default.fileExists(atPath: layoutSource.path),
               FileManager.default.fileExists(atPath: utilityWindowSource.path),
-              FileManager.default.fileExists(atPath: task8ObservationSource.path),
               FileManager.default.fileExists(atPath: factorySource.path) else {
             throw ContractInputError(category: "missing-onboarding-shell")
         }
         let output = try runCompiledContract(
-            sources: [metricsSource, layoutSource, utilityWindowSource, task8ObservationSource, controllerSource, factorySource],
+            sources: [metricsSource, layoutSource, utilityWindowSource, controllerSource, factorySource],
             fixture: fixture,
             evidenceRoot: arguments.evidenceRoot
         )

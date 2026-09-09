@@ -101,29 +101,32 @@ extension OigoIssue82ContractTests {
         let marker: [String: Any] = [
             "qa_root": qaRoot.path,
             "attempt_dir": attempt.path,
+            "source_sha": sourceSHA,
+            "app_sha": "sha256:" + bundleHash,
             "repository": canonicalRoot.path,
             "reviewed_plan_sha": "4b7cf8d3e0e323b5b3d7e0f17467e5b99901682b81255ad5f06c33ad2e42a198",
             "execution_base_sha": "a8315736e9b9ebb8c8e0a4bd6caa987eb67b2c37",
             "run_uuid": "00000000-0000-4000-8000-000000000000"
         ]
         let markerData = try JSONSerialization.data(withJSONObject: marker, options: [.sortedKeys])
-        try markerData.write(to: qaRoot.appendingPathComponent("run.json"))
+        try markerData.write(to: qaRoot.appendingPathComponent("native-qa-marker.json"))
         let environment = ["HOME": qaRoot.appendingPathComponent("home").path, "CFFIXED_USER_HOME": qaRoot.appendingPathComponent("home").path]
         let arguments = [
             sourceRoot.appendingPathComponent("Scripts/oigo-native-qa-preflight.sh").path,
             "--source-root", sourceRoot.path,
             "--app", app.path,
             "--app-source-sha", sourceSHA,
-            "--app-sha", bundleHash,
+            "--app-sha", "sha256:" + bundleHash,
             "--qa-root", qaRoot.path,
             "--evidence-root", evidence.path,
             "--frontmost-app", target.path,
+            "--profile", "oigo-native-qa-pass",
             "--target-field-id", "oigo.qa.target.text-field"
         ]
         let targetField = try runTask17Process(executable: "/bin/zsh", arguments: arguments, expectedStatus: nil, environment: environment)
         guard targetField.status == 1,
-              targetField.output.contains("ERROR target-field-not-found"),
-              !targetField.output.contains("INCONCLUSIVE target-field-unavailable"),
+              targetField.output.contains("ERROR target-field-mismatch"),
+              !targetField.output.contains("INCONCLUSIVE profile-precondition"),
               !FileManager.default.fileExists(atPath: qaRoot.appendingPathComponent("home/Library/Preferences").path),
               !FileManager.default.fileExists(atPath: evidence.appendingPathComponent("receipt.json").path) else {
             throw ContractFailure(message: "missing target field was not a non-mutating ERROR result")

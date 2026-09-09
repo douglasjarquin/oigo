@@ -26,7 +26,6 @@ final class ShortcutCopyScenario: NativeUIContractScenario {
         let popoverGlyphs: [String]
         let popoverActive: PopoverObservation
         let popoverConflict: PopoverObservation
-        let nativeConsumers: ConsumerReceipt
         let gallery: GalleryReceipt
         let conflictNoticeActionable: Bool
         let mouseStartEnabled: Bool
@@ -39,39 +38,6 @@ final class ShortcutCopyScenario: NativeUIContractScenario {
         let primaryEnabled: Bool
         let noticeActionTitle: String?
         let noticeActionEnabled: Bool
-    }
-
-    private struct ControlObservation: Codable {
-        let status: String
-        let hint: String
-        let recorderDisplay: String
-        let recorderAccessibilityValue: String
-    }
-
-    private struct HUDObservation: Codable {
-        let title: String
-        let detail: String
-        let accessibilityLabel: String
-        let visible: Bool
-    }
-
-    private struct StatusObservation: Codable {
-        let title: String
-        let toolTip: String
-        let menuTitle: String
-        let accessibilityLabel: String
-    }
-
-    private struct ConsumerReceipt: Codable {
-        let shortcut: ToggleShortcut
-        let hud: HUDObservation
-        let onboardingActive: ControlObservation
-        let onboardingConflict: ControlObservation
-        let settingsActive: ControlObservation
-        let settingsConflict: ControlObservation
-        let statusActive: StatusObservation
-        let statusError: StatusObservation
-        let statusConflict: StatusObservation
     }
 
     private struct GalleryObservation: Codable {
@@ -190,43 +156,11 @@ final class ShortcutCopyScenario: NativeUIContractScenario {
         let popoverConflict = try renderedPopoverObservation(conflict)
         let runtimeRoot = evidenceRoot.appendingPathComponent(name, isDirectory: true)
         try FileManager.default.createDirectory(at: runtimeRoot, withIntermediateDirectories: true)
-        let nativeConsumers = try observeNativeConsumers(
-            fixtureRoot: fixtureRoot,
-            outputRoot: runtimeRoot
-        )
         let gallery = try observeGallery(
             fixtureRoot: fixtureRoot,
             outputRoot: runtimeRoot.appendingPathComponent("gallery", isDirectory: true),
             defaultsSuite: defaultsSuite
         )
-        guard nativeConsumers.shortcut == shortcut,
-              nativeConsumers.hud.visible,
-              nativeConsumers.hud.detail == fixture.expectedReleaseHint,
-              nativeConsumers.hud.accessibilityLabel.contains(fixture.expectedReleaseHint),
-              [nativeConsumers.onboardingActive, nativeConsumers.settingsActive].allSatisfy({
-                  $0.status.contains(fixture.expectedDisplayName)
-                      && $0.recorderDisplay == fixture.expectedCompactName
-                      && $0.recorderAccessibilityValue == fixture.expectedCompactName
-              }),
-              [nativeConsumers.onboardingConflict, nativeConsumers.settingsConflict].allSatisfy({
-                  $0.status.contains(fixture.expectedDisplayName)
-                      && $0.recorderAccessibilityValue == fixture.expectedCompactName
-              }),
-              nativeConsumers.settingsActive.hint.contains(fixture.expectedDisplayName),
-              nativeConsumers.statusActive.title.contains(fixture.expectedDisplayName),
-              nativeConsumers.statusActive.menuTitle.contains(fixture.expectedDisplayName),
-              nativeConsumers.statusActive.toolTip.contains(fixture.expectedDisplayName),
-              nativeConsumers.statusError.title == "Fn Dictation Active - Open Settings…",
-              nativeConsumers.statusError.menuTitle == nativeConsumers.statusError.title,
-              nativeConsumers.statusError.toolTip.contains(fixture.expectedDisplayName),
-              nativeConsumers.statusError.toolTip.contains("Synthetic registration warning"),
-              nativeConsumers.statusConflict.title == "Fn Dictation Unavailable - Open Settings…",
-              nativeConsumers.statusConflict.menuTitle == nativeConsumers.statusConflict.title,
-              nativeConsumers.statusConflict.toolTip.contains(fixture.expectedDisplayName),
-              [nativeConsumers.statusActive, nativeConsumers.statusError, nativeConsumers.statusConflict]
-                .allSatisfy({ $0.accessibilityLabel.contains(fixture.expectedDisplayName) }) else {
-            throw ContractInputError(category: "native-consumer-copy-mismatch")
-        }
         guard gallery.shortcut == shortcut,
               let galleryActive = gallery.observations.first(where: { $0.row == "storage-ready-idle" }),
               let galleryConflict = gallery.observations.first(where: { $0.row == "shortcut-inactive-conflict" }),
@@ -260,7 +194,6 @@ final class ShortcutCopyScenario: NativeUIContractScenario {
             popoverGlyphs: popover.shortcut.glyphs,
             popoverActive: popoverActive,
             popoverConflict: popoverConflict,
-            nativeConsumers: nativeConsumers,
             gallery: gallery,
             conflictNoticeActionable: popoverConflict.noticeActionEnabled,
             mouseStartEnabled: popoverConflict.primaryEnabled,
@@ -392,28 +325,8 @@ final class ShortcutCopyScenario: NativeUIContractScenario {
 
     private static func buildRuntimeProducts() throws {
         try runProcess(executable: URL(fileURLWithPath: "/usr/bin/env"), arguments: [
-            "swift", "build", "--product", "Oigo"
-        ])
-        try runProcess(executable: URL(fileURLWithPath: "/usr/bin/env"), arguments: [
             "swift", "build", "--product", "OigoUIGallery"
         ])
-    }
-
-    private static func observeNativeConsumers(
-        fixtureRoot: URL,
-        outputRoot: URL
-    ) throws -> ConsumerReceipt {
-        let output = outputRoot.appendingPathComponent("oigo-consumers.json")
-        try runProcess(
-            executable: URL(fileURLWithPath: ".build/debug/Oigo"),
-            arguments: [
-                "--task-08-shortcut-probe",
-                fixtureRoot.appendingPathComponent("fixture.json").path,
-                output.path
-            ],
-            environment: ["OIGO_QA_MODE": "1"]
-        )
-        return try JSONDecoder().decode(ConsumerReceipt.self, from: Data(contentsOf: output))
     }
 
     private static func observeGallery(

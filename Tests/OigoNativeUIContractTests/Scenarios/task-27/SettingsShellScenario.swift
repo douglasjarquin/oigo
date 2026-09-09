@@ -35,7 +35,6 @@ final class SettingsShellScenario: NativeUIContractScenario {
             fixture: fixture,
             sourceFiles: [
                 repositoryRoot.appendingPathComponent("Sources/Oigo/OigoUtilityWindow.swift"),
-                repositoryRoot.appendingPathComponent("Sources/Oigo/Task8ControlObservation.swift"),
                 repositoryRoot.appendingPathComponent("Sources/Oigo/SettingsWindowController.swift")
             ],
             evidenceRoot: arguments.evidenceRoot

@@ -144,7 +144,6 @@ final class CrossSurfaceScenario: NativeUIContractScenario {
             "Sources/Oigo/UI/Presentation/OigoPopoverViewController.swift",
             "Sources/Oigo/StatusSurfaceController.swift",
             "Sources/Oigo/OigoUtilityWindow.swift",
-            "Sources/Oigo/Task8ControlObservation.swift",
             "Sources/Oigo/OnboardingShellMetrics.swift",
             "Sources/Oigo/OnboardingShellLayout.swift",
             "Sources/Oigo/OnboardingWindowController.swift",
