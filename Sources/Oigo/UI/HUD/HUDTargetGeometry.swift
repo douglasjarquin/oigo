@@ -135,6 +135,19 @@ public struct HUDPlacementInput: Equatable, Sendable {
         self.gap = gap
         self.screenInset = screenInset
     }
+
+    public func withPanelSize(_ panelSize: HUDSize) -> HUDPlacementInput {
+        HUDPlacementInput(
+            snapshot: snapshot,
+            currentGeneration: currentGeneration,
+            displays: displays,
+            frontmostDisplayID: frontmostDisplayID,
+            mainDisplayID: mainDisplayID,
+            panelSize: panelSize,
+            gap: gap,
+            screenInset: screenInset
+        )
+    }
 }
 
 public enum HUDPlacementStrategy: String, Equatable, Sendable {

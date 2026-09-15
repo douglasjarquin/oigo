@@ -15,7 +15,7 @@ public struct OigoHUDLifecycle: Equatable, Sendable {
     }
 
     public var previewUpdatesActive: Bool {
-        recordingTimerActive && state.map { OigoHUDShellPolicy.content(for: $0).allowsPreview } == true
+        recordingTimerActive && state.map(OigoHUDShellPolicy.allowsPreview) == true
     }
 
     public var resourceCount: Int {

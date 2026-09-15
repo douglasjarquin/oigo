@@ -1,3 +1,5 @@
+import Foundation
+
 public enum GlobalShortcutIntentEdge: Equatable, Sendable {
     case pressed
     case released
@@ -121,7 +123,7 @@ public struct GlobalShortcutIntentController: Sendable {
         }
 
         switch state {
-        case .preparing:
+        case .idle, .complete, .failed, .cancelled, .interrupted, .preparing:
             releaseLatched = true
             return .releaseLatched
         case .recording:

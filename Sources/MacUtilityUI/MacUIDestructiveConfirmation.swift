@@ -14,7 +14,11 @@ public enum MacUIDestructiveConfirmation {
         alert.informativeText = message
         let confirmButton = alert.addButton(withTitle: confirmTitle)
         confirmButton.hasDestructiveAction = true
-        alert.addButton(withTitle: cancelTitle)
+        confirmButton.setAccessibilityIdentifier("macui.destructive-confirm")
+        confirmButton.setAccessibilityLabel(confirmTitle)
+        let cancelButton = alert.addButton(withTitle: cancelTitle)
+        cancelButton.setAccessibilityIdentifier("macui.destructive-cancel")
+        cancelButton.setAccessibilityLabel(cancelTitle)
         return alert
     }
 

@@ -427,7 +427,6 @@ public enum OigoSettingsStoreError: Error, Equatable, LocalizedError, Sendable {
 
 public final class OigoSettingsStore {
     private static let key = "oigo.settings.v1"
-    private static let legacyShortcutDefault = ToggleShortcut(keyCode: 49, modifiers: 0x900)
     private let defaults: UserDefaults
     private let writeData: (Data) throws -> Void
 
@@ -456,9 +455,8 @@ public final class OigoSettingsStore {
 
         var settings = OigoSettings.default
         var loadedLegacyShortcut = false
-        if let data = defaults.data(forKey: "globalToggleShortcut"),
-           let shortcut = try? JSONDecoder().decode(ToggleShortcut.self, from: data) {
-            settings.globalShortcut = migrate(shortcut)
+        if defaults.data(forKey: "globalToggleShortcut") != nil {
+            settings.globalShortcut = ToggleShortcut.default
             loadedLegacyShortcut = true
         }
         if let rawMode = defaults.string(forKey: "transcriptCleanupMode"),
@@ -472,11 +470,7 @@ public final class OigoSettingsStore {
     }
 
     private func migrate(_ settings: OigoSettings) -> OigoSettings {
-        settings.with(globalShortcut: migrate(settings.globalShortcut))
-    }
-
-    private func migrate(_ shortcut: ToggleShortcut) -> ToggleShortcut {
-        shortcut == Self.legacyShortcutDefault ? .default : shortcut
+        settings
     }
 
     public func save(_ settings: OigoSettings) throws {

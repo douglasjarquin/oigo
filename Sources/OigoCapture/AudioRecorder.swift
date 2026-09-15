@@ -4,7 +4,7 @@ import CoreAudio
 import Foundation
 import OigoCore
 
-public enum AudioRecorderError: Error, CustomStringConvertible, Sendable {
+public enum AudioRecorderError: Error, CustomStringConvertible, DictationStartupFailureEvidence, Sendable {
     case alreadyRecording
     case notRecording
     case missingApplicationBundle
@@ -42,6 +42,10 @@ public enum AudioRecorderError: Error, CustomStringConvertible, Sendable {
         case .engineStartFailed(let reason):
             "audio engine could not start: " + reason
         }
+    }
+
+    public var dictationStartupFailureReason: String {
+        description
     }
 }
 
@@ -590,6 +594,11 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         guard Bundle.main.bundleIdentifier != nil else {
             throw AudioRecorderError.missingApplicationBundle
         }
+        guard AVAudioApplication.shared.recordPermission == .granted else {
+            throw AudioRecorderError.microphonePermission(
+                String(describing: AVAudioApplication.shared.recordPermission)
+            )
+        }
 
         lock.lock()
         let unavailable = recording || starting || finishing
@@ -627,10 +636,44 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         return recording
     }
 
+    private static let permissionRequestLock = NSLock()
+    nonisolated(unsafe) private static var permissionRequestInFlight = false
+    nonisolated(unsafe) private static var permissionRequestWaiters: [CheckedContinuation<Bool, Never>] = []
+
     public static func requestMicrophonePermission() async -> Bool {
-        await withCheckedContinuation { continuation in
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            return true
+        case .denied:
+            return false
+        case .undetermined:
+            break
+        @unknown default:
+            break
+        }
+        return await withCheckedContinuation { continuation in
+            permissionRequestLock.lock()
+            if AVAudioApplication.shared.recordPermission == .granted {
+                permissionRequestLock.unlock()
+                continuation.resume(returning: true)
+                return
+            }
+            permissionRequestWaiters.append(continuation)
+            guard !permissionRequestInFlight else {
+                permissionRequestLock.unlock()
+                return
+            }
+            permissionRequestInFlight = true
+            permissionRequestLock.unlock()
             AVAudioApplication.requestRecordPermission { granted in
-                continuation.resume(returning: granted)
+                permissionRequestLock.lock()
+                let waiters = permissionRequestWaiters
+                permissionRequestWaiters = []
+                permissionRequestInFlight = false
+                permissionRequestLock.unlock()
+                for waiter in waiters {
+                    waiter.resume(returning: granted)
+                }
             }
         }
     }
@@ -690,7 +733,10 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             )
         }
         let inputConfiguration = preparation.configuration
-        let sourceFormat = inputNode.inputFormat(forBus: 0)
+        let sourceFormat = try Self.tapSourceFormat(
+            from: inputNode,
+            selectedChannel: preparation.selectedChannel
+        )
         guard sourceFormat.sampleRate == inputConfiguration.sampleRate,
               sourceFormat.channelCount == inputConfiguration.channelCount else {
             throw AudioRecorderError.invalidInputFormat
@@ -772,7 +818,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
 
         do {
             let startupInterruption = try callbackDeliveryGate.performExclusively { () -> String? in
-                inputNode.installTap(onBus: 0, bufferSize: 1_024, format: nil) { [weak self] buffer, _ in
+                inputNode.installTap(onBus: 0, bufferSize: 1_024, format: sourceFormat) { [weak self] buffer, _ in
                     self?.handle(buffer, generation: recordingGeneration)
                 }
                 let observer = NotificationCenter.default.addObserver(
@@ -888,16 +934,10 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                     try inputRouter.route(inputNode: inputNode, to: device.deviceID)
                 },
                 inspect: { _ in
-                    guard let configuration = Self.inputConfiguration(for: inputNode) else {
-                        throw AudioRecorderError.invalidInputFormat
-                    }
-                    guard OigoInputChannelPolicy.isValid(
-                        channel,
-                        channelCount: Int(configuration.channelCount)
-                    ) else {
-                        throw AudioRecorderError.selectedChannelUnavailable
-                    }
-                    inputConfiguration = configuration
+                    inputConfiguration = try Self.inputConfiguration(
+                        for: inputNode,
+                        selectedChannel: channel
+                    )
                 }
             )
             guard let inputConfiguration else {
@@ -933,10 +973,14 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             }
         }
         try inputRouter.route(inputNode: inputNode, to: device.deviceID)
+        let configuration = try Self.inputConfiguration(
+            for: inputNode,
+            selectedChannel: preparedInput.selectedChannel
+        )
         lock.lock()
         activeDeviceUID = device.uid
         lock.unlock()
-        return (device, preparedInput.configuration)
+        return (device, configuration)
     }
 
     private func handleDeviceChange(_ devices: [OigoInputDevice], generation: UInt64) {
@@ -1017,18 +1061,56 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         let selectedChannel: Int
     }
 
-    private static func inputConfiguration(
-        for inputNode: AVAudioInputNode
-    ) -> InputConfiguration? {
-        let format = inputNode.inputFormat(forBus: 0)
+    private static func tapSourceFormat(
+        _ format: AVAudioFormat,
+        selectedChannel: Int
+    ) throws -> AVAudioFormat {
         guard format.sampleRate.isFinite,
               format.sampleRate > 0,
               format.channelCount > 0 else {
-            return nil
+            throw AudioRecorderError.invalidInputFormat
         }
+        guard OigoInputChannelPolicy.isValid(
+            selectedChannel,
+            channelCount: Int(format.channelCount)
+        ) else {
+            throw AudioRecorderError.selectedChannelUnavailable
+        }
+        return format
+    }
+
+    private static func tapSourceFormat(
+        from inputNode: AVAudioInputNode,
+        selectedChannel: Int
+    ) throws -> AVAudioFormat {
+        try tapSourceFormat(
+            inputNode.outputFormat(forBus: 0),
+            selectedChannel: selectedChannel
+        )
+    }
+
+    private static func inputConfiguration(
+        for inputNode: AVAudioInputNode,
+        selectedChannel: Int
+    ) throws -> InputConfiguration {
+        let format = try tapSourceFormat(from: inputNode, selectedChannel: selectedChannel)
         return InputConfiguration(
             sampleRate: format.sampleRate,
             channelCount: format.channelCount
+        )
+    }
+
+    @_spi(Testing)
+    public static func testRoutedTapFormat(
+        outputFormat: AVAudioFormat,
+        selectedChannel: Int,
+        installTap: (AVAudioFormat) throws -> Void = { _ in }
+    ) throws -> AudioCaptureFormat {
+        let format = try tapSourceFormat(outputFormat, selectedChannel: selectedChannel)
+        try installTap(format)
+        return AudioCaptureFormat(
+            sampleRate: format.sampleRate,
+            channelCount: Int(format.channelCount)
         )
     }
 

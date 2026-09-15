@@ -11,6 +11,7 @@ REQUIRED_PRODUCTION_ROOTS = {
     "Sources/OigoTranscription": "OigoTranscription",
     "Sources/OigoInsertion": "OigoInsertion",
     "Sources/OigoHotKey": "OigoHotKey",
+    "Sources/Oigo/UI/Identity": "OigoIdentity",
 }
 
 OPTIONAL_DECLARED_ROOTS = {

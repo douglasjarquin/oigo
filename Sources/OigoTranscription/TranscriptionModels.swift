@@ -23,7 +23,7 @@ public enum SpeechAssetState: Equatable, Sendable, CustomStringConvertible {
 }
 
 @available(macOS 26.0, *)
-public enum TranscriptionError: Error, Equatable, Sendable, CustomStringConvertible {
+public enum TranscriptionError: Error, Equatable, Sendable, CustomStringConvertible, DictationStartupFailureEvidence {
     case unsupportedLocale(String)
     case speechAssetsUnavailable(String)
     case speechAssetsInstalling(String)
@@ -86,6 +86,10 @@ public enum TranscriptionError: Error, Equatable, Sendable, CustomStringConverti
         case .invalidSessionState(let state):
             return "saved-audio retry requires a failed, interrupted, or retrying session, not " + state.rawValue
         }
+    }
+
+    public var dictationStartupFailureReason: String {
+        description
     }
 }
 

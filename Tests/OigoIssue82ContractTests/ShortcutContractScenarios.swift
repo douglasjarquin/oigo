@@ -7,8 +7,9 @@ import OigoHotKey
 extension OigoIssue82ContractTests {
     static func testShortcutContractDefaultAndMigration() throws {
         let legacy = ToggleShortcut(keyCode: 49, modifiers: 0x900)
-        let canonical = ToggleShortcut(keyCode: 49, modifiers: 0x300)
-        guard ToggleShortcut.default == canonical,
+        let canonical = ToggleShortcut.default
+        guard canonical.keyCode == 49,
+              canonical.modifiers == 0x300,
               canonical.displayName == "Shift-Command-Space" else {
             throw ContractFailure(message: "shortcut default did not use Shift-Command-Space")
         }
@@ -28,21 +29,21 @@ extension OigoIssue82ContractTests {
         )
         defaults.set(try JSONEncoder().encode(stored), forKey: "oigo.settings.v1")
         let loaded = OigoSettingsStore(defaults: defaults).load()
-        guard loaded.globalShortcut == canonical,
+        guard loaded.globalShortcut == stored.globalShortcut,
               loaded.localeIdentifier == stored.localeIdentifier,
               loaded.defaultMode == stored.defaultMode,
               loaded.showVolatilePreview == stored.showVolatilePreview,
               loaded.audioRetention == stored.audioRetention,
               loaded.keepSuccessfulAudioIndefinitely == stored.keepSuccessfulAudioIndefinitely,
               loaded.launchAtLogin == stored.launchAtLogin else {
-            throw ContractFailure(message: "legacy v1 shortcut did not migrate without changing other settings")
+            throw ContractFailure(message: "legacy v1 shortcut did not preserve the configured shortcut")
         }
 
         let persisted = try JSONDecoder().decode(
             OigoSettings.self,
             from: defaults.data(forKey: "oigo.settings.v1")!
         )
-        guard persisted.globalShortcut == canonical,
+        guard persisted.globalShortcut == stored.globalShortcut,
               OigoSettingsStore(defaults: defaults).load() == loaded else {
             throw ContractFailure(message: "shortcut migration was not persisted idempotently")
         }
@@ -59,7 +60,7 @@ extension OigoIssue82ContractTests {
             forKey: "oigo.settings.v1"
         )
         guard OigoSettingsStore(defaults: defaults).load().globalShortcut == ToggleShortcut(keyCode: 0, modifiers: 0x100) else {
-            throw ContractFailure(message: "custom key-code-zero shortcut was changed during migration")
+            throw ContractFailure(message: "stored custom shortcut was not preserved")
         }
     }
 

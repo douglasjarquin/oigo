@@ -20,7 +20,7 @@ public final class ShortcutRecorderControl: NSControl {
     }
 
     public override var acceptsFirstResponder: Bool {
-        true
+        isEnabled
     }
 
     public init(shortcut: ToggleShortcut) {
@@ -38,10 +38,16 @@ public final class ShortcutRecorderControl: NSControl {
     }
 
     public func beginRecording() {
+        guard isEnabled else {
+            return
+        }
+        if let window, window.firstResponder !== self, !window.makeFirstResponder(self) {
+            return
+        }
         shortcutBeforeRecording = shortcut
         validationError = nil
         isRecording = true
-        needsDisplay = true
+        updatePresentation()
     }
 
     public func cancelRecording() {
@@ -51,8 +57,17 @@ public final class ShortcutRecorderControl: NSControl {
         shortcut = shortcutBeforeRecording
         validationError = nil
         isRecording = false
+        updatePresentation()
+    }
+
+    public func clearShortcut() {
+        shortcutBeforeRecording = .default
+        shortcut = .default
+        validationError = nil
+        isRecording = false
         onCandidateChange?(shortcut)
-        needsDisplay = true
+        sendAction(action, to: target)
+        updatePresentation()
     }
 
     public func restoreCandidate(_ shortcut: ToggleShortcut) {
@@ -60,15 +75,28 @@ public final class ShortcutRecorderControl: NSControl {
         self.shortcut = shortcut
         validationError = nil
         isRecording = false
-        needsDisplay = true
+        updatePresentation()
     }
 
     public override func mouseDown(with event: NSEvent) {
         _ = event
-        if let window, !window.makeFirstResponder(self) {
+        guard isEnabled else {
             return
         }
         beginRecording()
+    }
+
+    public override func resignFirstResponder() -> Bool {
+        guard super.resignFirstResponder() else {
+            return false
+        }
+        cancelRecording()
+        return true
+    }
+
+    public override func cancelOperation(_ sender: Any?) {
+        _ = sender
+        cancelRecording()
     }
 
     public override func keyDown(with event: NSEvent) {
@@ -100,7 +128,8 @@ public final class ShortcutRecorderControl: NSControl {
             validationError = nil
             isRecording = false
             onCandidateChange?(candidate)
-            needsDisplay = true
+            sendAction(action, to: target)
+            updatePresentation()
         case .conflict(let message), .invalid(let message):
             reject(message)
         }
@@ -108,16 +137,31 @@ public final class ShortcutRecorderControl: NSControl {
 
     public override func draw(_ dirtyRect: NSRect) {
         _ = dirtyRect
-        let background = isRecording ? NSColor.selectedControlColor : NSColor.controlBackgroundColor
+        let background: NSColor
+        if isRecording {
+            background = NSColor.selectedControlColor
+        } else if isEnabled {
+            background = NSColor.controlBackgroundColor
+        } else {
+            background = NSColor.controlBackgroundColor.withAlphaComponent(0.55)
+        }
         background.setFill()
         bounds.insetBy(dx: 1, dy: 1).fill()
 
-        NSColor.separatorColor.setStroke()
+        let borderColor = isEnabled ? NSColor.separatorColor : NSColor.disabledControlTextColor
+        borderColor.setStroke()
         let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 5, yRadius: 5)
         border.lineWidth = 1
         border.stroke()
 
-        let textColor = isRecording ? NSColor.selectedControlTextColor : NSColor.labelColor
+        let textColor: NSColor
+        if isRecording {
+            textColor = NSColor.selectedControlTextColor
+        } else if isEnabled {
+            textColor = NSColor.labelColor
+        } else {
+            textColor = NSColor.disabledControlTextColor
+        }
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
             .foregroundColor: textColor
@@ -134,6 +178,9 @@ public final class ShortcutRecorderControl: NSControl {
     private func configureAppearance() {
         wantsLayer = true
         toolTip = "Click to record a global shortcut"
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("Global shortcut")
+        updatePresentation()
     }
 
     private func carbonModifiers(for flags: NSEvent.ModifierFlags) -> UInt32 {
@@ -156,6 +203,11 @@ public final class ShortcutRecorderControl: NSControl {
     private func reject(_ message: String) {
         validationError = message
         onValidationError?(message)
+        updatePresentation()
+    }
+
+    private func updatePresentation() {
+        setAccessibilityValue(displayValue)
         needsDisplay = true
     }
 }

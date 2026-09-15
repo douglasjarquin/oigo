@@ -33,16 +33,17 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private var transcriptLoadGeneration: UInt64 = 0
     private var cleanAgainOverride = true
     private var toolbarItemsByIdentifier: [NSToolbarItem.Identifier: NSToolbarItem] = [:]
-    private let moreMenu = NSMenu(title: "More")
-    private let loadMoreButton = NSButton(title: "Load More", target: nil, action: nil)
-    private let loadingLabel = NSTextField(labelWithString: "")
-    private let tableView = NSTableView()
-    private let detailTitle = NSTextField(labelWithString: "No session selected")
-    private let detailStatus = NSTextField(labelWithString: "")
-    private let transcriptView = NSTextView()
+    weak var mainRegionView: NSSplitView?
+    let moreMenu = NSMenu(title: "More")
+    let loadMoreButton = NSButton(title: "Load More", target: nil, action: nil)
+    let loadingLabel = NSTextField(labelWithString: "")
+    let tableView = NSTableView()
+    let detailTitle = NSTextField(labelWithString: "No session selected")
+    let detailStatus = NSTextField(labelWithString: "")
+    let transcriptView = NSTextView()
     private let failureLabel = NSTextField(labelWithString: "")
     private let messageLabel = NSTextField(labelWithString: "")
-    private let transcriptVersionPopup = NSPopUpButton()
+    let transcriptVersionPopup = NSPopUpButton()
 
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -113,7 +114,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         toolbar.delegate = self
         toolbar.allowsUserCustomization = false
         toolbar.displayMode = .iconAndLabel
+        toolbar.sizeMode = .regular
         window.toolbar = toolbar
+        window.setContentSize(NSSize(width: OigoHistoryWorkspacePolicy.defaultWidth, height: OigoHistoryWorkspacePolicy.defaultHeight))
         configureWindow()
     }
 
@@ -157,6 +160,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             selectedTranscriptSource = .raw
             transcriptVersionPopup.selectItem(at: 0)
             tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+            updateDetail(for: selectedEntry)
         } else {
             preservedSelectionID = nil
             updateDetail(for: nil)
@@ -266,11 +270,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                 + "\n" + projection.statusLabel
                 + "\n" + projection.summary
         )
-        label.font = .systemFont(ofSize: 12)
+        label.font = .systemFont(ofSize: 13)
         label.textColor = .labelColor
         label.lineBreakMode = .byTruncatingTail
         label.maximumNumberOfLines = 3
         label.setAccessibilityLabel(projection.accessibilityLabel)
+        label.setAccessibilityIdentifier("oigo.history.row.\(entries[row].id.uuidString)")
         return label
     }
 
@@ -306,7 +311,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     @objc private func pasteAgainAction() {
         guard let selectedEntry else { return }
-        pasteAgain(selectedEntry)
+        if selectedTranscriptSource == .processed {
+            pasteCleanAgain(selectedEntry)
+        } else {
+            pasteAgain(selectedEntry)
+        }
     }
 
     @objc private func pasteCleanAgainAction() {
@@ -380,33 +389,42 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         splitView.dividerStyle = .thin
         splitView.autosaveName = "Oigo.HistorySplit"
 
-        let listTitle = NSTextField(labelWithString: "Sessions")
-        listTitle.font = .boldSystemFont(ofSize: 15)
-        listTitle.alignment = .left
         let listScrollView = NSScrollView()
         listScrollView.hasVerticalScroller = true
         listScrollView.hasHorizontalScroller = false
         listScrollView.autohidesScrollers = true
-        tableView.frame = NSRect(x: 0, y: 0, width: 276, height: 400)
+        tableView.frame = NSRect(x: 0, y: 0, width: 324, height: 400)
         tableView.autoresizingMask = [.width]
         listScrollView.documentView = tableView
 
         configureTable()
-        let listStack = NSStackView(views: [listTitle, listScrollView])
+        let listStack = NSStackView(views: [listScrollView])
         listStack.orientation = .vertical
-        listStack.spacing = 8
-        listStack.edgeInsets = NSEdgeInsets(top: 20, left: 12, bottom: 20, right: 12)
+        listStack.spacing = 0
+        listStack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        listStack.setAccessibilityElement(true)
+        listStack.setAccessibilityIdentifier("oigo.history.list")
+        listStack.setAccessibilityLabel("History sessions")
 
         let detailView = makeDetailView()
+        detailView.setAccessibilityElement(true)
+        detailView.setAccessibilityIdentifier("oigo.history.detail")
+        detailView.setAccessibilityLabel("Selected history session")
         splitView.addArrangedSubview(listStack)
         splitView.addArrangedSubview(detailView)
+        mainRegionView = splitView
         splitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
-        splitView.setPosition(300, ofDividerAt: 0)
+        splitView.setAccessibilityElement(true)
+        splitView.setAccessibilityIdentifier("oigo.history.split")
+        splitView.setAccessibilityLabel("History list and detail")
+        splitView.setPosition(340, ofDividerAt: 0)
 
         loadMoreButton.target = self
         loadMoreButton.action = #selector(loadMoreAction)
         loadMoreButton.bezelStyle = .rounded
         loadingLabel.textColor = .secondaryLabelColor
+        loadMoreButton.setAccessibilityIdentifier("oigo.history.load-more")
+        loadingLabel.setAccessibilityIdentifier("oigo.history.loading")
         let footer = NSStackView(views: [loadMoreButton, loadingLabel])
         footer.orientation = .horizontal
         footer.alignment = .centerY
@@ -423,8 +441,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             root.topAnchor.constraint(equalTo: contentView.topAnchor),
             root.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             splitView.heightAnchor.constraint(greaterThanOrEqualToConstant: 400),
-            listStack.widthAnchor.constraint(equalToConstant: 300)
+            footer.heightAnchor.constraint(equalToConstant: 44),
+            listStack.widthAnchor.constraint(equalToConstant: 340)
         ])
+        contentView.setAccessibilityIdentifier("oigo.history.content")
+        contentView.setAccessibilityLabel("History")
         showMessage("")
         updateLoadingChrome()
     }
@@ -468,23 +489,35 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         tableView.headerView = NSTableHeaderView()
         tableView.selectionHighlightStyle = .regular
         tableView.allowsMultipleSelection = false
+        tableView.setAccessibilityElement(true)
+        tableView.setAccessibilityIdentifier("oigo.history.table")
+        tableView.setAccessibilityLabel("History sessions")
     }
 
     private func makeDetailView() -> NSView {
-        detailTitle.font = .boldSystemFont(ofSize: 18)
+        detailTitle.font = .systemFont(ofSize: 20, weight: .semibold)
+        detailTitle.setAccessibilityIdentifier("oigo.history.detail-title")
+        detailTitle.setAccessibilityLabel("History session date")
         detailTitle.lineBreakMode = .byTruncatingTail
         detailStatus.textColor = .secondaryLabelColor
+        detailStatus.font = .systemFont(ofSize: 13)
+        detailStatus.setAccessibilityIdentifier("oigo.history.detail-status")
+        detailStatus.setAccessibilityLabel("History session status")
         failureLabel.textColor = .systemOrange
+        failureLabel.setAccessibilityIdentifier("oigo.history.failure")
         failureLabel.lineBreakMode = .byWordWrapping
         failureLabel.maximumNumberOfLines = 3
         failureLabel.preferredMaxLayoutWidth = 440
         messageLabel.textColor = .secondaryLabelColor
+        messageLabel.setAccessibilityIdentifier("oigo.history.message")
         messageLabel.lineBreakMode = .byWordWrapping
         messageLabel.maximumNumberOfLines = 2
 
         transcriptView.isEditable = false
         transcriptView.isSelectable = true
-        transcriptView.font = .systemFont(ofSize: 14)
+        transcriptView.font = .systemFont(ofSize: 13)
+        transcriptView.setAccessibilityIdentifier("oigo.history.transcript")
+        transcriptView.setAccessibilityLabel("Transcript")
         transcriptView.textContainerInset = NSSize(width: 12, height: 12)
         transcriptView.backgroundColor = .textBackgroundColor
         let transcriptScroll = NSScrollView()
@@ -498,13 +531,15 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         transcriptVersionPopup.action = #selector(transcriptVersionAction)
         transcriptVersionPopup.controlSize = .small
         transcriptVersionPopup.toolTip = "Choose which durable transcript version to display"
+        transcriptVersionPopup.setAccessibilityIdentifier("oigo.history.transcript-version")
+        transcriptVersionPopup.setAccessibilityLabel("Transcript version")
 
         let stack = NSStackView(
             views: [detailTitle, detailStatus, failureLabel, transcriptVersionPopup, transcriptScroll, messageLabel]
         )
         stack.orientation = .vertical
-        stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 20, left: 16, bottom: 20, right: 20)
+        stack.spacing = 12
+        stack.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24)
         stack.alignment = .leading
         stack.translatesAutoresizingMaskIntoConstraints = false
         transcriptVersionPopup.translatesAutoresizingMaskIntoConstraints = false
@@ -563,22 +598,35 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         let generation = transcriptLoadGeneration
         let source = selectedTranscriptSource
         loadTranscript(entry, source) { [weak self] result in
-            Task { @MainActor in
-                guard let self,
-                      generation == self.transcriptLoadGeneration,
-                      self.selectedEntry?.id == entry.id else {
-                    return
+            if Thread.isMainThread {
+                MainActor.assumeIsolated {
+                    self?.applyTranscriptResult(result, for: entry, generation: generation)
                 }
-                switch result {
-                case .success(let transcript):
-                    self.transcriptView.string = transcript
-                case .failure:
-                    self.transcriptView.string = "Transcript unavailable."
-                    self.showMessage("Could not load the selected transcript.")
+            } else {
+                Task { @MainActor [weak self] in
+                    self?.applyTranscriptResult(result, for: entry, generation: generation)
                 }
             }
         }
         setActionButtons(enabled: true, entry: entry)
+    }
+
+    private func applyTranscriptResult(
+        _ result: Result<String, Error>,
+        for entry: SessionHistoryEntry,
+        generation: UInt64
+    ) {
+        guard generation == transcriptLoadGeneration,
+              selectedEntry?.id == entry.id else {
+            return
+        }
+        switch result {
+        case .success(let transcript):
+            transcriptView.string = transcript
+        case .failure:
+            transcriptView.string = "Transcript unavailable."
+            showMessage("Could not load the selected transcript.")
+        }
     }
 
     private func setActionButtons(enabled: Bool, entry: SessionHistoryEntry?) {
@@ -686,8 +734,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             ("Reapply Dictionary", #selector(reapplyDictionaryAction)),
             ("Retry Transcription", #selector(retryTranscriptionAction)),
             ("Reveal Recording", #selector(revealRecordingAction)),
-            ("Delete Session", #selector(deleteSessionAction)),
-            ("Run Idle Maintenance", #selector(runIdleMaintenanceAction))
+            ("Delete Session", #selector(deleteSessionAction))
         ]
         for (title, action) in items {
             if action == nil {
@@ -695,6 +742,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             } else {
                 let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
                 item.target = self
+                item.identifier = NSUserInterfaceItemIdentifier(
+                    "oigo.history.action." + title.lowercased().replacingOccurrences(of: " ", with: "-")
+                )
                 moreMenu.addItem(item)
             }
         }
@@ -743,9 +793,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         moreMenu.item(withTitle: "Retry Transcription")?.isEnabled = entry != nil
             && resolvedCapabilities?.savedAudioRetryAvailable == true
             && (commandAvailability?.canRetry ?? true)
-        moreMenu.item(withTitle: "Reveal Recording")?.isEnabled = entry != nil
+        moreMenu.item(withTitle: "Reveal Recording")?.isEnabled = entry.map {
+            FileManager.default.fileExists(atPath: $0.session.audioURL.path)
+        } == true
         moreMenu.item(withTitle: "Delete Session")?.isEnabled = entry?.session.metadata.state.isUnfinished == false
-        moreMenu.item(withTitle: "Run Idle Maintenance")?.isEnabled = commandAvailability?.canRunMaintenance ?? true
     }
 
     private static func durationText(_ duration: TimeInterval?) -> String {
@@ -788,20 +839,6 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             "Secure field"
         case .failed:
             "Paste failed"
-        }
-    }
-}
-
-@MainActor
-final class OigoUtilityWindow: NSWindow {
-    var onEscape: (() -> Void)?
-
-    override func cancelOperation(_ sender: Any?) {
-        _ = sender
-        if let onEscape {
-            onEscape()
-        } else {
-            super.cancelOperation(sender)
         }
     }
 }

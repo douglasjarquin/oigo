@@ -63,7 +63,7 @@ final class GalleryComponentsScenario: NativeUIContractScenario {
     }
 
     override class func run(arguments: ContractArguments) throws {
-        guard arguments.defaultsSuite == "com.oigo.qa.task7" else {
+        guard arguments.defaultsSuite == "com.oigo.qa.task07" else {
             throw ContractInputError(category: "invalid-defaults-suite")
         }
         let fixture = try loadFixture(from: arguments.fixtureRoot)

@@ -6,6 +6,7 @@ public enum OigoStatusIdentityVariant: String, Equatable, Sendable {
     case processing
     case recording
     case attention
+    case inactive
 }
 
 public enum OigoStatusIdentityShapeRole: String, Equatable, Sendable {
@@ -13,6 +14,7 @@ public enum OigoStatusIdentityShapeRole: String, Equatable, Sendable {
     case earProgressRing = "ear-progress-ring"
     case earRecordDot = "red-ear-bottom-record-dot"
     case earAttentionDot = "ear-top-attention-dot"
+    case earInactive = "ear-inactive"
 }
 
 public enum OigoStatusIdentityColorRole: String, Equatable, Sendable {
@@ -101,9 +103,14 @@ public struct OigoStatusIdentityArtwork: Equatable, Sendable {
             shapeRole = .earAttentionDot
             colorRole = .attention
             isTemplate = false
-        case .outline, .hidden:
+        case .outline:
             variant = .idle
             shapeRole = .earOutline
+            colorRole = .label
+            isTemplate = true
+        case .hidden:
+            variant = .inactive
+            shapeRole = .earInactive
             colorRole = .label
             isTemplate = true
         }
@@ -233,7 +240,7 @@ public struct OigoStatusIdentityArtwork: Equatable, Sendable {
         bounds.fill(using: .sourceIn)
 
         switch shapeRole {
-        case .earOutline:
+        case .earOutline, .earInactive:
             break
         case .earProgressRing:
             let ring = NSBezierPath()

@@ -10,14 +10,19 @@ public final class MacUIPermissionRow: NSStackView {
         actionTitle: String = "Open System Settings",
         action: @escaping @MainActor () -> Void
     ) {
-        let (button, target) = makeMacUIActionButton(title: actionTitle, action: action)
+        let (button, target) = makeMacUIActionButton(
+            title: actionTitle,
+            action: action,
+            identifier: MacUIAccessibility.identifier(prefix: "macui.permission-action", label: name)
+        )
         actionTarget = target
         super.init(frame: .zero)
         orientation = .horizontal
         alignment = .centerY
-        spacing = 12
+        spacing = MacUITokens.Spacing.row
         addArrangedSubview(MacUIStatusRow(content: status, title: name, trailingValue: status.label))
         addArrangedSubview(button)
+        MacUIAccessibility.configure(self, identifier: MacUIAccessibility.identifier(prefix: "macui.permission-row", label: name), label: name)
     }
 
     @available(*, unavailable)
@@ -36,14 +41,19 @@ public final class MacUIStorageHealthRow: NSStackView {
         actionTitle: String = "Retry",
         action: @escaping @MainActor () -> Void
     ) {
-        let (button, target) = makeMacUIActionButton(title: actionTitle, action: action)
+        let (button, target) = makeMacUIActionButton(
+            title: actionTitle,
+            action: action,
+            identifier: MacUIAccessibility.identifier(prefix: "macui.storage-action", label: name)
+        )
         actionTarget = target
         super.init(frame: .zero)
         orientation = .horizontal
         alignment = .centerY
-        spacing = 12
+        spacing = MacUITokens.Spacing.row
         addArrangedSubview(MacUIStatusRow(content: status, title: name, trailingValue: status.label))
         addArrangedSubview(button)
+        MacUIAccessibility.configure(self, identifier: MacUIAccessibility.identifier(prefix: "macui.storage-row", label: name), label: name)
     }
 
     @available(*, unavailable)

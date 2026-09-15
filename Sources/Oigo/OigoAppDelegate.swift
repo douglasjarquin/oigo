@@ -4,6 +4,7 @@ import ApplicationServices
 import Darwin
 import Foundation
 import OigoCore
+import OigoIdentity
 import OigoCapture
 import OigoTranscription
 import OigoInsertion
@@ -55,7 +56,8 @@ private enum OigoHUDPublication {
         generation: UInt64,
         geometry: HUDTargetGeometrySnapshot?,
         startedAt: Date?,
-        preview: String
+        preview: String,
+        shortcutCopy: OigoShortcutCopy
     )
     case hidden(generation: UInt64?)
 }
@@ -71,6 +73,55 @@ private struct OigoAppDelegatePresentationSnapshot {
     let hud: OigoHUDPublication
 }
 
+struct OigoSettingsShortcutCallbacks {
+    let validate: (ToggleShortcut) -> OigoShortcutValidation
+    let saveShortcut: (ToggleShortcut) -> OigoShortcutValidation
+    let saveSettings: (OigoSettings) -> String?
+}
+
+struct OigoSettingsShortcutOwnerBundle {
+    let ownerIdentity: String
+    let callbacks: OigoSettingsShortcutCallbacks
+    let state: () -> OigoSettingsShortcutOwnerState
+}
+
+struct OigoSettingsShortcutOwnerState {
+    let ownerIdentity: String
+    let persistedSettings: OigoSettings
+    let committedShortcut: ToggleShortcut
+    let registrationActive: Bool
+}
+
+enum OigoKeyboardStartupBoundaryFailure: Error, DictationStartupFailureEvidence {
+    case speechUnavailable
+    case speechFailed
+    case audioStartFailed
+
+    var dictationStartupFailureReason: String {
+        switch self {
+        case .speechUnavailable:
+            "speech recognition is unavailable"
+        case .speechFailed:
+            "speech recognition failed to start"
+        case .audioStartFailed:
+            "audio capture failed to start"
+        }
+    }
+}
+
+struct OigoKeyboardStartupAudioBoundary {
+    let capture: any AudioCapturing
+    let setInputSelection: (OigoInputSelection, Int) -> Void
+    let captureFormat: () throws -> AudioCaptureFormat
+}
+
+struct OigoKeyboardStartupSpeechBoundary {
+    let controller: any TranscriptionController
+    let configuredLocaleIdentifier: String
+    let installAssets: () async throws -> String?
+    let applyRecognitionContext: () -> Void
+}
+
 @available(macOS 26.0, *)
 @MainActor
 final class OigoAppDelegate: NSObject, NSApplicationDelegate {
@@ -80,36 +131,48 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private let deviceInventoryMonitor = SystemAudioDeviceMonitor()
     private lazy var recorder = AudioRecorder(deviceMonitor: deviceMonitor)
     private var transcription: TranscriptionService?
-    private lazy var insertion = InsertionService()
+    private var speechAssetReadiness: OigoLocaleAssetStatus = .checking
+    private var speechAssetCheckTask: Task<Void, Never>?
+    private let insertion: InsertionService
     private let playback = AudioPlayback()
-    private let shortcutRegistrar = CarbonGlobalShortcutRegistrar()
     private lazy var shortcutBridge = GlobalShortcutOperationBridge(
         state: { [weak self] in self?.coordinator.state ?? .failed },
         start: { [weak self] in self?.startKeyboardDictation() },
         stop: { [weak self] in self?.requestKeyboardStop() },
         feedback: { [weak self] result in self?.showShortcutFeedback(result) }
     )
-    private lazy var shortcutConfiguration = ShortcutConfigurationTransaction(
+    private lazy var productionShortcutBridge = GlobalShortcutProductionBridge(
+        operations: shortcutBridge
+    )
+    private lazy var shortcutRegistration = AppShortcutRegistrationController(
         committedShortcut: settings.globalShortcut,
         registrar: shortcutRegistrar,
-        onEvent: { [weak self] event in self?.handleGlobalShortcut(event) }
+        onRegisteredEvent: { [weak self] event in self?.handleGlobalShortcut(event) }
     )
-    private lazy var statusSurface = StatusSurfaceController { [weak self] command in
-        switch command {
-        case .history:
-            self?.openHistory()
-        case .settings:
-            self?.openSettings()
-        case .quit:
-            self?.quit()
-        case .popover(let command):
-            self?.performPopoverCommand(command)
+    private lazy var statusSurface = StatusSurfaceController(
+        onPopoverWillShow: { [weak self] in
+            self?.refreshPermissionPresentation()
+        },
+        commandHandler: { [weak self] command in
+            switch command {
+            case .history:
+                self?.openHistory()
+            case .settings:
+                self?.openSettings()
+            case .quit:
+                self?.quit()
+            case .popover(let command):
+                self?.performPopoverCommand(command)
+            }
         }
-    }
-    private let settingsStore = OigoSettingsStore()
-    private let onboardingStore = OigoOnboardingStore()
+    )
+    private let settingsStore: OigoSettingsStore
+    private let onboardingStore: OigoOnboardingStore
+    private let shortcutRegistrar: any GlobalShortcutRegistrationClient
+    private let shortcutStorageReady: (() -> Bool)?
+    private let settingsPermissionStates: (() -> (OigoPermissionState, OigoPermissionState))?
     private let storageCapability: DurableSessionCapability
-    private let launchAtLoginController = OigoLaunchAtLoginController(client: SystemLaunchAtLoginClient())
+    private let launchAtLoginController: OigoLaunchAtLoginController
     private let transcriptCleanupMetrics = TranscriptCleanupMetrics()
     private lazy var transcriptCleanup: TranscriptCleanupCoordinator = {
         let metrics = transcriptCleanupMetrics
@@ -135,7 +198,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private var historyCursor: SessionHistoryCursor?
     private var historyHasMore = false
     private var statusItem: NSStatusItem?
-    private var settings = OigoSettingsStore().load()
+    private var settings: OigoSettings
     private var targetSnapshot: InsertionTargetSnapshot?
     private var targetSnapshotGeneration: UInt64?
     private var insertionDisplayStatus: OigoHUDProcessingState?
@@ -212,12 +275,29 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     )
     private var finishRequestedAfterStart = false
     private var shortcutFeedbackDetail: String?
+    private var lastKeyboardStartupGeneration: UInt64 = 0
+    private var lastKeyboardTerminalizedGeneration: UInt64?
     private var workspaceObservers: [NSObjectProtocol] = []
-    private var shortcutRegistered = false
-
     init(
-        storageBootstrapper: any DurableSessionBootstrapping = DurableSessionBootstrapper()
+        storageBootstrapper: any DurableSessionBootstrapping = DurableSessionBootstrapper(),
+        settingsStore: OigoSettingsStore? = nil,
+        onboardingStore: OigoOnboardingStore? = nil,
+        shortcutRegistrar: (any GlobalShortcutRegistrationClient)? = nil,
+        shortcutStorageReady: (() -> Bool)? = nil,
+        settingsPermissionStates: (() -> (OigoPermissionState, OigoPermissionState))? = nil,
+        launchAtLoginController: OigoLaunchAtLoginController? = nil,
+        insertion: InsertionService? = nil
     ) {
+        let settingsStore = settingsStore ?? OigoSettingsStore()
+        self.settingsStore = settingsStore
+        self.onboardingStore = onboardingStore ?? OigoOnboardingStore()
+        self.shortcutRegistrar = shortcutRegistrar ?? CarbonGlobalShortcutRegistrar()
+        self.shortcutStorageReady = shortcutStorageReady
+        self.settingsPermissionStates = settingsPermissionStates
+        self.insertion = insertion ?? InsertionService()
+        self.launchAtLoginController = launchAtLoginController
+            ?? OigoLaunchAtLoginController(client: SystemLaunchAtLoginClient())
+        settings = settingsStore.load()
         storageCapability = DurableSessionCapability(bootstrapper: storageBootstrapper)
         super.init()
         storageCapability.onChange = { [weak self] in
@@ -252,11 +332,26 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         updateSurface()
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        _ = notification
+        refreshPermissionPresentation()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
+        speechAssetCheckTask?.cancel()
+        speechAssetCheckTask = nil
         presentationPublicationFence.shutdown()
-        unregisterShortcut()
-        shortcutBridge.reset()
+        do {
+            try shortcutRegistration.shutdown()
+        } catch {
+            let detail = "Global shortcut teardown failed: \(error)"
+            shortcutFeedbackDetail = detail
+            failureDetail = detail
+            lastFailureCode = "shortcut-teardown"
+            FileHandle.standardError.write(Data(("ERROR shortcut-teardown: \(error)\n").utf8))
+        }
+        resetShortcutInput()
         let storageWasChecking = storageCapability.health == .checking
         storageCapability.shutdown()
         deviceInventoryMonitor.stop()
@@ -300,10 +395,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishApplicationTermination() async {
         operationGate.cancelCurrent()
-        await coordinator.cancelActiveWork(reason: "application shutdown")
         if coordinator.hasActiveTranscription {
             await coordinator.shutdownWithTranscription()
         } else {
+            await coordinator.cancelActiveWork(reason: "application shutdown")
             await coordinator.shutdownAndWait()
         }
     }
@@ -314,15 +409,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         if let settingsWindow, settingsWindow.window?.isVisible == true {
-            settingsWindow.showWindow(nil)
-            settingsWindow.window?.makeKeyAndOrderFront(nil)
+            settingsWindow.showAndFocus()
             return
         }
         presentSettings(supportedLocales: [])
     }
 
-    private func presentSettings(supportedLocales: [String]) {
+    @discardableResult
+    func presentSettings(supportedLocales: [String]) -> SettingsWindowController {
         let sessionID = UUID()
+        let shortcutOwner = settingsShortcutOwnerBundle()
         let window = SettingsWindowController(
             settings: settings,
             inputDevices: currentInputDevices(),
@@ -342,14 +438,15 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 self?.launchAtLoginController.openLoginItemsSettings()
             },
             registrationStatus: { [weak self] in
-                self?.shortcutRegistrar.status ?? .inactive("Global shortcut is not registered")
+                self?.shortcutRegistration.registrationStatus
+                    ?? .inactive("Global shortcut is not registered")
             },
             registrationError: { [weak self] in
-                self?.shortcutConfiguration.lastError ?? self?.shortcutRegistrar.lastError
+                self?.shortcutRegistration.lastError
             },
-            save: { [weak self] settings in
-                self?.applySettings(settings) ?? "Oigo is no longer available."
-            },
+            validateShortcut: shortcutOwner.callbacks.validate,
+            saveShortcut: shortcutOwner.callbacks.saveShortcut,
+            save: shortcutOwner.callbacks.saveSettings,
             checkSpeechAssets: { [weak self] identifier in
                 await self?.inspectSpeechAssets(for: identifier) ?? .unavailable("Oigo is no longer available")
             },
@@ -412,15 +509,25 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow = window
         window.setDictionaryStatus(dictionaryLoadError)
         window.showAndFocus()
+        return window
     }
 
     private func installApplicationMenu() {
         let mainMenu = NSMenu()
         let applicationMenu = NSMenu(title: "Oigo")
-        applicationMenu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
-        applicationMenu.addItem(NSMenuItem(title: "History", action: #selector(openHistory), keyEquivalent: ""))
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.setAccessibilityIdentifier(OigoStatusMenuIdentity.settingsIdentifier)
+        settingsItem.setAccessibilityLabel(OigoStatusMenuIdentity.accessibilityName(for: .openSettings))
+        applicationMenu.addItem(settingsItem)
+        let historyItem = NSMenuItem(title: "History", action: #selector(openHistory), keyEquivalent: "")
+        historyItem.setAccessibilityIdentifier(OigoStatusMenuIdentity.historyIdentifier)
+        historyItem.setAccessibilityLabel(OigoStatusMenuIdentity.accessibilityName(for: .openHistory))
+        applicationMenu.addItem(historyItem)
         applicationMenu.addItem(.separator())
-        applicationMenu.addItem(NSMenuItem(title: "Quit Oigo", action: #selector(quit), keyEquivalent: "q"))
+        let quitItem = NSMenuItem(title: "Quit Oigo", action: #selector(quit), keyEquivalent: "q")
+        quitItem.setAccessibilityIdentifier(OigoStatusMenuIdentity.quitIdentifier)
+        quitItem.setAccessibilityLabel(OigoStatusMenuIdentity.accessibilityName(for: .quit))
+        applicationMenu.addItem(quitItem)
         let applicationMenuItem = NSMenuItem()
         applicationMenuItem.submenu = applicationMenu
         mainMenu.addItem(applicationMenuItem)
@@ -514,10 +621,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 self?.openSystemSettings(OigoPermissionPresentation.microphone(.denied).settingsURL)
             },
             registrationStatus: { [weak self] in
-                self?.shortcutRegistrar.status ?? .inactive("Global shortcut is not registered")
+                self?.shortcutRegistration.registrationStatus
+                    ?? .inactive("Global shortcut is not registered")
             },
             registrationError: { [weak self] in
-                self?.shortcutConfiguration.lastError ?? self?.shortcutRegistrar.lastError
+                self?.shortcutRegistration.lastError
             },
             validateShortcut: { [weak self] candidate in
                 self?.validateShortcut(candidate) ?? .invalid("Oigo is no longer available")
@@ -571,16 +679,17 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     self.updateSurface()
                     return
                 }
-                guard self.shortcutRegistrar.status.isActive else {
+                self.onboardingStore.markCompleted()
+                self.synchronizeShortcutRegistration()
+                guard self.shortcutRegistration.isOperationReady else {
                     self.onboardingWindow?.showRegistrationFailure(
-                        self.shortcutRegistrar.lastError ?? self.shortcutRegistrar.status.message
+                        self.shortcutRegistration.lastError
+                            ?? self.shortcutRegistration.registrationStatus.message
                     )
                     self.updateSurface()
                     return
                 }
-                self.onboardingStore.markCompleted()
                 self.onboardingWindow = nil
-                self.registerShortcut()
                 self.updateSurface()
             },
             onClose: { [weak self] in
@@ -663,29 +772,22 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         statusSurface.install(statusItem: item)
     }
 
-    private func registerShortcut() {
-        guard storageCapability.health.isReady,
-              onboardingStore.load().isComplete,
-              !shortcutRegistered else {
-            return
-        }
+    private func synchronizeShortcutRegistration() {
         do {
-            try shortcutRegistrar.register(shortcut: settings.globalShortcut) { [weak self] event in
-                self?.handleGlobalShortcut(event)
-            }
-            shortcutConfiguration.clearError()
-            shortcutBridge.reset()
-            shortcutRegistered = true
+            try shortcutRegistration.synchronize(
+                storageReady: isShortcutStorageReady,
+                onboardingComplete: isSetupReady
+            )
+            resetShortcutInput()
         } catch {
             NSLog("Oigo could not register the global toggle shortcut: %@", Self.failureReason(for: error))
-            shortcutBridge.reset()
+            resetShortcutInput()
             updateSurface()
         }
     }
 
-    private func unregisterShortcut() {
-        shortcutRegistrar.unregister()
-        shortcutRegistered = false
+    private var isShortcutStorageReady: Bool {
+        shortcutStorageReady?() ?? storageCapability.health.isReady
     }
 
     private func installWorkspaceInterruptionObservers() {
@@ -731,13 +833,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             self.lastSession = self.coordinator.currentSession ?? self.lastSession
-            self.recordingStartedAt = nil
             self.clearTargetSnapshot(generation: interruptedGeneration)
-            self.hudGeneration = handle.generation
-            self.livePreview = ""
-            self.insertionDisplayStatus = nil
-            self.shortcutBridge.reset()
-            self.updateSurface()
+            self.presentKeyboardStartupRecovery(
+                category: "startup-interrupted",
+                copy: "Dictation startup was interrupted. Try dictation again.",
+                generation: interruptedGeneration
+            )
         }
     }
 
@@ -745,6 +846,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         performanceInstrumentation.mark(.shortcutReceived)
         guard allowBeforeSetup || onboardingStore.load().isComplete else {
             showOnboarding(OigoSystemSupportEvaluator.current())
+            return
+        }
+        guard allowBeforeSetup || speechAssetReadiness.isReady else {
+            updateSurface()
             return
         }
         guard storageCapability.health.isReady else {
@@ -758,26 +863,42 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             startDictation(kind: allowBeforeSetup ? .onboardingTest : .dictation)
         case .recording:
             finishDictation()
-        case .preparing, .finalizing, .cleaning, .inserting:
+        case .preparing:
+            finishDictation()
+        case .finalizing, .cleaning, .inserting:
             showShortcutFeedback(.ignoredProcessing(coordinator.state))
         }
     }
 
     private func handleGlobalShortcut(_ event: GlobalShortcutEvent) {
         performanceInstrumentation.mark(.shortcutReceived)
-        let edge: GlobalShortcutIntentEdge = switch event.edge {
-        case .pressed:
-            .pressed
-        case .released:
-            .released
-        }
-        _ = shortcutBridge.receive(edge)
+        applyShortcutIntent(event.edge, from: event)
+    }
+
+    private func applyShortcutIntent(_ edge: GlobalShortcutEdge, from event: GlobalShortcutEvent) {
+        _ = productionShortcutBridge.receive(
+            GlobalShortcutEvent(edge: edge, generation: event.generation)
+        )
+    }
+
+    private func resetShortcutInput() {
+        shortcutBridge.reset()
     }
 
     private func startKeyboardDictation() {
         let onboardingAllowsTest = onboardingWindow?.isDrivingProductionTest == true
         guard onboardingStore.load().isComplete || onboardingAllowsTest else {
-            shortcutBridge.reset()
+            presentKeyboardStartupRecovery(
+                category: "onboarding-incomplete",
+                copy: "Finish Oigo setup before starting dictation.",
+                generation: nil
+            )
+            return
+        }
+        guard speechAssetReadiness.isReady else {
+            shortcutFeedbackDetail = "Finish speech asset setup before starting dictation."
+            resetShortcutInput()
+            updateSurface()
             return
         }
         startDictation(kind: onboardingAllowsTest ? .onboardingTest : .dictation)
@@ -796,7 +917,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         maintenanceCoordinator.preempt()
         guard storageCapability.health.isReady else {
             reportOnboardingTestFailure()
-            updateSurface()
+            presentKeyboardStartupRecovery(
+                category: "storage-unavailable",
+                copy: "Storage is unavailable. Retry storage in Oigo Settings.",
+                generation: nil
+            )
             return
         }
         let availability = commandAvailability
@@ -806,20 +931,21 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 showShortcutFeedback(.ignoredBusy(coordinator.state))
             }
-            shortcutBridge.reset()
+            resetShortcutInput()
             return
         }
         switch operationGate.begin(kind) {
         case .failure(let reason):
-            shortcutBridge.reset()
+            resetShortcutInput()
             showBusy(reason)
         case .success(let handle):
+            lastKeyboardStartupGeneration = handle.generation
             operationGate.run(handle, completes: false) { @MainActor [weak self] in
                 guard let self else { return }
                 await self.performStartDictation(handle: handle)
                 guard self.operationGate.isCurrent(handle) else { return }
                 if self.coordinator.state == .recording {
-                    _ = self.shortcutBridge.observeState()
+                    _ = self.productionShortcutBridge.observeState()
                     if self.finishRequestedAfterStart {
                         self.finishRequestedAfterStart = false
                         await self.performFinishDictation(handle: handle)
@@ -828,7 +954,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                         }
                     }
                 } else {
-                    self.shortcutBridge.reset()
+                    self.resetShortcutInput()
                     self.operationGate.complete(handle)
                 }
             }
@@ -849,7 +975,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 showShortcutFeedback(.ignoredBusy(coordinator.state))
             }
-            shortcutBridge.reset()
+            resetShortcutInput()
             return
         }
         continueDictationStop()
@@ -865,7 +991,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         guard coordinator.state == .recording,
               let handle = operationGate.currentHandle,
               handle.kind.isDictationLifecycle else {
-            shortcutBridge.reset()
+            resetShortcutInput()
             updateSurface()
             return
         }
@@ -889,6 +1015,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 if let generation = handle?.generation {
                     self.statusSurface.hideHUD(generation: generation)
                 }
+                self.hudGeneration = nil
+                self.hudGeometrySnapshot = nil
                 self.updateSurface()
                 return
             }
@@ -902,6 +1030,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             if let generation = handle?.generation {
                 self.statusSurface.hideHUD(generation: generation)
             }
+            self.hudGeneration = nil
+            self.hudGeometrySnapshot = nil
             self.updateSurface()
         }
     }
@@ -920,7 +1050,26 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     generation: handle.generation
                 )
                 updateSurface()
-                let microphoneStateBeforeRequest = microphonePermissionState()
+                let readiness = KeyboardStartupReadinessSnapshot(
+                    microphonePermission: microphonePermissionState(),
+                    inputSelection: settings.selectedInput,
+                    inputDevices: currentInputDevices()
+                )
+                if let readinessFailure = KeyboardStartupReadinessPolicy.failure(using: readiness) {
+                    let recoveryCopy = switch readinessFailure {
+                    case .microphoneDenied:
+                        "Microphone access is required. Allow Oigo in System Settings."
+                    case .inputUnavailable:
+                        "No selected microphone input is available. Choose an input in Oigo Settings."
+                    }
+                    reportOnboardingTestFailure()
+                    presentKeyboardStartupRecovery(
+                        category: readinessFailure.rawValue,
+                        copy: recoveryCopy,
+                        generation: handle.generation
+                    )
+                    return
+                }
                 let capturedTarget = try await insertion.captureTargetBeforeMicrophonePermission {
                     try await self.ensureMicrophonePermission()
                 }
@@ -932,17 +1081,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 targetSnapshot = capturedTarget
                 targetSnapshotGeneration = handle.generation
                 try Task.checkCancellation()
-                guard microphoneStateBeforeRequest == .granted else {
+                guard microphonePermissionState() == .granted else {
                     clearTargetSnapshot(generation: handle.generation)
-                    statusSurface.hideHUD(generation: handle.generation)
-                    hudGeneration = nil
-                    shortcutBridge.reset()
-                    failureDetail = "microphone_permission_retry_required"
-                    lastFailureCode = "microphone_permission_retry_required"
-                    shortcutFeedbackDetail = "Microphone permission granted. Press the shortcut again to start dictation."
-                    historyWindow?.showMessage(shortcutFeedbackDetail ?? "Press the shortcut again to start dictation.")
                     reportOnboardingTestFailure()
-                    updateSurface()
+                    presentKeyboardStartupRecovery(
+                        category: "microphone-denied",
+                        copy: "Microphone access is required. Allow Oigo in System Settings.",
+                        generation: handle.generation
+                    )
                     return
                 }
                 lastSession = try await DurableSessionDictationBoundary.withPersistedSession(
@@ -951,27 +1097,43 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     pendingSessionBoundary = persistedSession
                     lastSession = persistedSession
                     bindOnboardingTestSession(persistedSession.id)
-                    recorder.setInputSelection(
-                        settings.selectedInput,
-                        channel: settings.selectedInputChannel
-                    )
-                    let format = try recorder.captureFormat()
+                    let speech = keyboardStartupSpeechBoundary()
+                    let requestedLocaleIdentifier = settings.localeIdentifier.isEmpty
+                        ? Locale.current.identifier
+                        : settings.localeIdentifier
+                    let verifiedLocaleIdentifier = try await speech.installAssets()
                     try Task.checkCancellation()
-                    let service = transcriptionService()
-                    self.applyRecognitionContext(to: service, localeIdentifier: service.configuredLocaleIdentifier)
+                    guard operationGate.isCurrent(handle) else {
+                        throw KeyboardStartupLocaleBindingFailure.staleGeneration
+                    }
+                    let binding = try KeyboardStartupLocaleBinding(
+                        generation: handle.generation,
+                        currentGeneration: operationGate.currentHandle?.generation ?? 0,
+                        requestedLocaleIdentifier: requestedLocaleIdentifier,
+                        configuredLocaleIdentifier: speech.configuredLocaleIdentifier,
+                        verifiedLocaleIdentifier: verifiedLocaleIdentifier
+                    )
+                    let audio = keyboardStartupAudioBoundary()
+                    audio.setInputSelection(
+                        settings.selectedInput,
+                        settings.selectedInputChannel
+                    )
+                    let format = try audio.captureFormat()
+                    try Task.checkCancellation()
+                    speech.applyRecognitionContext()
                     let snapshot = self.makeConfigurationSnapshot(
                         format: format,
-                        localeIdentifier: service.configuredLocaleIdentifier
+                        localeIdentifier: binding.localeIdentifier
                     )
-                    recordingStartedAt = Date()
                     previewThrottle = OigoHUDPreviewThrottle()
-                    return try await coordinator.startPersistedRecordingWithTranscription(
+                    let startedSession = try await coordinator.startPersistedRecordingWithTranscription(
                         persistedSession,
-                        using: recorder,
+                        using: audio.capture,
                         store: store,
-                        transcription: service,
+                        transcription: speech.controller,
                         format: format,
                         configuration: snapshot,
+                        onAudioReady: {},
                         onUpdate: { [weak self] update in
                             Task { @MainActor [weak self] in
                                 self?.applyTranscriptionUpdate(
@@ -981,6 +1143,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                             }
                         }
                     )
+                    recordingStartedAt = Date()
+                    return startedSession
                 }
                 pendingSessionBoundary = nil
             case .recording:
@@ -1068,6 +1232,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 refreshHistory()
             }
             scheduleIdleMaintenance(.sessionTerminal)
+            observeKeyboardTerminalization(generation: handle.generation)
             updateSurface()
         } catch is CancellationError {
             await coordinator.cancelActiveWork()
@@ -1079,9 +1244,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             recordingStartedAt = nil
             clearTargetSnapshot(generation: handle.generation)
             guard operationGate.isCurrent(handle) else { return }
-            livePreview = ""
-            applyTerminalDisplay(cancelled: true)
-            updateSurface()
+            presentKeyboardStartupRecovery(
+                category: "startup-cancelled",
+                copy: "Dictation startup was cancelled. Try dictation again.",
+                generation: handle.generation
+            )
         } catch {
             let failureReason = Self.failureReason(for: error)
             if coordinator.hasActiveWork {
@@ -1092,19 +1259,22 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 cancelled: false
             )
             markStorageUnhealthyIfNeeded(error)
-            shortcutBridge.reset()
+            resetShortcutInput()
             lastSession = coordinator.currentSession ?? lastSession
             clearTargetSnapshot(generation: handle.generation)
             guard operationGate.isCurrent(handle) else { return }
-            recordingStartedAt = nil
-            applyTerminalDisplay(error: error, cancelled: false)
             if let session = coordinator.currentSession,
                [.failed, .interrupted].contains(session.metadata.state) {
                 lastSession = session
             }
             reportOnboardingTestFailure()
             NSLog("Oigo rejected the dictation start command: %@", failureReason)
-            updateSurface()
+            let recovery = Self.keyboardStartupRecovery(for: error)
+            presentKeyboardStartupRecovery(
+                category: recovery.category,
+                copy: recovery.copy,
+                generation: handle.generation
+            )
         }
     }
 
@@ -1196,13 +1366,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             updateSurface()
         } catch is CancellationError {
             await coordinator.cancelActiveWork()
-            shortcutBridge.reset()
+            resetShortcutInput()
             lastSession = coordinator.currentSession ?? lastSession
             recordingStartedAt = nil
             clearTargetSnapshot(generation: handle.generation)
             guard operationGate.isCurrent(handle) else { return }
             livePreview = ""
             applyTerminalDisplay(cancelled: true)
+            observeKeyboardTerminalization(generation: handle.generation)
             updateSurface()
         } catch {
             let failureReason = Self.failureReason(for: error)
@@ -1210,7 +1381,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 await coordinator.cancelActiveWork(reason: failureReason)
             }
             markStorageUnhealthyIfNeeded(error)
-            shortcutBridge.reset()
+            resetShortcutInput()
             lastSession = coordinator.currentSession ?? lastSession
             clearTargetSnapshot(generation: handle.generation)
             guard operationGate.isCurrent(handle) else { return }
@@ -1221,6 +1392,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 lastSession = session
             }
             reportOnboardingTestFailure()
+            observeKeyboardTerminalization(generation: handle.generation)
             NSLog("Oigo rejected the dictation finish command: %@", failureReason)
             updateSurface()
         }
@@ -1236,8 +1408,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         operationGate.availability(
             coordinatorState: coordinator.state,
             setupComplete: onboardingStore.load().isComplete,
-            storageReady: storageCapability.health.isReady
+            storageReady: storageCapability.health.isReady,
+            speechAssetsReady: speechAssetReadiness.isReady
         )
+    }
+
+    private var isSetupReady: Bool {
+        onboardingStore.load().isComplete && speechAssetReadiness.isReady
     }
 
     private func frozenConfiguration() -> DictationConfigurationSnapshot {
@@ -1289,10 +1466,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
             guard let displayState else { return }
             insertionDisplayStatus = displayState
-            shortcutFeedbackDetail = "Shortcut ignored while \(state.rawValue.capitalized) is running"
+            shortcutFeedbackDetail = settings.globalShortcut.copy.ignoredMessage(
+                while: state.rawValue.capitalized
+            )
             updateSurface()
         case .ignoredRecordingNotOwned:
-            statusItem?.button?.toolTip = "Shortcut ignored: recording was started from the menu"
+            statusItem?.button?.toolTip = settings.globalShortcut.copy.menuRecordingIgnoredMessage
         case .ignoredBusy(_):
             if let busy = commandAvailability.busyReason {
                 showBusy(busy)
@@ -2052,11 +2231,14 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             occupiedKind: operationHandle?.kind,
             acceptingCommands: acceptingCommands,
             setupComplete: onboarding.isComplete,
-            storageReady: storageHealth.isReady
+            storageReady: storageHealth.isReady,
+            speechAssetsReady: speechAssetReadiness.isReady
         )
         let settingsSnapshot = settings
-        let shortcutStatus = shortcutRegistrar.status
-        let shortcutError = shortcutConfiguration.lastError
+        let committedShortcutCopy = settingsSnapshot.globalShortcut.copy
+        let shortcutState = shortcutRegistration.state(commandAvailability: availability)
+        let shortcutStatus = shortcutState.registrationStatus
+        let shortcutError = shortcutState.registrationError
         let inputDevices = currentInputDevices()
         let localeIdentifier = presentationLocaleIdentifier(
             coordinator.activeConfiguration?.resolvedLocaleIdentifier
@@ -2087,7 +2269,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             shortcut: .init(
                 registration: Self.presentationShortcutStatus(shortcutStatus, error: shortcutError),
                 isConfigured: true,
-                displayName: settingsSnapshot.globalShortcut.displayName
+                shortcut: settingsSnapshot.globalShortcut
             ),
             permissions: .init(
                 microphone: Self.presentationPermission(microphonePermissionState()),
@@ -2096,7 +2278,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             input: .init(selection: inputStatus, channelIndex: settingsSnapshot.selectedInputChannel),
             localeAssets: .init(
                 localeIdentifier: localeIdentifier,
-                status: Self.presentationAssetStatus(transcription?.currentAssetState),
+                status: Self.presentationAssetStatus(speechAssetReadiness),
                 generation: generation
             ),
             activeConfiguration: activeConfiguration,
@@ -2108,7 +2290,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 mode: Self.presentationMode(settingsSnapshot.defaultMode)
             ),
             terminal: terminal,
-            latestSession: lastSession.map(Self.presentationLatestSession),
+            latestSession: lastSession.map { OigoSessionPresentationProjection.latestSession($0) },
             playback: Self.presentationPlayback(playback.currentState()),
             onboarding: Self.presentationOnboarding(onboarding),
             shutdown: .init(
@@ -2123,6 +2305,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         )
         let shortcutCopy = Self.presentationShortcutCopy(
             shortcutStatus,
+            committedShortcutCopy: committedShortcutCopy,
             error: shortcutError,
             feedback: shortcutFeedbackDetail
         )
@@ -2137,7 +2320,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             hud: presentationHUD(
                 coordinatorState: coordinatorState,
                 operationHandle: operationHandle,
-                terminal: terminal
+                terminal: terminal,
+                shortcutCopy: committedShortcutCopy
             )
         )
     }
@@ -2162,13 +2346,21 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             onboardingWindow?.setCommandAvailability(snapshot.availability)
             statusItem?.button?.toolTip = snapshot.shortcutToolTip
             switch snapshot.hud {
-            case .visible(let state, let generation, let geometry, let startedAt, let preview):
+            case .visible(
+                let state,
+                let generation,
+                let geometry,
+                let startedAt,
+                let preview,
+                let shortcutCopy
+            ):
                 statusSurface.presentHUD(
                     state,
                     generation: generation,
                     geometry: geometry,
                     startedAt: startedAt,
-                    preview: preview
+                    preview: preview,
+                    shortcutCopy: shortcutCopy
                 )
             case .hidden(let generation):
                 if let generation {
@@ -2304,7 +2496,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             failure = .insertion
         case .failed:
             outcome = .failed
-            failure = Self.presentationFailure(lastSession?.metadata.failureCode)
+            failure = OigoSessionPresentationProjection.failure(lastSession?.metadata.failureCode)
         case .finalizing, .cleaning, .pasting, nil:
             guard let session = lastSession else {
                 return nil
@@ -2316,7 +2508,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 outcome = .interrupted
             case .failed:
                 outcome = .failed
-                failure = Self.presentationFailure(session.metadata.failureCode)
+                failure = OigoSessionPresentationProjection.failure(session.metadata.failureCode)
             case .completed:
                 if session.metadata.cleanupFallbackReason != nil {
                     outcome = .cleanupFallback
@@ -2349,35 +2541,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private static func presentationFailure(
-        _ code: DictationFailureCode?
-    ) -> OigoTerminalPresentationFailure? {
-        switch code {
-        case .audioWriteFailed:
-            .storage
-        case .microphonePermissionRevoked:
-            .permission
-        case .transcriptionFailed:
-            .transcription
-        case .transcriptionTimedOut:
-            .timeout
-        case .cleanupTimedOut:
-            .cleanup
-        case .targetLost:
-            .targetLost
-        case .audioInputDeviceChanged, .audioInputConfigurationChanged, .audioEngineStartFailed:
-            .capture
-        case .cancelled, .applicationQuit, .audioEngineInterrupted, .unknownFailure:
-            .unknown
-        case nil:
-            nil
-        }
-    }
-
     private func presentationHUD(
         coordinatorState: DictationState,
         operationHandle: AppOperationHandle?,
-        terminal: OigoTerminalPresentationInput?
+        terminal: OigoTerminalPresentationInput?,
+        shortcutCopy: OigoShortcutCopy
     ) -> OigoHUDPublication {
         guard let generation = hudGeneration else {
             return .hidden(generation: nil)
@@ -2389,7 +2557,8 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 generation: generation,
                 geometry: hudGeometrySnapshot,
                 startedAt: nil,
-                preview: ""
+                preview: "",
+                shortcutCopy: shortcutCopy
             )
         }
 
@@ -2406,7 +2575,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .inserting:
             state = .pasting
         case .idle, .complete, .failed, .cancelled, .interrupted:
-            state = terminal.map(hudTerminalState)
+            state = terminal.flatMap { terminal in
+                let projected = OigoSessionPresentationProjection.terminalHUDState(
+                    for: terminal,
+                    latestSession: lastSession.map { OigoSessionPresentationProjection.latestSession($0) }
+                )
+                return OigoHUDState(rawValue: projected.rawValue)
+            }
         }
         guard let state else {
             return .hidden(generation: generation)
@@ -2419,30 +2594,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             geometry: hudGeometrySnapshot,
             startedAt: state == .recording || state == .degradedRecording
                 ? (recordingStartedAt ?? Date()) : nil,
-            preview: state == .recording && previewEnabled ? livePreview : ""
+            preview: state == .recording && previewEnabled ? livePreview : "",
+            shortcutCopy: shortcutCopy
         )
-    }
-
-    private func hudTerminalState(_ terminal: OigoTerminalPresentationInput) -> OigoHUDState {
-        switch terminal.outcome {
-        case .completed:
-            .terminal
-        case .pasteAttempted, .pasted:
-            .pasteAttempted
-        case .copied:
-            .copyOnly
-        case .cleanupFallback:
-            .cleanupFallback
-        case .insertionFailed, .failed:
-            .preservedFailure
-        case .retryRequired:
-            .savedRetry
-        case .cancelled:
-            (lastSession?.metadata.rawTextByteCount ?? 0) > 0
-                ? .cancelledAfterRaw : .cancelledBeforeRaw
-        case .interrupted:
-            .interrupted
-        }
     }
 
     private static func presentationOperationKind(
@@ -2560,41 +2714,17 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private static func presentationLatestSession(
-        _ session: DictationSession
-    ) -> OigoLatestSessionPresentationInput {
-        let state: OigoLatestSessionPresentationState = switch session.metadata.state {
-        case .preparing: .preparing
-        case .recording: .recording
-        case .stopping: .stopping
-        case .retrying: .retrying
-        case .completed: .complete
+    private static func presentationAssetStatus(
+        _ status: OigoLocaleAssetStatus
+    ) -> OigoLocaleAssetPresentationStatus {
+        switch status {
+        case .idle: .idle
+        case .checking: .checking
+        case .installing: .installing
+        case .ready: .ready
         case .failed: .failed
-        case .cancelled: .cancelled
-        case .interrupted: .interrupted
-        }
-        return OigoLatestSessionPresentationInput(
-            id: session.id,
-            state: state,
-            createdAt: session.metadata.createdAt,
-            hasAudio: (session.metadata.audioByteCount ?? 0) > 0,
-            hasTranscript: (session.metadata.rawTextByteCount ?? 0) > 0,
-            failure: Self.presentationFailure(session.metadata.failureCode),
-            durationSeconds: session.metadata.duration.map { max(0, Int($0.rounded())) },
-            source: Self.presentationLatestSource(session.metadata)
-        )
-    }
-
-    private static func presentationLatestSource(
-        _ metadata: SessionMetadata
-    ) -> OigoLatestSessionPresentationSource {
-        switch metadata.configurationSnapshot?.processingMode {
-        case .instant:
-            .instant
-        case .clean:
-            .clean
-        case nil:
-            .unknown
+        case .unavailable: .unavailable
+        case .unsupported: .unsupported
         }
     }
 
@@ -2637,25 +2767,26 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private static func presentationShortcutCopy(
         _ status: GlobalShortcutRegistrationStatus,
+        committedShortcutCopy: OigoShortcutCopy,
         error: String?,
         feedback: String?
     ) -> (title: String, toolTip: String) {
         switch status {
-        case .active(let shortcut, _):
+        case .active:
             if let error {
                 return (
-                    "Global Shortcut Active - Open Settings…",
-                    "Global shortcut active: \(shortcut.displayName). Last registration error: \(error)"
+                    committedShortcutCopy.globalTitle + " - Open Settings…",
+                    committedShortcutCopy.activeToolTip + ". Last registration error: " + error
                 )
             }
             return (
-                "Global Shortcut: " + shortcut.displayName,
-                feedback ?? "Global shortcut active: " + shortcut.displayName
+                committedShortcutCopy.globalTitle,
+                feedback ?? committedShortcutCopy.activeToolTip
             )
         case .inactive(let message):
             return (
-                "Global Shortcut Inactive - Open Settings…",
-                "Global Shortcut Inactive: " + (error ?? message)
+                committedShortcutCopy.displayName + " Dictation Unavailable - Open Settings…",
+                committedShortcutCopy.unavailableMessage(error ?? message)
             )
         }
     }
@@ -2782,11 +2913,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             if historyWindow != nil {
                 refreshHistory()
             }
-            if onboardingStore.load().isComplete {
-                registerShortcut()
-            }
+            synchronizeShortcutRegistration()
         } else {
-            unregisterShortcut()
+            synchronizeShortcutRegistration()
             reportedMalformedSessionCount = 0
             historyWindow?.showMessage(displayedStorageHealth.statusMessage)
         }
@@ -2794,8 +2923,45 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         onboardingWindow?.setStorageHealth(displayedStorageHealth)
         if storageCapability.health.isReady {
             scheduleIdleMaintenance(.startup)
+            preflightSpeechAssetsIfNeeded()
         }
         updateSurface()
+    }
+
+    private func preflightSpeechAssetsIfNeeded() {
+        guard storageCapability.health.isReady,
+              onboardingStore.load().isComplete,
+              speechAssetCheckTask == nil else {
+            return
+        }
+        speechAssetReadiness = .checking
+        let identifier = settings.localeIdentifier.isEmpty
+            ? Locale.current.identifier
+            : settings.localeIdentifier
+        let service = transcriptionService(for: identifier)
+        speechAssetCheckTask = Task { @MainActor [weak self, service] in
+            let status: OigoLocaleAssetStatus
+            do {
+                status = Self.localeAssetStatus(from: try await service.checkSpeechAssets())
+            } catch {
+                status = Self.localeAssetStatus(from: service.currentAssetState)
+            }
+            guard !Task.isCancelled, let self else {
+                return
+            }
+            speechAssetCheckTask = nil
+            speechAssetReadiness = status
+            if !status.isReady {
+                let stored = onboardingStore.load()
+                onboardingStore.save(OigoOnboardingState(
+                    step: .language,
+                    copyOnlyAccepted: stored.copyOnlyAccepted
+                ))
+                showOnboarding(OigoSystemSupportEvaluator.current())
+            }
+            synchronizeShortcutRegistration()
+            updateSurface()
+        }
     }
 
     private var displayedStorageHealth: DurableSessionHealth {
@@ -2848,12 +3014,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         guard storageCapability.health.isReady else {
             return .unavailable("durable storage is unavailable")
         }
-        let service = speechAssetService(for: identifier)
+        let service = transcriptionService(for: identifier)
+        let status: OigoLocaleAssetStatus
         do {
-            return Self.localeAssetStatus(from: try await service.installSpeechAssets())
+            status = Self.localeAssetStatus(from: try await service.installSpeechAssets())
         } catch {
-            return Self.localeAssetStatus(from: service.currentAssetState)
+            status = Self.localeAssetStatus(from: service.currentAssetState)
         }
+        speechAssetReadiness = status
+        updateSurface()
+        return status
     }
 
     private static func localeAssetStatus(from state: SpeechAssetState) -> OigoLocaleAssetStatus {
@@ -2867,13 +3037,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .unavailable(let reason):
             .unavailable(reason)
         }
-    }
-
-    private func speechAssetService(for identifier: String) -> TranscriptionService {
-        TranscriptionService(
-            locale: Locale(identifier: identifier),
-            instrumentation: performanceInstrumentation
-        )
     }
 
     private func loadDictionary() {
@@ -2965,9 +3128,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         TranscriptCleanupMode(rawValue: mode.rawValue) ?? .instant
     }
 
-    private func applySettings(_ newSettings: OigoSettings) -> String? {
+    private func applySettings(_ requestedSettings: OigoSettings) -> String? {
         let previousSettings = settings
-        let shortcutChanged = previousSettings.globalShortcut != newSettings.globalShortcut
+        let newSettings = requestedSettings.with(globalShortcut: shortcutRegistration.committedShortcut)
         let currentLaunchStatus = launchAtLoginController.status
         let launchAtLoginChanged = OigoLaunchAtLoginReconciliation.shouldMutate(
             requested: newSettings.launchAtLogin,
@@ -2978,61 +3141,29 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             do {
                 try launchAtLoginController.setEnabled(newSettings.launchAtLogin)
             } catch {
-                registerShortcut()
+                synchronizeShortcutRegistration()
                 settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                 return "Launch at Login could not be changed: " + Self.failureReason(for: error)
             }
         }
 
-        if shortcutChanged {
-            let shortcutValidation = shortcutConfiguration.save(
-                newSettings.globalShortcut,
-                persist: { [weak self] shortcut in
-                    guard let self else { throw OigoSettingsStoreError.storeUnavailable }
-                    try self.settingsStore.save(newSettings.with(globalShortcut: shortcut))
-                },
-                restore: { [weak self] in
-                    guard let self else { throw OigoSettingsStoreError.storeUnavailable }
-                    try self.settingsStore.save(previousSettings)
-                }
-            )
-            guard shortcutValidation.isAvailable else {
-                let shortcutError = Self.shortcutValidationMessage(shortcutValidation)
-                guard launchAtLoginChanged else {
-                    settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
-                    updateSurface()
-                    return shortcutError
-                }
-                do {
-                    try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
-                } catch {
-                    settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
-                    updateSurface()
-                    return shortcutError + "; Launch at Login could not be restored: " + Self.failureReason(for: error)
-                }
-                settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
-                updateSurface()
-                return shortcutError
-            }
-        } else {
-            do {
-                try settingsStore.save(newSettings)
-            } catch {
-                var message = "Settings could not be saved: \(error)"
-                guard launchAtLoginChanged else {
-                    settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
-                    updateSurface()
-                    return message
-                }
-                do {
-                    try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
-                } catch let restoreError {
-                    message += "; Launch at Login could not be restored: \(restoreError)"
-                }
+        do {
+            try settingsStore.save(newSettings)
+        } catch {
+            var message = "Settings could not be saved: \(error)"
+            guard launchAtLoginChanged else {
                 settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
                 updateSurface()
                 return message
             }
+            do {
+                try launchAtLoginController.setEnabled(previousSettings.launchAtLogin)
+            } catch let restoreError {
+                message += "; Launch at Login could not be restored: \(restoreError)"
+            }
+            settingsWindow?.setLaunchAtLoginStatus(launchAtLoginController.status)
+            updateSurface()
+            return message
         }
 
         settings = newSettings
@@ -3053,9 +3184,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
            ) {
             transcription = nil
         }
-        if !shortcutRegistrar.status.isActive {
-            registerShortcut()
-        }
+        synchronizeShortcutRegistration()
         if previousSettings.audioRetention != settings.audioRetention
             || previousSettings.keepSuccessfulAudioIndefinitely != settings.keepSuccessfulAudioIndefinitely {
             scheduleIdleMaintenance(.settingsChanged)
@@ -3065,7 +3194,67 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func currentInputDevices() -> [OigoInputDevice] {
-        (try? deviceInventoryMonitor.currentDevices()) ?? []
+        return (try? deviceInventoryMonitor.currentDevices()) ?? []
+    }
+
+    private func keyboardStartupAudioBoundary() -> OigoKeyboardStartupAudioBoundary {
+        return OigoKeyboardStartupAudioBoundary(
+            capture: recorder,
+            setInputSelection: { [recorder] selection, channel in
+                recorder.setInputSelection(selection, channel: channel)
+            },
+            captureFormat: { [recorder] in try recorder.captureFormat() }
+        )
+    }
+
+    private func keyboardStartupSpeechBoundary() -> OigoKeyboardStartupSpeechBoundary {
+        let service = transcriptionService()
+        return OigoKeyboardStartupSpeechBoundary(
+            controller: service,
+            configuredLocaleIdentifier: service.configuredLocaleIdentifier,
+            installAssets: {
+                let state = try await service.installSpeechAssets()
+                if case .ready(let identifier) = state {
+                    return identifier
+                }
+                return nil
+            },
+            applyRecognitionContext: { [weak self, service] in
+                self?.applyRecognitionContext(
+                    to: service,
+                    localeIdentifier: service.configuredLocaleIdentifier
+                )
+            }
+        )
+    }
+
+    private func presentKeyboardStartupRecovery(
+        category: String,
+        copy: String,
+        generation: UInt64?
+    ) {
+        if let generation {
+            statusSurface.hideHUD(generation: generation)
+        }
+        hudGeneration = nil
+        hudGeometrySnapshot = nil
+        recordingStartedAt = nil
+        insertionDisplayStatus = nil
+        livePreview = ""
+        resetShortcutInput()
+        lastFailureCode = category
+        failureDetail = copy
+        shortcutFeedbackDetail = copy
+        historyWindow?.showMessage(copy)
+        observeKeyboardTerminalization(generation: generation ?? lastKeyboardStartupGeneration)
+        updateSurface()
+    }
+
+    private func observeKeyboardTerminalization(generation: UInt64) {
+        guard lastKeyboardTerminalizedGeneration != generation else {
+            return
+        }
+        lastKeyboardTerminalizedGeneration = generation
     }
 
     private func beginOnboardingProductionTest(generation: UInt64) {
@@ -3138,7 +3327,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
               let generation = onboardingTestGeneration else {
             return
         }
-        shortcutBridge.reset()
+        resetShortcutInput()
         let bound = recorder.currentSelection()
         let session = sessionForOnboardingTest(session)
         let selectedText: String
@@ -3191,7 +3380,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
               let generation = onboardingTestGeneration else {
             return
         }
-        shortcutBridge.reset()
+        resetShortcutInput()
         let bound = recorder.currentSelection()
         let session = sessionForOnboardingTest(lastSession ?? coordinator.currentSession)
         let cafExists = session.map { FileManager.default.fileExists(atPath: $0.audioURL.path) } ?? false
@@ -3237,16 +3426,16 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func validateShortcut(_ candidate: ToggleShortcut) -> OigoShortcutValidation {
-        guard storageCapability.health.isReady else {
+        guard isShortcutStorageReady else {
             return .invalid("Storage unavailable. Retry storage before enabling a shortcut.")
         }
-        shortcutConfiguration.setCandidate(candidate)
-        return shortcutConfiguration.validate(candidate)
+        shortcutRegistration.setCandidate(candidate)
+        return shortcutRegistration.validate(candidate)
     }
 
     private func saveShortcut(_ candidate: ToggleShortcut) -> OigoShortcutValidation {
         let previousSettings = settings
-        let validation = shortcutConfiguration.save(
+        let validation = shortcutRegistration.save(
             candidate,
             persist: { [weak self] shortcut in
                 guard let self else { throw OigoSettingsStoreError.storeUnavailable }
@@ -3264,6 +3453,50 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         settings = previousSettings.with(globalShortcut: candidate)
         updateSurface()
         return .available
+    }
+
+    func settingsShortcutOwnerBundle() -> OigoSettingsShortcutOwnerBundle {
+        let callbacks = OigoSettingsShortcutCallbacks(
+            validate: { [weak self] candidate in
+                guard let self else {
+                    return .invalid("Oigo is no longer available")
+                }
+                return self.validateShortcut(candidate)
+            },
+            saveShortcut: { [weak self] candidate in
+                guard let self else {
+                    return .invalid("Oigo is no longer available")
+                }
+                return self.saveShortcut(candidate)
+            },
+            saveSettings: { [weak self] requestedSettings in
+                guard let self else {
+                    return "Oigo is no longer available."
+                }
+                return self.applySettings(requestedSettings)
+            }
+        )
+        return OigoSettingsShortcutOwnerBundle(
+            ownerIdentity: shortcutRegistration.ownerIdentity,
+            callbacks: callbacks,
+            state: { [weak self] in
+                self?.settingsShortcutOwnerState ?? OigoSettingsShortcutOwnerState(
+                    ownerIdentity: "unavailable",
+                    persistedSettings: .default,
+                    committedShortcut: .default,
+                    registrationActive: false
+                )
+            }
+        )
+    }
+
+    var settingsShortcutOwnerState: OigoSettingsShortcutOwnerState {
+        OigoSettingsShortcutOwnerState(
+            ownerIdentity: shortcutRegistration.ownerIdentity,
+            persistedSettings: settingsStore.load(),
+            committedShortcut: shortcutRegistration.committedShortcut,
+            registrationActive: shortcutRegistration.registrationStatus.isActive
+        )
     }
 
     private static func shortcutValidationMessage(_ validation: OigoShortcutValidation) -> String {
@@ -3293,6 +3526,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func rerunOnboarding() {
         onboardingStore.rerun()
+        synchronizeShortcutRegistration()
         showOnboarding(OigoSystemSupportEvaluator.current())
     }
 
@@ -3310,11 +3544,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         } else {
             sessionCount = 0
         }
-        let shortcutRegistration: OigoDiagnosticsShortcutRegistration
-        if shortcutRegistrar.status.isActive {
-            shortcutRegistration = .present
+        let diagnosticsShortcutRegistration: OigoDiagnosticsShortcutRegistration
+        if shortcutRegistration.registrationStatus.isActive {
+            diagnosticsShortcutRegistration = .present
         } else {
-            shortcutRegistration = .inactive
+            diagnosticsShortcutRegistration = .inactive
         }
         let snapshot = OigoDiagnosticsSnapshot(
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0",
@@ -3326,7 +3560,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             dictationState: coordinator.state,
             lastFailureCode: lastFailureCode,
             settings: settings,
-            shortcutRegistration: shortcutRegistration,
+            shortcutRegistration: diagnosticsShortcutRegistration,
             shortcutDisplayName: settings.globalShortcut.displayName,
             dictionaryEntryCount: dictionaryDocument.entries.count,
             sessionCount: sessionCount,
@@ -3364,15 +3598,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         case .granted:
             return
         case .unknown:
-            let presentation = OigoPermissionPresentation.microphone(.unknown)
-            let alert = NSAlert()
-            alert.messageText = presentation.title
-            alert.informativeText = presentation.explanation
-            alert.addButton(withTitle: "Allow Microphone")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else {
-                throw AudioRecorderError.microphonePermission("permission request was cancelled")
-            }
             guard await AudioRecorder.requestMicrophonePermission() else {
                 throw AudioRecorderError.microphonePermission("denied")
             }
@@ -3392,6 +3617,23 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func openSystemSettings(_ url: URL) {
         NSWorkspace.shared.open(url)
+    }
+
+    private func refreshPermissionPresentation() {
+        refreshPermissionSurface()
+    }
+
+    private func refreshPermissionSurface() {
+        let microphone = microphonePermissionState()
+        let accessibility = accessibilityPermissionState()
+        if onboardingStore.load().isComplete {
+            updateSurface()
+        } else {
+            onboardingWindow?.refreshPermissions(
+                microphone: microphone,
+                accessibility: accessibility
+            )
+        }
     }
 
     private func waitForDestinationHandoff() async {
@@ -3452,7 +3694,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func microphonePermissionState() -> OigoPermissionState {
-        Self.currentMicrophonePermissionState()
+        if let settingsPermissionStates {
+            return settingsPermissionStates().0
+        }
+        return Self.currentMicrophonePermissionState()
     }
 
     private static func currentMicrophonePermissionState() -> OigoPermissionState {
@@ -3469,7 +3714,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func accessibilityPermissionState() -> OigoPermissionState {
-        Self.currentAccessibilityPermissionState()
+        if let settingsPermissionStates {
+            return settingsPermissionStates().1
+        }
+        return Self.currentAccessibilityPermissionState()
     }
 
     private static func currentAccessibilityPermissionState() -> OigoPermissionState {
@@ -3511,6 +3759,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static func failureReason(for error: Error) -> String {
+        if let startupFailure = error as? any DictationStartupFailureEvidence {
+            return startupFailure.dictationStartupFailureReason
+        }
         if let category = storageFailureCategory(error) {
             return "storage failure: " + category.statusDescription
         }
@@ -3537,6 +3788,74 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return "operation failed"
+    }
+
+    private static func keyboardStartupRecovery(
+        for error: Error
+    ) -> (category: String, copy: String) {
+        if let boundary = error as? OigoKeyboardStartupBoundaryFailure {
+            switch boundary {
+            case .speechUnavailable:
+                return (
+                    "speech-unavailable",
+                    "Speech recognition is unavailable. Retry after Speech support is available."
+                )
+            case .speechFailed:
+                return (
+                    "speech-failed",
+                    "Speech recognition failed to start. Try dictation again."
+                )
+            case .audioStartFailed:
+                return (
+                    "audio-start-failed",
+                    "The selected microphone could not start. Choose an input in Oigo Settings."
+                )
+            }
+        }
+        if let binding = error as? KeyboardStartupLocaleBindingFailure {
+            switch binding {
+            case .staleGeneration:
+                return (
+                    "stale-generation",
+                    "Speech readiness was stale. Try dictation again."
+                )
+            case .localeMismatch:
+                return (
+                    "locale-mismatch",
+                    "Speech readiness did not match the selected language. Try dictation again."
+                )
+            case .assetsNotReady:
+                return (
+                    "speech-assets-not-ready",
+                    "Speech assets are not ready for the selected language. Try again after installation."
+                )
+            }
+        }
+        if let transcription = error as? TranscriptionError {
+            switch transcription {
+            case .unsupportedLocale, .speechAssetsUnavailable, .speechAssetsInstalling,
+                 .recognitionUnavailable:
+                return (
+                    "speech-unavailable",
+                    "Speech recognition is unavailable. Retry after Speech support is available."
+                )
+            default:
+                return (
+                    "speech-failed",
+                    "Speech recognition failed to start. Try dictation again."
+                )
+            }
+        }
+        if storageFailureCategory(error) != nil {
+            return (
+                "storage-unavailable",
+                "Storage is unavailable. Retry storage in Oigo Settings."
+            )
+        }
+        return (
+            "audio-start-failed",
+            "The selected microphone could not start. Choose an input in Oigo Settings."
+        )
     }
 
     private func applyTerminalDisplay(error: Error? = nil, cancelled: Bool) {

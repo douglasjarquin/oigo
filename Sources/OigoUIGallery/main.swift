@@ -27,15 +27,20 @@ private final class GalleryApplicationDelegate: NSObject, NSApplicationDelegate,
         self.window = window
         window.delegate = self
         if configuration.scenario == "popover-states" {
-            window.setContentSize(NSSize(width: 760, height: 580))
+            window.setContentSize(NSSize(width: 760, height: 700))
             window.center()
         }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        print("HOST_READY scenario=" + configuration.scenario + " windows=1")
-        fflush(stdout)
+        DispatchQueue.main.async {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            print("HOST_READY scenario=" + self.configuration.scenario + " windows=1")
+            fflush(stdout)
+        }
+        let matrixRun = ProcessInfo.processInfo.environment["OIGO_GALLERY_MATRIX"] == "1"
         terminationTimer = Timer.scheduledTimer(
-            timeInterval: configuration.scenario == "popover-states" ? 120 : 20,
+            timeInterval: matrixRun ? 10 : (configuration.scenario == "popover-states" ? 120 : 20),
             target: self,
             selector: #selector(terminateAfterBound),
             userInfo: nil,

@@ -1,6 +1,7 @@
 .DS_Store
 .build/
 .omo/
+T/oigo-shortcut-transcription-design-fidelity.qa/
 
 # Worktree evidence is published on the orphan branch no-mistakes/evidence.
 .no-mistakes/evidence/

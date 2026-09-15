@@ -40,7 +40,7 @@ private final class ComponentsGalleryViewController: NSViewController {
     private let body = NSStackView()
     private let modeLabel = NSTextField(labelWithString: "")
     private let receiptLabel = NSTextField(labelWithString: "No actions invoked")
-    private var mode: Mode = .darkLarge
+    private var mode: Mode
     private var loadingView: MacUILoadingView?
     private var transcriptView: MacUITranscriptView?
     private var floatingPanel: MacUIFloatingPanel?
@@ -51,6 +51,7 @@ private final class ComponentsGalleryViewController: NSViewController {
 
     init(configuration: GalleryConfiguration) {
         self.configuration = configuration
+        self.mode = configuration.appearance == "dark" ? .dark : .normal
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -71,13 +72,18 @@ private final class ComponentsGalleryViewController: NSViewController {
         let content = NSStackView()
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = 14
-        content.edgeInsets = NSEdgeInsets(top: 24, left: 28, bottom: 28, right: 28)
+        content.spacing = MacUITokens.Spacing.section
+        content.edgeInsets = NSEdgeInsets(
+            top: MacUITokens.Spacing.major,
+            left: MacUITokens.Spacing.window,
+            bottom: MacUITokens.Spacing.window,
+            right: MacUITokens.Spacing.window
+        )
         content.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(content)
 
         let title = NSTextField(labelWithString: "MacUtilityUI Component Gallery")
-        title.font = .systemFont(ofSize: 24, weight: .bold)
+        title.font = MacUITokens.Typography.heading
         title.setAccessibilityRole(.staticText)
         title.setAccessibilityLabel("MacUtilityUI Component Gallery")
         content.addArrangedSubview(title)
@@ -85,7 +91,7 @@ private final class ComponentsGalleryViewController: NSViewController {
         let safety = NSTextField(
             wrappingLabelWithString: "Synthetic values only - no Oigo data, microphone, permissions, or pasteboard access."
         )
-        safety.textColor = .secondaryLabelColor
+        safety.textColor = MacUITokens.Colors.secondaryLabel
         safety.setAccessibilityLabel(
             "Synthetic values only. No Oigo data, microphone, permissions, or pasteboard access."
         )
@@ -94,7 +100,7 @@ private final class ComponentsGalleryViewController: NSViewController {
         let modes = NSStackView()
         modes.orientation = .horizontal
         modes.alignment = .centerY
-        modes.spacing = 8
+        modes.spacing = MacUITokens.Spacing.controlGroup
         for item in [Mode.normal, .dark, .largeText, .darkLarge, .reducedMotion, .longLabels] {
             let button = NSButton(title: item.rawValue, target: self, action: #selector(changeMode(_:)))
             button.setButtonType(.toggle)
@@ -107,13 +113,13 @@ private final class ComponentsGalleryViewController: NSViewController {
         }
         content.addArrangedSubview(modes)
 
-        modeLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        modeLabel.font = MacUITokens.Typography.section
         modeLabel.setAccessibilityRole(.staticText)
         content.addArrangedSubview(modeLabel)
 
         body.orientation = .vertical
         body.alignment = .leading
-        body.spacing = 14
+        body.spacing = MacUITokens.Spacing.section
         body.translatesAutoresizingMaskIntoConstraints = false
         content.addArrangedSubview(body)
 
@@ -135,7 +141,7 @@ private final class ComponentsGalleryViewController: NSViewController {
             content.trailingAnchor.constraint(equalTo: document.trailingAnchor),
             content.topAnchor.constraint(equalTo: document.topAnchor),
             content.bottomAnchor.constraint(equalTo: document.bottomAnchor),
-            body.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -56)
+            body.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -(MacUITokens.Spacing.window * 2))
         ])
         view = root
         renderBody()
@@ -229,12 +235,17 @@ private final class ComponentsGalleryViewController: NSViewController {
         ) { [weak self] in
             self?.record("Inline notice acknowledged")
         }
-        let scenarioAppearance = NSAppearance(
-            named: [.dark, .darkLarge].contains(mode) ? .darkAqua : .aqua
-        )
-        notice.appearance = scenarioAppearance
-        scenarioAppearance?.performAsCurrentDrawingAppearance {
-            notice.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        let noticeAppearance: NSAppearance?
+        if [.dark, .darkLarge].contains(mode) || configuration.appearance == "dark" {
+            noticeAppearance = NSAppearance(named: .darkAqua)
+        } else if configuration.appearance == "light" || mode == .largeText || mode == .longLabels {
+            noticeAppearance = NSAppearance(named: .aqua)
+        } else {
+            noticeAppearance = nil
+        }
+        notice.appearance = noticeAppearance
+        noticeAppearance?.performAsCurrentDrawingAppearance {
+            notice.layer?.backgroundColor = MacUITokens.Colors.controlBackground.cgColor
         }
         notice.setAccessibilityRole(.group)
         notice.setAccessibilityLabel("Synthetic inline notice: " + warning.label)
@@ -338,7 +349,7 @@ private final class ComponentsGalleryViewController: NSViewController {
 
         let controls = NSStackView()
         controls.orientation = .horizontal
-        controls.spacing = 8
+        controls.spacing = MacUITokens.Spacing.controlGroup
         let destructive = makeButton(
             title: "Delete Synthetic Item",
             label: "Delete synthetic item",
@@ -393,9 +404,15 @@ private final class ComponentsGalleryViewController: NSViewController {
     }
 
     private func applyScenarioAppearance() {
-        let appearance = [.dark, .darkLarge].contains(mode)
-            ? NSAppearance(named: .darkAqua)
-            : NSAppearance(named: .aqua)
+        let appearance: NSAppearance?
+        switch configuration.appearance {
+        case "light":
+            appearance = NSAppearance(named: .aqua)
+        case "dark":
+            appearance = NSAppearance(named: .darkAqua)
+        default:
+            appearance = nil
+        }
         view.appearance = appearance
         view.window?.appearance = appearance
     }
@@ -404,18 +421,18 @@ private final class ComponentsGalleryViewController: NSViewController {
         for button in modeButtons {
             let selected = button.state == .on
             button.wantsLayer = true
-            button.layer?.cornerRadius = 6
+            button.layer?.cornerRadius = MacUITokens.Radius.compact
             button.layer?.borderWidth = selected ? 1.5 : 0
             button.layer?.borderColor = selected
-                ? NSColor.controlAccentColor.cgColor
+                ? MacUITokens.Colors.accent.cgColor
                 : NSColor.clear.cgColor
             button.layer?.backgroundColor = selected
-                ? NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor
+                ? MacUITokens.Colors.accent.withAlphaComponent(0.22).cgColor
                 : NSColor.clear.cgColor
             button.bezelColor = selected
-                ? NSColor.controlAccentColor.withAlphaComponent(0.22)
+                ? MacUITokens.Colors.accent.withAlphaComponent(0.22)
                 : nil
-            button.contentTintColor = selected ? NSColor.controlAccentColor : nil
+            button.contentTintColor = selected ? MacUITokens.Colors.accent : nil
             button.image = selected
                 ? NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Selected")
                 : nil
@@ -533,10 +550,10 @@ private final class ComponentsGalleryViewController: NSViewController {
         panel.isFloatingPanel = true
         let panelContent = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 96))
         panelContent.wantsLayer = true
-        panelContent.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        panelContent.layer?.cornerRadius = 12
+        panelContent.layer?.backgroundColor = MacUITokens.Colors.windowBackground.cgColor
+        panelContent.layer?.cornerRadius = MacUITokens.Radius.floating
         panelContent.layer?.borderWidth = 1
-        panelContent.layer?.borderColor = NSColor.separatorColor.cgColor
+        panelContent.layer?.borderColor = MacUITokens.Colors.separator.cgColor
         panelContent.setAccessibilityElement(true)
         panelContent.setAccessibilityRole(.group)
         panelContent.setAccessibilityLabel("Synthetic floating panel content")

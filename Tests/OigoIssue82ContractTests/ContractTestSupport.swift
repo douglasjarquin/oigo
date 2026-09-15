@@ -26,9 +26,14 @@ final class RecordingConfigurationRegistrationClient: GlobalShortcutRegistration
     private var generation: UInt64
     var failFor: ToggleShortcut?
 
-    init(active shortcut: ToggleShortcut) {
-        generation = 1
-        status = .active(shortcut, generation: generation)
+    init(active shortcut: ToggleShortcut? = nil) {
+        if let shortcut {
+            generation = 1
+            status = .active(shortcut, generation: generation)
+        } else {
+            generation = 0
+            status = .inactive("Global shortcut is not registered")
+        }
     }
 
     func register(
@@ -58,7 +63,7 @@ final class RecordingConfigurationRegistrationClient: GlobalShortcutRegistration
         lastError = nil
     }
 
-    func unregister() {
+    func unregister() throws {
         if case .active(let shortcut, _) = status {
             calls.append("unregister:\(shortcut.keyCode)/\(shortcut.modifiers)")
         }

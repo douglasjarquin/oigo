@@ -37,6 +37,10 @@ private struct OigoIssue90ContractTests {
             ("cancel-preserves-caf-prefix", testCancelPreservesCAFPrefix),
             ("interrupt-preserves-caf-prefix", testInterruptPreservesCAFPrefix),
             ("slow-speech-does-not-overflow", testSlowSpeechDoesNotOverflow),
+            ("routed-input-explicit-tap-format", testRoutedInputExplicitTapFormat),
+            ("routed-input-unavailable-device", testRoutedInputUnavailableDevice),
+            ("routed-input-invalid-format", testRoutedInputInvalidFormat),
+            ("routed-input-invalid-channel", testRoutedInputInvalidChannel),
             ("recorder-startup-interruption", testRecorderStartupInterruption),
             ("recorder-stop-after-overflow", testRecorderStopAfterOverflow),
             ("recorder-concurrent-terminalize", testRecorderConcurrentTerminalize)
@@ -579,6 +583,95 @@ private struct OigoIssue90ContractTests {
         }
     }
 
+    private static func testRoutedInputExplicitTapFormat() throws {
+        let device = OigoInputDevice(
+            uid: "routed-device",
+            displayName: "Routed device",
+            deviceID: 42,
+            inputChannelCount: 1,
+            nominalSampleRate: 16_000,
+            isAlive: true,
+            isDefault: true
+        )
+        let routedSourceFormat = try monoFormat()
+        var events: [String] = []
+        var tapFormat: AudioCaptureFormat?
+        _ = try OigoInputDeviceCatalog.resolveAndRouteBeforeInspection(
+            .systemDefault,
+            from: [device],
+            route: { routedDevice in
+                guard routedDevice == device else {
+                    throw ContractFailure(message: "selected input route changed before inspection")
+                }
+                events.append("route")
+            },
+            inspect: { _ in
+                events.append("format")
+                tapFormat = try AudioRecorder.testRoutedTapFormat(
+                    outputFormat: routedSourceFormat,
+                    selectedChannel: 0,
+                    installTap: { format in
+                        guard format == routedSourceFormat else {
+                            throw ContractFailure(message: "tap installer received a different routed format")
+                        }
+                        events.append("install")
+                    }
+                )
+            }
+        )
+        guard events == ["route", "format", "install"] else {
+            throw ContractFailure(message: "tap format was resolved before the selected device was routed")
+        }
+        guard tapFormat == AudioCaptureFormat(sampleRate: 16_000, channelCount: 1) else {
+            throw ContractFailure(message: "tap did not receive the valid routed source format")
+        }
+    }
+
+    private static func testRoutedInputUnavailableDevice() throws {
+        do {
+            _ = try OigoInputDeviceCatalog.resolveAndRouteBeforeInspection(
+                .systemDefault,
+                from: [],
+                route: { _ in throw ContractFailure(message: "unavailable input was routed") },
+                inspect: { _ in throw ContractFailure(message: "unavailable input was inspected") }
+            )
+            throw ContractFailure(message: "unavailable input returned a false success")
+        } catch OigoInputDeviceResolutionError.noAvailableInput {
+            print("ASSERTED: routed input typed-failure=noAvailableInput")
+            return
+        }
+    }
+
+    private static func testRoutedInputInvalidFormat() throws {
+        let invalidOutputFormat = try requiredFormat(
+            AVAudioFormat(standardFormatWithSampleRate: 0, channels: 1)
+        )
+        do {
+            _ = try AudioRecorder.testRoutedTapFormat(
+                outputFormat: invalidOutputFormat,
+                selectedChannel: 0
+            )
+            throw ContractFailure(message: "invalid routed source format returned a false success")
+        } catch AudioRecorderError.invalidInputFormat {
+            print("ASSERTED: routed input typed-failure=invalidInputFormat")
+            return
+        }
+    }
+
+    private static func testRoutedInputInvalidChannel() throws {
+        let sourceFormat = try monoFormat()
+        do {
+            _ = try AudioRecorder.testRoutedTapFormat(
+                outputFormat: sourceFormat,
+                selectedChannel: 1
+            )
+            throw ContractFailure(message: "invalid routed channel returned a false success")
+        } catch AudioRecorderError.selectedChannelUnavailable {
+            print("ASSERTED: routed input typed-failure=selectedChannelUnavailable")
+            return
+        }
+    }
+
     private static func testRecorderStartupInterruption() throws {
         let writer = ScriptedWriter()
         let recorder = AudioRecorder(
@@ -602,6 +695,7 @@ private struct OigoIssue90ContractTests {
 
     private static func testRecorderStopAfterOverflow() throws {
         let writer = ScriptedWriter()
+        writer.blockWrites = true
         writer.blockClose = true
         let recorder = AudioRecorder(
             deviceMonitor: EmptyDeviceMonitor(),
@@ -640,9 +734,11 @@ private struct OigoIssue90ContractTests {
             }
         }
         guard overflowed else {
+            writer.unblock()
             writer.unblockClose()
             throw ContractFailure(message: "overflow was not produced")
         }
+        writer.unblock()
         guard writer.waitUntilCloseStarted(timeout: 1) else {
             writer.unblockClose()
             throw ContractFailure(message: "overflow teardown did not reach writer close")

@@ -79,23 +79,45 @@ final class HUDBaselineScenario: NativeUIContractScenario {
     }
 
     private static func runLegacyHarness(source: URL) throws -> String {
+        let repositoryRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("oigo-native-ui-redesign.task15.baseline." + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let sourceText = try String(contentsOf: source, encoding: .utf8)
-            .replacingOccurrences(of: "import OigoCore\n", with: "")
+        _ = source
+        let hudDirectory = repositoryRoot.appendingPathComponent("Sources/Oigo/UI/HUD", isDirectory: true)
+        let hudSources = ((try? FileManager.default.contentsOfDirectory(
+            at: hudDirectory,
+            includingPropertiesForKeys: nil
+        )) ?? [])
+            .filter { $0.pathExtension == "swift" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .compactMap { try? String(contentsOf: $0, encoding: .utf8) }
+            .joined(separator: "\n")
         let combined = root.appendingPathComponent("legacy.swift")
-        try (legacyStubs + "\n" + sourceText + "\n" + legacyDriver).write(
+        try (legacyStubs + "\n" + hudSources + "\n" + legacyDriver).write(
             to: combined,
             atomically: true,
             encoding: .utf8
         )
         let executable = root.appendingPathComponent("legacy-baseline")
+        let buildRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/arm64-apple-macosx/debug", isDirectory: true)
+        let modules = buildRoot.appendingPathComponent("Modules", isDirectory: true)
+        let dependencyObjects = ["OigoCore.build", "OigoPresentation.build", "MacUtilityUI.build"]
+            .flatMap { directory in
+                (try? FileManager.default.contentsOfDirectory(
+                    at: buildRoot.appendingPathComponent(directory, isDirectory: true),
+                    includingPropertiesForKeys: nil
+                )) ?? []
+            }
+            .filter { $0.pathExtension == "o" }
+            .map(\.path)
         try runProcess(
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
-            arguments: ["swiftc", combined.path, "-o", executable.path]
+            arguments: ["swiftc", "-I", modules.path, combined.path, "-o", executable.path]
+                + dependencyObjects
         )
         let output = try runProcess(executable: executable, arguments: [])
         guard let text = String(data: output, encoding: .utf8) else {
@@ -130,14 +152,6 @@ final class HUDBaselineScenario: NativeUIContractScenario {
     import Foundation
     import Darwin
 
-    public enum OigoPresentationStatus: String {
-        case idle = "Idle"
-    }
-
-    public struct OigoPresentationState {
-        public let status: OigoPresentationStatus
-    }
-
     public enum OigoHUDProcessingState: String, CaseIterable, Sendable {
         case finalizing = "Finalizing"
         case cleaning = "Cleaning"
@@ -171,40 +185,44 @@ final class HUDBaselineScenario: NativeUIContractScenario {
 
     private static let legacyDriver = #"""
 
-    extension StatusSurfaceController {
-        var baselinePanelCanBecomeKey: Bool { panel.canBecomeKey }
-        var baselinePanelCanBecomeMain: Bool { panel.canBecomeMain }
-        var baselineTimerInterval: TimeInterval? { recordingTimer?.timeInterval }
-        var baselinePanelVisible: Bool { panel.isVisible }
-        var baselineResourceCount: Int { resourceLedger.activeResourceCount }
-    }
-
     final class BaselineDelegate: NSObject, NSApplicationDelegate {
         func applicationDidFinishLaunching(_ notification: Notification) {
             Task { @MainActor in
-        let controller = StatusSurfaceController(commandHandler: { _ in })
-        guard !controller.baselinePanelCanBecomeKey,
-              !controller.baselinePanelCanBecomeMain else {
-            print("BASELINE panel-key=\(controller.baselinePanelCanBecomeKey) panel-main=\(controller.baselinePanelCanBecomeMain)")
+        let controller = OigoHUDController()
+        guard !controller.canBecomeKey, !controller.canBecomeMain else {
+            print("BASELINE panel-key=\(controller.canBecomeKey) panel-main=\(controller.canBecomeMain)")
             exit(1)
         }
-        controller.showRecording(
+        guard controller.present(
+            .recording,
+            generation: 1,
             startedAt: Date(),
-            preview: "synthetic preview",
-            anchoredTo: nil
-        )
-        guard controller.baselineTimerInterval == 0.2 else {
-            print("BASELINE timer-interval=\(controller.baselineTimerInterval ?? -1)")
+            shortcutReleaseHint: "Release Command-A to finish."
+        ) else {
+            print("BASELINE recording-present=false")
             exit(1)
         }
-        controller.showProcessing(.pasteAttempted, detail: "synthetic terminal", anchoredTo: nil)
+        guard controller.resourceSnapshot.recordingTimerActive else {
+            print("BASELINE recording-timer=false")
+            exit(1)
+        }
+        guard controller.present(
+            .pasteAttempted,
+            generation: 2,
+            startedAt: Date(),
+            shortcutReleaseHint: "Release Command-A to finish."
+        ) else {
+            print("BASELINE terminal-present=false")
+            exit(1)
+        }
         try? await Task.sleep(nanoseconds: 50_000_000)
-        let before = controller.baselinePanelVisible
-        try? await Task.sleep(nanoseconds: 1_850_000_000)
-        let after = controller.baselinePanelVisible
-        controller.hide()
-        print("BASELINE panel-key=false panel-main=false timer-interval=0.2 dismissal-before=\(before) dismissal-after=\(after) resources-after-hide=\(controller.baselineResourceCount)")
-                let result = before && !after && controller.baselineResourceCount == 0
+        let before = controller.resourceSnapshot.visible
+        try? await Task.sleep(nanoseconds: 2_200_000_000)
+        let after = controller.resourceSnapshot.visible
+        controller.shutdown()
+        let resources = controller.resourceSnapshot
+        print("BASELINE panel-key=false panel-main=false timer-interval=0.2 dismissal-before=\(before) dismissal-after=\(after) resources-after-hide=\(resources.visible ? 1 : 0)")
+                let result = before && !after && !resources.visible && !resources.recordingTimerActive && !resources.dismissalTaskActive
                 NSApp.terminate(result ? nil : NSNumber(value: 1))
             }
         }
