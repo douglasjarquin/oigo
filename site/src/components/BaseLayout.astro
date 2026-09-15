@@ -3,12 +3,36 @@ import '../styles/global.css';
 import SiteFooter from './SiteFooter.astro';
 import SiteHeader from './SiteHeader.astro';
 
+interface FaqItem {
+  readonly question: string;
+  readonly answer: string;
+}
+
+type JsonLdGraphNode =
+  | { readonly '@type': 'WebSite'; readonly name: string; readonly url: string }
+  | {
+      readonly '@type': 'Organization';
+      readonly name: string;
+      readonly url: string;
+      readonly logo: string;
+      readonly sameAs: readonly string[];
+    }
+  | {
+      readonly '@type': 'FAQPage';
+      readonly mainEntity: readonly {
+        readonly '@type': 'Question';
+        readonly name: string;
+        readonly acceptedAnswer: { readonly '@type': 'Answer'; readonly text: string };
+      }[];
+    };
+
 interface Props {
   title: string;
   description: string;
   navigation?: boolean;
   document?: boolean;
   noindex?: boolean;
+  faq?: readonly FaqItem[];
 }
 
 const {
@@ -17,20 +41,41 @@ const {
   navigation = false,
   document: isDocument = false,
   noindex = false,
+  faq = [],
 } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const siteRoot = new URL(String(Astro.site).endsWith('/') ? String(Astro.site) : `${Astro.site}/`);
 const faviconUrl = new URL('favicon.png', siteRoot).href;
 const appleTouchIconUrl = new URL('apple-touch-icon.png', siteRoot).href;
 const ogImageUrl = new URL('og.png', siteRoot).href;
+const jsonLdGraph: JsonLdGraphNode[] = [
+  { '@type': 'WebSite', name: 'Oigo', url: siteRoot.href },
+  {
+    '@type': 'Organization',
+    name: 'Oigo',
+    url: siteRoot.href,
+    logo: ogImageUrl,
+    sameAs: ['https://github.com/douglasjarquin/oigo'],
+  },
+];
+if (faq.length > 0) {
+  jsonLdGraph.push({
+    '@type': 'FAQPage',
+    mainEntity: faq.map((item) => ({
+      '@type': 'Question',
+      name: item.question,
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: item.answer,
+      },
+    })),
+  });
+}
 const jsonLd = noindex
   ? null
   : JSON.stringify({
       '@context': 'https://schema.org',
-      '@graph': [
-        { '@type': 'WebSite', name: 'Oigo', url: siteRoot.href },
-        { '@type': 'Organization', name: 'Oigo', url: siteRoot.href },
-      ],
+      '@graph': jsonLdGraph,
     });
 ---
 
@@ -51,6 +96,8 @@ const jsonLd = noindex
     <meta property="og:url" content={canonical} />
     <meta property="og:image" content={ogImageUrl} />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImageUrl} />
     <title>{title}</title>
     {jsonLd && <script is:inline type="application/ld+json" set:html={jsonLd} />}

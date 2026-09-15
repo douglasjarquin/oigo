@@ -36,6 +36,110 @@ function canonicalHref(html) {
   return hrefFirst ? hrefFirst[1] : null;
 }
 
+function decodeHtml(text) {
+  return text
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'")
+    .replaceAll('&apos;', "'");
+}
+
+function jsonLdDocuments(html) {
+  const documents = [];
+  const scriptPattern = /<script\b[^>]*\btype="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi;
+  for (const match of html.matchAll(scriptPattern)) {
+    try {
+      documents.push(JSON.parse(match[1]));
+    } catch {
+      fail('JSON-LD is not valid JSON');
+    }
+  }
+  return documents;
+}
+
+function jsonLdNodes(documents) {
+  const nodes = [];
+  for (const document of documents) {
+    if (Array.isArray(document['@graph'])) {
+      nodes.push(...document['@graph']);
+    } else {
+      nodes.push(document);
+    }
+  }
+  return nodes;
+}
+
+function nodeTypes(node) {
+  const type = node['@type'];
+  if (Array.isArray(type)) {
+    return type;
+  }
+  return typeof type === 'string' ? [type] : [];
+}
+
+function findNodeByType(nodes, type) {
+  return nodes.find((node) => nodeTypes(node).includes(type)) ?? null;
+}
+
+function visibleFaq(html) {
+  return [...html.matchAll(/<summary\b[^>]*>([\s\S]*?)<\/summary>\s*<p\b[^>]*\bclass="faq-answer"[^>]*>([\s\S]*?)<\/p>/g)].map((match) => ({
+    question: decodeHtml(match[1].trim()),
+    answer: decodeHtml(match[2].trim()),
+  }));
+}
+
+function assertNoFaqPage(html, label) {
+  const nodes = jsonLdNodes(jsonLdDocuments(html));
+  if (findNodeByType(nodes, 'FAQPage')) {
+    fail(`${label} must not include FAQPage JSON-LD`);
+  }
+}
+
+function assertHomeFaqPage(html) {
+  const nodes = jsonLdNodes(jsonLdDocuments(html));
+  if (!findNodeByType(nodes, 'WebSite')) {
+    fail('index.html must keep WebSite JSON-LD');
+  }
+  if (!findNodeByType(nodes, 'Organization')) {
+    fail('index.html must keep Organization JSON-LD');
+  }
+  const faqPage = findNodeByType(nodes, 'FAQPage');
+  if (!faqPage) {
+    fail('index.html must include FAQPage JSON-LD');
+    return;
+  }
+  const entities = Array.isArray(faqPage.mainEntity) ? faqPage.mainEntity : [];
+  const visible = visibleFaq(html);
+  if (visible.length === 0) {
+    fail('index.html is missing visible FAQ entries to compare with FAQPage');
+    return;
+  }
+  if (entities.length !== visible.length) {
+    fail(`FAQPage mainEntity count is ${entities.length}, expected ${visible.length}`);
+  }
+  const count = Math.min(entities.length, visible.length);
+  for (let index = 0; index < count; index += 1) {
+    const entity = entities[index];
+    const expected = visible[index];
+    if (!nodeTypes(entity).includes('Question')) {
+      fail(`FAQPage mainEntity[${index}] must be a Question`);
+    }
+    if (entity.name !== expected.question) {
+      fail(`FAQPage Question name mismatch at ${index}`);
+    }
+    const acceptedAnswer = entity.acceptedAnswer;
+    if (!acceptedAnswer || !nodeTypes(acceptedAnswer).includes('Answer')) {
+      fail(`FAQPage mainEntity[${index}] must have an acceptedAnswer Answer`);
+      continue;
+    }
+    if (acceptedAnswer.text !== expected.answer) {
+      fail(`FAQPage acceptedAnswer text mismatch at ${index}`);
+    }
+  }
+}
+
 if (!existsSync(dist)) {
   fail('site/dist is missing; run npm run build first');
 } else {
@@ -91,6 +195,7 @@ if (!existsSync(dist)) {
     if (hasRobotsNoindex(home)) {
       fail('index.html must stay indexable');
     }
+    assertHomeFaqPage(home);
   }
 
   const designSystem = read('design-system/index.html');
@@ -98,6 +203,7 @@ if (!existsSync(dist)) {
     if (!hasRobotsNoindex(designSystem)) {
       fail('design-system/index.html must include robots noindex');
     }
+    assertNoFaqPage(designSystem, 'design-system/index.html');
   }
 
   const notFound = read('404.html');
@@ -105,6 +211,7 @@ if (!existsSync(dist)) {
     if (!hasRobotsNoindex(notFound)) {
       fail('404.html must include robots noindex');
     }
+    assertNoFaqPage(notFound, '404.html');
   }
 }
 
