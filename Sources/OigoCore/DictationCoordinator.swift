@@ -571,6 +571,11 @@ public final class DictationCoordinator {
             sessionStore = store
             currentSession = persistedSession
             let startupSession = persistedSession
+            let audioDescriptor = try store.createAudioFileDescriptor(for: persistedSession)
+            activeAudioDescriptor = try store.duplicateAudioFileDescriptor(
+                audioDescriptor,
+                for: persistedSession
+            )
 
             try await BoundedOperation.run(
                 operationID: operationID,
@@ -600,11 +605,6 @@ public final class DictationCoordinator {
                 )
             }
             try Task.checkCancellation()
-            let audioDescriptor = try store.createAudioFileDescriptor(for: persistedSession)
-            activeAudioDescriptor = try store.duplicateAudioFileDescriptor(
-                audioDescriptor,
-                for: persistedSession
-            )
             try capture.start(
                 to: audioDescriptor,
                 onBuffer: { buffer in
