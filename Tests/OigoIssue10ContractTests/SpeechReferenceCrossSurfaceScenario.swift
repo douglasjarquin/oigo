@@ -30,15 +30,12 @@ enum SpeechReferenceCrossSurfaceScenario {
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try SessionStore(rootDirectory: root)
         let capture = SpeechReferenceCapture()
-        let targetEnvironment = SpeechReferenceTargetEnvironment()
         let coordinator = DictationCoordinator()
         let scheduler = SpeechReferenceScheduler()
-        var target: InsertionTargetSnapshot?
         var operationError: Error?
         let bridge = GlobalShortcutOperationBridge(
             state: { coordinator.state },
             start: {
-                target = targetEnvironment.capture()
                 do { _ = try coordinator.startRecording(using: capture, store: store) }
                 catch { operationError = error }
             },
@@ -51,9 +48,8 @@ enum SpeechReferenceCrossSurfaceScenario {
         )
         scheduler.set(milliseconds: 0)
         guard bridge.receive(.pressed) == .start,
-              targetEnvironment.captureCount == 1,
               coordinator.state == .recording else {
-            throw SpeechReferenceContractFailure(description: "press did not capture target before start")
+            throw SpeechReferenceContractFailure(description: "press did not start recording")
         }
         switch gesture {
         case .hold:
@@ -75,13 +71,11 @@ enum SpeechReferenceCrossSurfaceScenario {
                 throw SpeechReferenceContractFailure(description: "locked next tap did not stop")
             }
         }
-        if let target { targetEnvironment.discard(target) }
         guard operationError == nil,
               coordinator.state == .complete,
               coordinator.activeResourceCount == 0,
-              !capture.isActive,
-              targetEnvironment.discardCount == 1 else {
-            throw SpeechReferenceContractFailure(description: "gesture left lifecycle resources or target ownership")
+              !capture.isActive else {
+            throw SpeechReferenceContractFailure(description: "gesture left lifecycle resources")
         }
         receipts.append(SpeechReferenceEvidence.receipt(
             scenario: gesture == .hold ? "shortcut-hold" : "shortcut-double-tap-lock",
@@ -95,6 +89,11 @@ enum SpeechReferenceCrossSurfaceScenario {
         let store: SessionStore
         let session: DictationSession
         let root: URL
+        let insertion: InsertionService
+        let targetEnvironment: SpeechReferenceTargetEnvironment
+        let pasteboard: SpeechReferencePasteboard
+        let eventSender: SpeechReferenceEventSender
+        let target: InsertionTargetSnapshot
     }
 
     private static func runSpeechDegradation(
@@ -110,6 +109,21 @@ enum SpeechReferenceCrossSurfaceScenario {
         let capture = SpeechReferenceCapture()
         let transcription = SpeechReferenceTranscription()
         let coordinator = DictationCoordinator()
+        let targetEnvironment = SpeechReferenceTargetEnvironment()
+        let pasteboard = SpeechReferencePasteboard()
+        let eventSender = SpeechReferenceEventSender()
+        let insertion = InsertionService(
+            targetEnvironment: targetEnvironment,
+            pasteboard: pasteboard,
+            eventSender: eventSender
+        )
+        let target = insertion.captureTarget()
+        var transfersTargetOwnership = false
+        defer {
+            if !transfersTargetOwnership {
+                insertion.discardTarget(target)
+            }
+        }
         _ = try await coordinator.startRecordingWithTranscription(
             using: capture,
             store: store,
@@ -118,6 +132,14 @@ enum SpeechReferenceCrossSurfaceScenario {
         )
         transcription.degrade()
         for _ in 0..<200 where !coordinator.liveTranscriptionDegraded { await Task.yield() }
+        guard coordinator.liveTranscriptionDegradation == .queueSaturated,
+              coordinator.currentSession?.metadata.failureCode == .transcriptionFailed,
+              coordinator.currentSession?.metadata.failureReason
+                == LiveTranscriptionDegradation.queueSaturated.rawValue else {
+            throw SpeechReferenceContractFailure(
+                description: "coordinator did not observe live Speech degradation callback"
+            )
+        }
         do {
             _ = try await coordinator.stopRecordingWithTranscription()
             throw SpeechReferenceContractFailure(description: "degraded Speech reported success")
@@ -144,10 +166,21 @@ enum SpeechReferenceCrossSurfaceScenario {
         receipts.append(SpeechReferenceEvidence.receipt(
             scenario: "speech-degradation-retry",
             generation: generation,
-            verdict: "RECOVERED"
+            verdict: "OBSERVED_AND_RECOVERED"
         ))
         transfersRootOwnership = true
-        return RetryContext(coordinator: coordinator, store: store, session: retried, root: root)
+        transfersTargetOwnership = true
+        return RetryContext(
+            coordinator: coordinator,
+            store: store,
+            session: retried,
+            root: root,
+            insertion: insertion,
+            targetEnvironment: targetEnvironment,
+            pasteboard: pasteboard,
+            eventSender: eventSender,
+            target: target
+        )
     }
 
     private static func runCopyOnly(
@@ -156,24 +189,23 @@ enum SpeechReferenceCrossSurfaceScenario {
         receipts: inout [SpeechReferenceReceipt]
     ) throws {
         defer { try? FileManager.default.removeItem(at: context.root) }
-        let targetEnvironment = SpeechReferenceTargetEnvironment()
-        targetEnvironment.validation = .applicationChanged
-        let pasteboard = SpeechReferencePasteboard()
-        let eventSender = SpeechReferenceEventSender()
-        let insertion = InsertionService(
-            targetEnvironment: targetEnvironment,
-            pasteboard: pasteboard,
-            eventSender: eventSender
+        context.targetEnvironment.validations = [.safe, .applicationChanged]
+        let result = context.insertion.insertRawText(
+            for: context.session,
+            store: context.store,
+            target: context.target
         )
-        let target = insertion.captureTarget()
-        let result = insertion.insertRawText(for: context.session, store: context.store, target: target)
         guard result.outcome == .copied,
               result.reasonCode == .applicationChanged,
-              pasteboard.writeCount == 1,
-              eventSender.sendCount == 0,
-              targetEnvironment.discardCount == 1,
+              context.targetEnvironment.captureCount == 1,
+              context.targetEnvironment.validationCount == 2,
+              context.pasteboard.writeCount == 1,
+              context.eventSender.sendCount == 1,
+              context.targetEnvironment.discardCount == 1,
               context.coordinator.activeResourceCount == 0 else {
-            throw SpeechReferenceContractFailure(description: "copy-only insertion was unsafe or leaked target ownership")
+            throw SpeechReferenceContractFailure(
+                description: "joined insertion did not validate, revalidate, copy safely, and release target ownership"
+            )
         }
         receipts.append(SpeechReferenceEvidence.receipt(
             scenario: "copy-only-insertion",

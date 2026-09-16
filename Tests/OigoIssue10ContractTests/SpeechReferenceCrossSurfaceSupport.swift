@@ -94,7 +94,8 @@ final class SpeechReferenceTranscription: TranscriptionController, @unchecked Se
 final class SpeechReferenceTargetEnvironment: InsertionTargetEnvironment {
     private(set) var captureCount = 0
     private(set) var discardCount = 0
-    var validation: TargetValidation = .safe
+    private(set) var validationCount = 0
+    var validations: [TargetValidation] = [.safe]
 
     func capture() -> InsertionTargetSnapshot {
         captureCount += 1
@@ -109,7 +110,9 @@ final class SpeechReferenceTargetEnvironment: InsertionTargetEnvironment {
 
     func validate(_ snapshot: InsertionTargetSnapshot) -> TargetValidation {
         _ = snapshot
-        return validation
+        let index = min(validationCount, validations.count - 1)
+        validationCount += 1
+        return validations[index]
     }
 
     func discard(_ snapshot: InsertionTargetSnapshot) {
@@ -138,9 +141,9 @@ final class SpeechReferenceEventSender: InsertionEventSender {
         revalidate: () -> TargetValidation
     ) -> InsertionEventResult {
         _ = processIdentifier
-        _ = revalidate
         sendCount += 1
-        return .dispatched
+        let validation = revalidate()
+        return validation == .safe ? .dispatched : .targetUnsafe(validation)
     }
 }
 

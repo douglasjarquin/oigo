@@ -275,6 +275,7 @@ public final class DictationCoordinator {
     private var acceptsCallbacks = false
     private var activeCaptureFailureForTesting: (() -> Void)?
     private var staleCaptureFailureForTesting: (() -> Void)?
+    private var asynchronousTerminalHandler: (@MainActor @Sendable (DictationSession) -> Void)?
     private var terminalOperationInFlight = false
     private var terminalOperationWaiters: [CheckedContinuation<Void, Never>] = []
     private let timeoutPolicy: TranscriptionTimeoutPolicy
@@ -390,7 +391,8 @@ public final class DictationCoordinator {
         store: SessionStore,
         now: Date = Date(),
         configuration: DictationConfigurationSnapshot? = nil,
-        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void = { _ in }
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void = { _ in },
+        onAsynchronousTerminal: @escaping @MainActor @Sendable (DictationSession) -> Void = { _ in }
     ) throws -> DictationSession {
         reapReleasedTranscription()
         guard activeCapture == nil else {
@@ -416,6 +418,7 @@ public final class DictationCoordinator {
             _ = try apply(.prepared)
             activeCapture = capture
             activeOperationID = operationID
+            asynchronousTerminalHandler = onAsynchronousTerminal
             acceptsCallbacks = true
             sessionStore = store
             currentSession = preparedSession
@@ -436,10 +439,7 @@ public final class DictationCoordinator {
                 onFinish: {},
                 onInterruption: { [weak self] (reason: String) in
                     Task { @MainActor [weak self] in
-                        _ = try? self?.interruptRecording(
-                            reason: reason,
-                            operationID: operationID
-                        )
+                        self?.handleCaptureInterruption(reason, operationID: operationID)
                     }
                 },
                 onFailure: { [weak self] (reason: String) in
@@ -484,7 +484,8 @@ public final class DictationCoordinator {
         now: Date = Date(),
         configuration: DictationConfigurationSnapshot? = nil,
         onAudioReady: @escaping () -> Void = {},
-        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in }
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in },
+        onAsynchronousTerminal: @escaping @MainActor @Sendable (DictationSession) -> Void = { _ in }
     ) async throws -> DictationSession {
         try await startRecordingWithTranscriptionInternal(
             using: capture,
@@ -495,7 +496,8 @@ public final class DictationCoordinator {
             now: now,
             configuration: configuration,
             onAudioReady: onAudioReady,
-            onUpdate: onUpdate
+            onUpdate: onUpdate,
+            onAsynchronousTerminal: onAsynchronousTerminal
         )
     }
 
@@ -508,7 +510,8 @@ public final class DictationCoordinator {
         now: Date = Date(),
         configuration: DictationConfigurationSnapshot? = nil,
         onAudioReady: @escaping () -> Void = {},
-        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in }
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void = { _ in },
+        onAsynchronousTerminal: @escaping @MainActor @Sendable (DictationSession) -> Void = { _ in }
     ) async throws -> DictationSession {
         try await startRecordingWithTranscriptionInternal(
             using: capture,
@@ -519,7 +522,8 @@ public final class DictationCoordinator {
             now: now,
             configuration: configuration,
             onAudioReady: onAudioReady,
-            onUpdate: onUpdate
+            onUpdate: onUpdate,
+            onAsynchronousTerminal: onAsynchronousTerminal
         )
     }
 
@@ -532,7 +536,8 @@ public final class DictationCoordinator {
         now: Date,
         configuration: DictationConfigurationSnapshot?,
         onAudioReady: @escaping () -> Void,
-        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void
+        onUpdate: @escaping @Sendable (TranscriptionUpdate) -> Void,
+        onAsynchronousTerminal: @escaping @MainActor @Sendable (DictationSession) -> Void
     ) async throws -> DictationSession {
         reapReleasedTranscription()
         guard activeCapture == nil, activeTranscription == nil else {
@@ -566,6 +571,7 @@ public final class DictationCoordinator {
             activeCapture = capture
             activeTranscription = transcription
             activeOperationID = operationID
+            asynchronousTerminalHandler = onAsynchronousTerminal
             transcriptionCancellationTask = nil
             acceptsCallbacks = true
             sessionStore = store
@@ -1463,6 +1469,7 @@ public final class DictationCoordinator {
               let session = currentSession else {
             return
         }
+        let handler = asynchronousTerminalHandler
 
         capture.cancel()
         lastFailureReason = reason
@@ -1480,6 +1487,7 @@ public final class DictationCoordinator {
         currentSession = failedSession
         releaseCapture()
         diagnostics.record("audio capture failed: " + reason)
+        handler?(failedSession)
     }
 
     private func handleTranscriptionCaptureFailure(
@@ -1501,6 +1509,7 @@ public final class DictationCoordinator {
               let session = currentSession else {
             return
         }
+        let handler = asynchronousTerminalHandler
 
         capture.cancel()
         let result: TranscriptionResult?
@@ -1526,6 +1535,7 @@ public final class DictationCoordinator {
             currentSession = timedOutSession
             releaseCapture()
             diagnostics.record("audio capture failure cancellation timed out")
+            handler?(timedOutSession)
             return
         }
         lastFailureReason = reason
@@ -1544,6 +1554,7 @@ public final class DictationCoordinator {
         currentSession = failedSession
         releaseCapture()
         diagnostics.record("audio capture and transcription failed: " + reason)
+        handler?(failedSession)
     }
 
     private static func failureReason(for error: Error) -> String {
@@ -1729,7 +1740,38 @@ public final class DictationCoordinator {
         guard activeOperationID == operationID, acceptsCallbacks else {
             return
         }
-        _ = try? await interruptRecordingWithTranscription(reason: reason)
+        let handler = asynchronousTerminalHandler
+        do {
+            let session = try await interruptRecordingWithTranscription(reason: reason)
+            handler?(session)
+        } catch {
+            if let session = currentSession,
+               [.failed, .interrupted].contains(session.metadata.state) {
+                handler?(session)
+            }
+        }
+    }
+
+    private func handleCaptureInterruption(
+        _ reason: String,
+        operationID: UUID
+    ) {
+        guard activeOperationID == operationID, acceptsCallbacks else {
+            return
+        }
+        let handler = asynchronousTerminalHandler
+        do {
+            let session = try interruptRecording(
+                reason: reason,
+                operationID: operationID
+            )
+            handler?(session)
+        } catch {
+            if let session = currentSession,
+               [.failed, .interrupted].contains(session.metadata.state) {
+                handler?(session)
+            }
+        }
     }
 
     private func releaseCapture() {
@@ -1741,6 +1783,7 @@ public final class DictationCoordinator {
             staleCaptureFailureForTesting = activeCaptureFailureForTesting
         }
         activeCaptureFailureForTesting = nil
+        asynchronousTerminalHandler = nil
         acceptsCallbacks = false
         activeCapture = nil
         activeAudioDescriptor = nil

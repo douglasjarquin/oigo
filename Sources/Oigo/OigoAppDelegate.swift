@@ -1146,6 +1146,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                                     generation: handle.generation
                                 )
                             }
+                        },
+                        onAsynchronousTerminal: { [weak self] session in
+                            self?.handleAsynchronousDictationTerminal(
+                                session,
+                                handle: handle
+                            )
                         }
                     )
                     recordingStartedAt = Date()
@@ -1401,6 +1407,35 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             NSLog("Oigo rejected the dictation finish command: %@", failureReason)
             updateSurface()
         }
+    }
+
+    private func handleAsynchronousDictationTerminal(
+        _ session: DictationSession,
+        handle: AppOperationHandle
+    ) {
+        guard operationGate.isCurrent(handle) else {
+            return
+        }
+        lastSession = session
+        recordingStartedAt = nil
+        livePreview = ""
+        let statusCopy = DictationTerminalContract.statusCopy(
+            sessionState: session.metadata.state,
+            insertionOutcome: session.metadata.insertionOutcome
+        )
+        insertionDisplayStatus = session.metadata.state == .failed ? .failed : nil
+        failureDetail = statusCopy
+        lastFailureCode = session.metadata.failureCode?.rawValue
+        shortcutFeedbackDetail = statusCopy
+        historyWindow?.showMessage(statusCopy)
+        resetShortcutInput()
+        clearTargetSnapshot(generation: handle.generation)
+        statusSurface.hideHUD(generation: handle.generation)
+        hudGeneration = nil
+        reportOnboardingTestFailure()
+        observeKeyboardTerminalization(generation: handle.generation)
+        operationGate.complete(handle)
+        updateSurface()
     }
 
     private func showBusy(_ reason: AppOperationBusyReason) {

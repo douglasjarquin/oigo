@@ -46,10 +46,15 @@ enum SpeechReferenceEvidence {
     static func writeIfRequested(_ receipts: [SpeechReferenceReceipt]) throws {
         let environment = ProcessInfo.processInfo.environment
         guard let rootPath = environment["OIGO_TASK7_EVIDENCE_DIR"] else { return }
-        guard !receipts.isEmpty,
-              receipts.allSatisfy({ isSHA($0.sourceSHA) && isSHA($0.integratedSHA) }) else {
+        guard let expectedSourceSHA = environment["OIGO_EXPECTED_SOURCE_SHA"],
+              let expectedIntegratedSHA = environment["OIGO_EXPECTED_INTEGRATED_SHA"] else {
             throw SpeechReferenceContractFailure(description: "evidence receipt SHA binding is missing")
         }
+        try validate(
+            receipts,
+            expectedSourceSHA: expectedSourceSHA,
+            expectedIntegratedSHA: expectedIntegratedSHA
+        )
         let root = URL(fileURLWithPath: rootPath, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
@@ -69,6 +74,26 @@ enum SpeechReferenceEvidence {
             to: root.appendingPathComponent("speech-reference-cross-surface-receipt.json"),
             options: .atomic
         )
+    }
+
+    static func validate(
+        _ receipts: [SpeechReferenceReceipt],
+        expectedSourceSHA: String,
+        expectedIntegratedSHA: String
+    ) throws {
+        guard !receipts.isEmpty,
+              isSHA(expectedSourceSHA),
+              isSHA(expectedIntegratedSHA),
+              receipts.allSatisfy({
+                  isSHA($0.sourceSHA)
+                      && isSHA($0.integratedSHA)
+                      && $0.sourceSHA == expectedSourceSHA
+                      && $0.integratedSHA == expectedIntegratedSHA
+              }) else {
+            throw SpeechReferenceContractFailure(
+                description: "evidence receipt SHA does not match expected source identity"
+            )
+        }
     }
 
     private static func isSHA(_ value: String) -> Bool {

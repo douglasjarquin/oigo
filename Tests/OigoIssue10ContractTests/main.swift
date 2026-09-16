@@ -34,6 +34,8 @@ private struct OigoIssue10ContractTests {
             ("transcription shutdown cancels active transcription", testTranscriptionShutdownCancelsActiveTranscription),
             ("insertion terminal paths release store references", testInsertionTerminalPathsReleaseStoreReferences),
             ("live speech degradation preserves recording and retry", testLiveSpeechDegradationPreservesRecordingAndRetry),
+            ("asynchronous failure releases app operation ownership", testAsynchronousFailureReleasesAppOperationOwnership),
+            ("speech evidence rejects wrong valid SHA", testSpeechEvidenceRejectsWrongValidSHA),
             ("speech reference cross surface", SpeechReferenceCrossSurfaceScenario.run)
         ]
 
@@ -1015,6 +1017,99 @@ private struct OigoIssue10ContractTests {
               DictationFailureCode.infer(from: "speech_queue_saturated") == .transcriptionFailed,
               DictationFailureCode.infer(from: "audio file write failed: disk full") == .audioWriteFailed else {
             throw ContractFailure(message: "live speech degradation did not expose saved-audio retry as a distinct outcome")
+        }
+    }
+
+    private static func testAsynchronousFailureReleasesAppOperationOwnership() async throws {
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let coordinator = DictationCoordinator()
+        let gate = AppOperationGate()
+        let firstCapture = ScriptedAudioCapture()
+        let firstTranscription = ProcessingTranscriptionController()
+        let firstHandle: AppOperationHandle
+        switch gate.begin(.dictation) {
+        case .success(let handle):
+            firstHandle = handle
+        case .failure(let reason):
+            throw ContractFailure(message: "fixture could not acquire initial operation ownership: \(reason)")
+        }
+        var shortcutOwnsOperation = true
+        var terminalState: DictationSessionState?
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: firstCapture,
+            store: store,
+            transcription: firstTranscription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1),
+            onAsynchronousTerminal: { session in
+                guard gate.isCurrent(firstHandle) else { return }
+                terminalState = session.metadata.state
+                shortcutOwnsOperation = false
+                gate.complete(firstHandle)
+            }
+        )
+
+        firstCapture.emitFailure("audio file write failed: deterministic fixture")
+        for _ in 0..<200 where !gate.isIdle { await Task.yield() }
+        guard coordinator.state == .failed,
+              terminalState == .failed,
+              gate.isIdle,
+              !shortcutOwnsOperation,
+              coordinator.activeResourceCount == 0 else {
+            throw ContractFailure(message: "asynchronous failure retained coordinator or app operation ownership")
+        }
+
+        let secondHandle: AppOperationHandle
+        switch gate.begin(.dictation) {
+        case .success(let handle):
+            secondHandle = handle
+        case .failure(let reason):
+            throw ContractFailure(message: "fresh command remained blocked after terminal callback: \(reason)")
+        }
+        let secondCapture = ScriptedAudioCapture()
+        let secondTranscription = ProcessingTranscriptionController()
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: secondCapture,
+            store: store,
+            transcription: secondTranscription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        guard coordinator.state == .recording, gate.isCurrent(secondHandle) else {
+            throw ContractFailure(message: "fresh command was accepted by the gate but did not start recording")
+        }
+        _ = try await coordinator.cancelRecordingWithTranscription()
+        gate.complete(secondHandle)
+    }
+
+    private static func testSpeechEvidenceRejectsWrongValidSHA() throws {
+        let actual = String(repeating: "a", count: 40)
+        let expected = String(repeating: "b", count: 40)
+        let receipt = SpeechReferenceReceipt(
+            referenceSHA: String(repeating: "c", count: 40),
+            sourceSHA: actual,
+            integratedSHA: actual,
+            scenario: "wrong-valid-sha",
+            generation: 1,
+            verdict: "MUST_REJECT",
+            cleanup: SpeechReferenceCleanup(
+                activeResources: 0,
+                retainedTargets: 0,
+                temporaryRootsRemoved: true
+            ),
+            evidenceClass: "deterministic-synthetic-no-native-claim"
+        )
+        do {
+            try SpeechReferenceEvidence.validate(
+                [receipt],
+                expectedSourceSHA: expected,
+                expectedIntegratedSHA: expected
+            )
+            throw ContractFailure(message: "unrelated syntactically valid SHA was accepted")
+        } catch let failure as SpeechReferenceContractFailure {
+            guard failure.description.contains("does not match expected source identity") else {
+                throw ContractFailure(message: "wrong valid SHA failed for an unrelated reason: \(failure)")
+            }
         }
     }
 

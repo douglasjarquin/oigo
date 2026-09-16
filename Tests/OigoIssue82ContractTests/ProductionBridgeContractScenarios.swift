@@ -169,10 +169,23 @@ extension OigoIssue82ContractTests {
             from: "        case .success(let handle):",
             to: "        }\n    }"
         )
+        let asynchronousTerminal = try sourceSlice(
+            source,
+            from: "    private func handleAsynchronousDictationTerminal(",
+            to: "    private func showBusy(_ reason: AppOperationBusyReason) {"
+        )
         let capture = try requiredOffset("let capturedTarget = try await insertion.captureTargetBeforeMicrophonePermission", in: start)
         let publish = try requiredOffset("hudGeometrySnapshot = hudGeometrySession.beginDictation", in: start)
-        guard !acceptedStart.contains("updateSurface()"), capture < publish else {
-            throw ContractFailure(message: "startup UI publication can precede target capture")
+        guard !acceptedStart.contains("updateSurface()"),
+              capture < publish,
+              start.contains("onAsynchronousTerminal:"),
+              asynchronousTerminal.contains("guard operationGate.isCurrent(handle)"),
+              asynchronousTerminal.contains("resetShortcutInput()"),
+              asynchronousTerminal.contains("clearTargetSnapshot(generation: handle.generation)"),
+              asynchronousTerminal.contains("statusSurface.hideHUD(generation: handle.generation)"),
+              try requiredOffset("operationGate.complete(handle)", in: asynchronousTerminal)
+                < requiredOffset("updateSurface()", in: asynchronousTerminal) else {
+            throw ContractFailure(message: "startup target order or asynchronous terminal ownership contract is incomplete")
         }
 
         for (name, begin, end) in [
