@@ -1,7 +1,7 @@
 # Speech reference crosswalk
 
 Oigo uses `/Users/douglasjarquin/github/oss/speech.md` at revision `0886702c8e6c6ce56853ae72e9a07760dfaf60d5` as a read-only behavioral reference.
-The reference is normative only for dictation gesture timing and Speech-session ordering.
+The reference informs dictation gesture timing, shortcut capture, Fn delivery, and Speech-session ordering.
 Oigo's product contracts and design packet remain authoritative for durability, insertion safety, presentation, and scope.
 
 The inventory below classifies every reference behavior considered by `stabilize-oigo-speech-reference` as adopted, preserved or strengthened, or excluded.
@@ -9,12 +9,18 @@ No deterministic result in this crosswalk is native TCC, microphone, Speech, Acc
 
 ## Adopted reference behavior
 
+The production capture path lets AVAudioEngine own System Default, routes a pinned input once before format inspection, then reuses that prepared engine for recording, matching `SpeechPipeline.startMicrophone` ordering.
+Oigo reads the input node's hardware format because the output scope on this host retains the previous device's rate after routing.
+The September 16 native reproduction observed 44.1 kHz hardware with a stale 48 kHz output scope; re-routing and using that output format aborted inside `installTap`.
+Live and saved-audio recognition each construct one analyzer without an input stream, set its context, and start exactly one stream, as in the reference.
+
 | Reference behavior | Reference source | Oigo implementation | Deterministic acceptance scenario |
 | --- | --- | --- | --- |
 | Recording starts on the first valid key press, before the gesture is resolved. | `README.md`; `Sources/SpeechMD/Dictation/DictationGesture.swift` | `Sources/OigoCore/GlobalShortcutIntentController.swift`; `Sources/OigoCore/GlobalShortcutOperationBridge.swift` | `oigo-issue82-contract-tests`: `gesture press starts before release`; `oigo-issue10-contract-tests`: `speech reference cross surface` receipt `shortcut-hold` |
 | A release before 350 ms waits for a second press; a release at or after 350 ms finishes the hold. | `Sources/SpeechMD/Dictation/DictationGesture.swift` | `Sources/OigoCore/GlobalShortcutIntentController.swift` | `oigo-issue82-contract-tests`: 349, 350, and 351 ms gesture scenarios; cross-surface receipt `shortcut-hold` |
 | A second press strictly before the 350 ms deadline locks the existing recording without starting another one; the next tap stops it once. | `README.md`; `Sources/SpeechMD/Dictation/DictationGesture.swift` | `Sources/OigoCore/GlobalShortcutIntentController.swift`; `Sources/OigoCore/GlobalShortcutOperationBridge.swift` | `oigo-issue82-contract-tests`: second-press and locked-next-tap scenarios; cross-surface receipt `shortcut-double-tap-lock` |
 | Carbon delivers distinct press and release edges for a configured global shortcut. | `Sources/SpeechMD/Settings/GlobalHotkey.swift` | `Sources/OigoHotKey/GlobalHotKeyRegistrar.swift`; `Sources/OigoHotKey/GlobalShortcutRegistration.swift` | `oigo-issue82-contract-tests`: registrar, production bridge, and lifecycle ordering scenarios |
+| Shortcut capture receives Command key equivalents, captures Fn flags changes, and temporarily suspends global delivery. | `Sources/SpeechMD/Settings/ShortcutRecorderView.swift`; `Sources/SpeechMD/Settings/FunctionKeyTap.swift` | `ShortcutRecorderControl`; `ShortcutConfigurationTransaction`; `FunctionKeyShortcutBackend` | Native shortcut-recorder and shortcut-registration contracts cover capture, suspension, restoration, and permission failure. |
 | The original frontmost target is captured when dictation begins, before Oigo can take focus. | `Sources/SpeechMD/Dictation/DictationSession.swift`; `Sources/SpeechMD/Dictation/TextInserter.swift` | `Sources/OigoInsertion/InsertionService.swift`; `Sources/Oigo/OigoAppDelegate.swift` | `oigo-issue77-contract-tests`; the joined cross-surface scenario carries one captured target through coordinator recording and retry into production insertion |
 | Live partials are published directly and do not wait for formatting or persistence consumers. | `README.md`; `Sources/SpeechMD/Dictation/DictationSession.swift`; `Sources/SpeechMD/Speech/SpeechPipeline.swift` | `Sources/OigoTranscription/TranscriptionService.swift`; `Sources/OigoCore/DictationCoordinator.swift` | `oigo-issue5-contract-tests`; `oigo-issue78-contract-tests` |
 | Speech analysis is prepared before capture is treated as recording, and finalization completes before final text is consumed. | `Sources/SpeechMD/Speech/SpeechPipeline.swift`; `Sources/SpeechMD/Dictation/DictationSession.swift` | `Sources/OigoTranscription/TranscriptionService.swift`; `Sources/OigoCore/DictationCoordinator.swift` | `oigo-issue5-contract-tests`; `oigo-issue78-contract-tests`; `oigo-issue90-contract-tests` |
@@ -57,7 +63,7 @@ No deterministic result in this crosswalk is native TCC, microphone, Speech, Acc
 | The draggable waveform island, spring animation, edge drop zones, elapsed ticker, warning countdown, and result bubble | `Sources/SpeechMD/Island/DynamicIslandView.swift`; `Sources/SpeechMD/Island/IslandController.swift`; `Sources/SpeechMD/Island/IslandDropZones.swift` | Oigo keeps its passive, bounded, one-line HUD; HUD and gallery contracts reject the reference shell. |
 | Temporary restoration of prior clipboard contents after paste | `Sources/SpeechMD/Dictation/TextInserter.swift` | Oigo intentionally retains the transcript for recovery; `docs/native-raw-insertion.md` and insertion contracts enforce this. |
 | In-memory-only dictation history | `README.md`; `Sources/SpeechMD/Dictation/DictationSession.swift` | Oigo persists metadata, audio, and transcript artifacts through `SessionStore`; durability contracts enforce recovery. |
-| The reference-specific Fn HID event tap and automatic mutation of the user's Globe-key system preference | `Sources/SpeechMD/Settings/FunctionKeyTap.swift`; `Sources/SpeechMD/Settings/GlobeKeyAction.swift` | Task 7 adds no global keyboard-preference mutation or new HID interception; Oigo shortcut delivery remains app-owned and covered by its existing registrar contracts. |
+| Automatic mutation of the user's Globe-key system preference | `Sources/SpeechMD/Settings/GlobeKeyAction.swift` | Oigo handles Fn through a permission-gated event tap and does not change the system keyboard preference. |
 | Reference-native success claims | Reference app runtime behavior cannot be transferred by source comparison. | The Task 7 receipts use `deterministic-synthetic-no-native-claim`; live TCC, Speech, microphone, Accessibility, and cross-app proof are reserved for dedicated native QA. |
 
 ## Task 7 receipt contract

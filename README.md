@@ -63,6 +63,11 @@ Microphone permission is required to record.
 Accessibility permission is required to paste into the app you were using.
 Without Accessibility, Oigo still copies the transcript and keeps History.
 
+The dictation key can be Fn or a combination such as Option-Command-R.
+Fn also requires Accessibility permission so Oigo can receive its press and release events.
+While you record a new dictation key in Settings, Oigo temporarily suspends the global shortcut.
+After setup, the new shortcut applies immediately after it is registered and saved.
+
 Oigo asks for these permissions during onboarding and can reopen System Settings from Settings.
 
 ## Instant vs Clean
@@ -181,5 +186,10 @@ The `Swift build and contract harness` job is the deterministic SwiftPM suite.
 The `Xcode app bundle` job builds and inspects unsigned Release `Oigo.app`.
 A green package build is not app-bundle validation.
 Hosted CI does not prove native TCC, Speech, Accessibility, hardware, signing, or clean-account dogfood.
+
+For a local check of the production live and saved-audio Speech paths, run `swift run oigo-spike --scenario production-speech --fixture /path/to/mono-speech.caf` with a nonempty mono Float32 recording containing English speech.
+This check installs Apple-managed English speech assets if needed and fails if either path returns empty text.
+It prints transcript byte counts and an isolated evidence directory without printing the transcript.
+It does not exercise microphone capture, global shortcut delivery, or automatic paste.
 
 See `docs/branch-protection.md` for the repository-admin protection handoff that this worktree cannot apply.
