@@ -15,6 +15,7 @@ private struct ContractFailure: Error, CustomStringConvertible {
 
 @main
 @available(macOS 14.0, *)
+@MainActor
 private struct OigoIssue90ContractTests {
     static func main() {
         let filter = CommandLine.arguments.dropFirst().drop(while: { $0 != "--filter" }).dropFirst().first

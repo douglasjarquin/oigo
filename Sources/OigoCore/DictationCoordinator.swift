@@ -577,13 +577,13 @@ public final class DictationCoordinator {
                 stage: .startup,
                 timeout: timeoutPolicy.budget(for: .startup),
                 registry: operationRegistry
-            ) {
+            ) { [self] in
                 try await transcription.start(
                     session: startupSession,
                     format: format,
                     store: store,
                     onUpdate: { [weak self] update in
-                        Task { @MainActor [weak self] in
+                        Task { @MainActor [weak self, operationID, onUpdate] in
                             guard self?.activeOperationID == operationID,
                                   self?.acceptsCallbacks == true else {
                                 return
@@ -612,7 +612,7 @@ public final class DictationCoordinator {
                 },
                 onFinish: {},
                 onInterruption: { [weak self] reason in
-                    Task { @MainActor [weak self] in
+                    Task { @MainActor [weak self, operationID] in
                         await self?.handleTranscriptionCaptureInterruption(
                             reason,
                             operationID: operationID
