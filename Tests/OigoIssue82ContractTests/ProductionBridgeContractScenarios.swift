@@ -8,6 +8,7 @@ extension OigoIssue82ContractTests {
         var trace: [String] = []
         var starts = 0
         var stops = 0
+        let scheduler = ManualGestureScheduler()
         let operationBridge = GlobalShortcutOperationBridge(
             state: { state },
             start: {
@@ -17,7 +18,9 @@ extension OigoIssue82ContractTests {
             stop: {
                 stops += 1
                 trace.append("stop:keyboard")
-            }
+            },
+            clock: { scheduler.now },
+            scheduler: { delay, action in scheduler.schedule(after: delay, action: action) }
         )
         let productionBridge = GlobalShortcutProductionBridge(operations: operationBridge)
         let backend = RecordingRegistrationBackend()
@@ -30,9 +33,11 @@ extension OigoIssue82ContractTests {
         }
         let generation = try activeGeneration(of: registrar)
 
+        scheduler.setNow(milliseconds: 0)
         backend.emit(.pressed, generation: generation)
         state = .recording
         productionBridge.observeState()
+        scheduler.setNow(milliseconds: 350)
         backend.emit(.released, generation: generation)
 
         guard trace == ["pressed", "start:keyboard", "released", "stop:keyboard"] else {
@@ -53,10 +58,12 @@ extension OigoIssue82ContractTests {
         state = .idle
         starts = 0
         stops = 0
+        scheduler.setNow(milliseconds: 1_000)
         backend.emit(.pressed, generation: replacementGeneration)
         backend.emit(.pressed, generation: replacementGeneration)
         state = .recording
         productionBridge.observeState()
+        scheduler.setNow(milliseconds: 1_350)
         backend.emit(.released, generation: replacementGeneration)
         backend.emit(.released, generation: replacementGeneration)
         guard starts == 1, stops == 1 else {

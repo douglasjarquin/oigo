@@ -3,26 +3,58 @@ import OigoHotKey
 
 @MainActor
 extension OigoIssue82ContractTests {
-    static func testIntentRapidTap() throws {
+    static func testIntentPressReleaseDuplicateCharacterization() throws {
+        // Given a fresh shortcut intent owner.
         var controller = GlobalShortcutIntentController()
-        guard controller.receive(.pressed, state: .idle) == .start,
-              controller.receive(.pressed, state: .idle, isRepeat: true) == .ignoredRepeat,
-              controller.receive(.released, state: .idle) == .releaseLatched,
-              controller.observe(.recording) == .stop,
-              controller.receive(.released, state: .finalizing) == .ignoredProcessing(.finalizing) else {
-            throw ContractFailure(message: "rapid release before readiness did not produce one latched stop")
+
+        // When one physical press is followed by repeat, duplicate, release, and duplicate release edges.
+        let press = controller.receive(.pressed, state: .idle)
+        let repeatPress = controller.receive(.pressed, state: .preparing, isRepeat: true)
+        let duplicatePress = controller.receive(.pressed, state: .preparing)
+        let release = controller.receive(.released, state: .preparing)
+        let duplicateRelease = controller.receive(.released, state: .preparing)
+
+        // Then exactly one start is emitted, release stays pending, and duplicate edges remain inert.
+        guard press == .start,
+              repeatPress == .ignoredRepeat,
+              duplicatePress == .ignoredDuplicatePress,
+              release != .stop,
+              duplicateRelease == .ignoredDuplicateRelease,
+              controller.ownsKeyboardOperation,
+              !controller.isPhysicalDown else {
+            throw ContractFailure(message: "press/release duplicate characterization changed")
         }
 
-        print("TRACE: intent rapid tap start -> release-latched -> stop")
+        print("CHARACTERIZATION: start=1 repeat=ignored duplicate-press=ignored release=pending duplicate-release=ignored ownership=keyboard")
+    }
+
+    static func testIntentRapidTap() throws {
+        var controller = GlobalShortcutIntentController()
+        let press = controller.receive(.pressed, state: .idle, now: .zero)
+        let repeatPress = controller.receive(.pressed, state: .idle, isRepeat: true, now: .zero)
+        let shortRelease = controller.receive(.released, state: .idle, now: .milliseconds(100))
+        guard case .awaitingSecondPress(let generation) = shortRelease else {
+            throw ContractFailure(message: "rapid release did not await a second press")
+        }
+        guard press == .start,
+              repeatPress == .ignoredRepeat,
+              controller.observe(.recording) == nil,
+              controller.timeout(generation: generation, state: .recording) == .stop,
+              controller.receive(.released, state: .finalizing) == .ignoredProcessing(.finalizing) else {
+            throw ContractFailure(message: "rapid release did not remain active until its timeout")
+        }
+
+        print("TRACE: intent rapid tap start -> awaiting-second-press -> timeout -> stop")
     }
 
     static func testIntentDuplicatesAndProcessing() throws {
         var controller = GlobalShortcutIntentController()
-        guard controller.receive(.pressed, state: .idle) == .start,
+        guard controller.receive(.pressed, state: .idle, now: .zero) == .start,
               controller.receive(.pressed, state: .preparing) == .ignoredDuplicatePress,
-              controller.receive(.released, state: .preparing) == .releaseLatched,
-              controller.receive(.released, state: .preparing) == .ignoredDuplicateRelease,
-              controller.observe(.recording) == .stop else {
+              controller.receive(.released, state: .preparing, now: .milliseconds(100)) == .awaitingSecondPress(generation: 1),
+              controller.receive(.released, state: .preparing, now: .milliseconds(101)) == .ignoredDuplicateRelease,
+              controller.observe(.recording) == nil,
+              controller.timeout(generation: 1, state: .recording) == .stop else {
             throw ContractFailure(message: "duplicate shortcut edges changed ownership or stop count")
         }
 
@@ -40,23 +72,37 @@ extension OigoIssue82ContractTests {
         var starts = 0
         var stops = 0
         var feedback: [GlobalShortcutIntentResult] = []
+        let scheduler = ManualGestureScheduler()
         let bridge = GlobalShortcutOperationBridge(
             state: { state },
             start: { starts += 1 },
             stop: { stops += 1 },
-            feedback: { feedback.append($0) }
+            feedback: { feedback.append($0) },
+            clock: { scheduler.now },
+            scheduler: { delay, action in scheduler.schedule(after: delay, action: action) }
         )
 
-        guard bridge.receive(.pressed) == .start,
-              bridge.receive(.pressed, isRepeat: true) == .ignoredRepeat,
-              bridge.receive(.released) == .releaseLatched,
+        scheduler.setNow(milliseconds: 0)
+        let press = bridge.receive(.pressed)
+        let repeatPress = bridge.receive(.pressed, isRepeat: true)
+        scheduler.setNow(milliseconds: 100)
+        let release = bridge.receive(.released)
+        guard case .awaitingSecondPress = release else {
+            throw ContractFailure(message: "bridge did not schedule the startup second-press window")
+        }
+        guard press == .start,
+              repeatPress == .ignoredRepeat,
               starts == 1,
               stops == 0 else {
-            throw ContractFailure(message: "bridge did not preserve one keyboard start and latch release during startup")
+            throw ContractFailure(message: "bridge did not preserve one keyboard start during the short release window")
         }
 
         state = .recording
-        guard bridge.observeState() == .stop,
+        guard bridge.observeState() == nil else {
+            throw ContractFailure(message: "recording readiness stopped a short release before timeout")
+        }
+        scheduler.advance(toMilliseconds: 450)
+        guard bridge.observeState() == nil,
               bridge.observeState() == nil,
               bridge.receive(.released) == .ignoredRecordingNotOwned,
               stops == 1,
@@ -71,7 +117,7 @@ extension OigoIssue82ContractTests {
             throw ContractFailure(message: "processing release changed the active operation")
         }
 
-        print("COUNTS: startup_start=1 latched_stop=1 repeated_observe_stop=0 duplicate_release_stop=0")
+        print("COUNTS: startup_start=1 timeout_stop=1 repeated_observe_stop=0 duplicate_release_stop=0")
     }
 
     static func testAppBridgeProcessingFeedback() throws {
@@ -79,11 +125,14 @@ extension OigoIssue82ContractTests {
         var starts = 0
         var stops = 0
         var feedback: [GlobalShortcutIntentResult] = []
+        let scheduler = ManualGestureScheduler()
         let bridge = GlobalShortcutOperationBridge(
             state: { state },
             start: { starts += 1 },
             stop: { stops += 1 },
-            feedback: { feedback.append($0) }
+            feedback: { feedback.append($0) },
+            clock: { scheduler.now },
+            scheduler: { delay, action in scheduler.schedule(after: delay, action: action) }
         )
 
         guard bridge.receive(.pressed) == .ignoredProcessing(.finalizing),
@@ -103,9 +152,16 @@ extension OigoIssue82ContractTests {
         }
 
         state = .idle
-        guard bridge.receive(.released) == .ignoredDuplicateRelease,
-              bridge.receive(.pressed) == .start,
-              bridge.receive(.released) == .releaseLatched,
+        scheduler.setNow(milliseconds: 0)
+        let invalidRelease = bridge.receive(.released)
+        let press = bridge.receive(.pressed)
+        scheduler.setNow(milliseconds: 100)
+        let shortRelease = bridge.receive(.released)
+        guard case .awaitingSecondPress = shortRelease else {
+            throw ContractFailure(message: "short release did not enter the second-press window")
+        }
+        guard invalidRelease == .ignoredDuplicateRelease,
+              press == .start,
               starts == 1,
               stops == 0 else {
             throw ContractFailure(message: "invalid release or pre-readiness release changed operation ownership")
@@ -118,10 +174,12 @@ extension OigoIssue82ContractTests {
         }
 
         state = .idle
+        scheduler.setNow(milliseconds: 1_000)
         guard bridge.receive(.pressed) == .start else {
             throw ContractFailure(message: "keyboard operation did not resume after interruption reset")
         }
         state = .recording
+        scheduler.setNow(milliseconds: 1_350)
         guard bridge.receive(.released) == .stop,
               starts == 2,
               stops == 1 else {
