@@ -46,6 +46,8 @@ struct OigoIssue82ContractTests {
             ("native QA target field classification", testNativeQATargetFieldClassification),
             ("app bridge processing feedback", testAppBridgeProcessingFeedback),
             ("production bridge", testProductionBridge),
+            ("production bridge lifecycle resets", testProductionBridgeLifecycleResets),
+            ("app shortcut lifecycle ordering", testAppShortcutLifecycleOrdering),
             ("configuration atomic save", testConfigurationAtomicSave),
             ("configuration failure restoration", testConfigurationFailureRestoration),
             ("settings store persistence failure restoration", testSettingsStorePersistenceFailureRestoration),

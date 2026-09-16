@@ -312,6 +312,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
+        resetShortcutInput()
         NSApp.setActivationPolicy(.accessory)
         installApplicationMenu()
         startInputDeviceInventoryMonitor()
@@ -339,6 +340,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
+        resetShortcutInput()
         speechAssetCheckTask?.cancel()
         speechAssetCheckTask = nil
         presentationPublicationFence.shutdown()
@@ -351,7 +353,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             lastFailureCode = "shortcut-teardown"
             FileHandle.standardError.write(Data(("ERROR shortcut-teardown: \(error)\n").utf8))
         }
-        resetShortcutInput()
         let storageWasChecking = storageCapability.health == .checking
         storageCapability.shutdown()
         deviceInventoryMonitor.stop()
@@ -658,10 +659,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             startTest: { [weak self] generation in
                 self?.onboardingWindow?.focusTestField()
                 self?.beginOnboardingProductionTest(generation: generation)
-                _ = self?.shortcutBridge.receive(.pressed)
+                self?.resetShortcutInput()
+                self?.handleMouseToggle(allowBeforeSetup: true)
             },
             stopTest: { [weak self] in
-                _ = self?.shortcutBridge.receive(.released)
+                self?.resetShortcutInput()
+                self?.handleMouseToggle(allowBeforeSetup: true)
             },
             cancelTest: { [weak self] in
                 self?.clearOnboardingTestBinding()
@@ -822,6 +825,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         guard operationGate.isAcceptingCommands else {
             return
         }
+        resetShortcutInput()
         let interruptedGeneration = hudGeneration
         let handle = operationGate.preempt(.interruption)
         operationGate.run(handle, completes: true) { @MainActor [weak self] in
@@ -843,6 +847,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleMouseToggle(allowBeforeSetup: Bool = false) {
+        resetShortcutInput()
         performanceInstrumentation.mark(.shortcutReceived)
         guard allowBeforeSetup || onboardingStore.load().isComplete else {
             showOnboarding(OigoSystemSupportEvaluator.current())
@@ -958,7 +963,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     self.operationGate.complete(handle)
                 }
             }
-            updateSurface()
         }
     }
 
@@ -1002,6 +1006,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func cancelTestDictation() {
+        resetShortcutInput()
         let handle = operationGate.currentHandle
         operationGate.cancelCurrent()
         Task { @MainActor [weak self] in
@@ -1045,11 +1050,6 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 failureDetail = nil
                 lastFailureCode = nil
                 shortcutFeedbackDetail = nil
-                hudGeneration = handle.generation
-                hudGeometrySnapshot = hudGeometrySession.beginDictation(
-                    generation: handle.generation
-                )
-                updateSurface()
                 let readiness = KeyboardStartupReadinessSnapshot(
                     microphonePermission: microphonePermissionState(),
                     inputSelection: settings.selectedInput,
@@ -1080,6 +1080,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 targetSnapshot = capturedTarget
                 targetSnapshotGeneration = handle.generation
+                hudGeneration = handle.generation
+                hudGeometrySnapshot = hudGeometrySession.beginDictation(
+                    generation: handle.generation
+                )
+                updateSurface()
                 try Task.checkCancellation()
                 guard microphonePermissionState() == .granted else {
                     clearTargetSnapshot(generation: handle.generation)
@@ -3446,6 +3451,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 try self.settingsStore.save(previousSettings)
             }
         )
+        resetShortcutInput()
         guard validation.isAvailable else {
             updateSurface()
             return validation

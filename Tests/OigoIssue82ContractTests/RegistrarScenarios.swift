@@ -73,6 +73,10 @@ final class RecordingRegistrationBackend: GlobalShortcutRegistrationBackend {
         }
     }
 
+    func emitMalformed(_ edge: GlobalShortcutEdge, generation: UInt64) {
+        registrations.last?.receive(GlobalShortcutEvent(edge: edge, generation: generation))
+    }
+
     var activeRegistrationCount: Int {
         registrations.count
     }
