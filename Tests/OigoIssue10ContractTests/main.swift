@@ -33,7 +33,8 @@ private struct OigoIssue10ContractTests {
             ("transcription shutdown waits for registered task", testTranscriptionShutdownWaitsForRegisteredTask),
             ("transcription shutdown cancels active transcription", testTranscriptionShutdownCancelsActiveTranscription),
             ("insertion terminal paths release store references", testInsertionTerminalPathsReleaseStoreReferences),
-            ("live speech degradation preserves recording and retry", testLiveSpeechDegradationPreservesRecordingAndRetry)
+            ("live speech degradation preserves recording and retry", testLiveSpeechDegradationPreservesRecordingAndRetry),
+            ("speech reference cross surface", SpeechReferenceCrossSurfaceScenario.run)
         ]
 
         var failures = 0
