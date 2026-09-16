@@ -61,7 +61,7 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             requiredOutput.append("PASS onboarding-happy")
         }
         guard requiredOutput.allSatisfy(output.contains) else {
-            throw ContractInputError(category: "unexpected-onboarding-state-output")
+            throw ContractInputError(category: "unexpected-onboarding-state-output:" + output)
         }
         try writeReceipt(output: output, fixture: fixture, evidenceRoot: arguments.evidenceRoot)
         print(output, terminator: "")
@@ -127,7 +127,7 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
     }
 
     private static func dependencyObjects(_ repositoryRoot: URL) -> [String] {
-        ["OigoCore.build", "OigoHotKey.build"].flatMap { directory in
+        ["OigoCore.build", "OigoHotKey.build", "MacUtilityUI.build"].flatMap { directory in
             let root = repositoryRoot.appendingPathComponent(".build/arm64-apple-macosx/debug/" + directory)
             return (try? FileManager.default.contentsOfDirectory(
                 at: root,
@@ -297,7 +297,8 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
                 throw ProbeError.missingAccessibilityValue
             }
             let candidate = ToggleShortcut(keyCode: 0, modifiers: ToggleShortcutModifiers.command)
-            recorder.beginRecording()
+            try sendClick(in: content, identifier: "oigo.onboarding.change-shortcut")
+            guard recorder.isRecording, window.firstResponder === recorder else { throw ProbeError.focusMismatch }
             guard let candidateEvent = NSEvent.keyEvent(
                 with: .keyDown,
                 location: .zero,
@@ -340,6 +341,12 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             }
             let sessionID = UUID()
             guard let generation = factory.testGenerations.last else { throw ProbeError.missingGeneration }
+            window.makeFirstResponder(testAction)
+            testAction.performClick(nil)
+            guard factory.testStopCount == 1,
+                  window.firstResponder === testField || testField.currentEditor() === window.firstResponder else {
+                throw ProbeError.focusMismatch
+            }
             let staleObservation = try observe(controller)
             let staleSettings = factory.settingsStore.load()
             controller.applyTestCompletion(
@@ -639,9 +646,9 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
         ) throws {
             guard let content = window.contentView,
                   let stage = fixture.stages[key],
-                  visibleText(in: content, identifier: "oigo.onboarding.title") == stage.title,
+                  visibleText(in: content, identifier: "oigo.onboarding.title") == (key == "done" ? "Ready to Dictate" : stage.title),
                   visibleText(in: content, identifier: "oigo.onboarding.body").hasPrefix(stage.body),
-                  accessibilityLabel(in: content, identifier: "oigo.onboarding.title") == stage.title,
+                  accessibilityLabel(in: content, identifier: "oigo.onboarding.title") == (key == "done" ? "Ready to Dictate" : stage.title),
                   accessibilityLabel(in: content, identifier: "oigo.onboarding.body") != "",
                   accessibilityLabel(in: content, identifier: "oigo.onboarding.progress") != "",
                   let close = window.standardWindowButton(.closeButton),
@@ -765,6 +772,10 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
         func captureStage(_ controller: OnboardingWindowController, key: String) throws {
             guard let window = controller.window,
                   let content = window.contentView else { throw ProbeError.missingWindow }
+            if let primary = findButton(in: content, identifier: fixture.controls.continue) {
+                guard window.defaultButtonCell === primary.cell else { throw ProbeError.keyboardMismatch }
+                print("PRIMARY \(key) active=\(NSApp.isActive) key=\(window.isKeyWindow) default=\(window.defaultButtonCell === primary.cell) enabled=\(primary.isEnabled)")
+            }
             let appearances = [
                 ("light", "NSAppearanceNameAqua"),
                 ("dark", "NSAppearanceNameDarkAqua"),
@@ -773,10 +784,87 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             for (label, appearanceName) in appearances {
                 window.appearance = NSAppearance(named: NSAppearance.Name(appearanceName))
                 content.appearance = window.appearance
+                content.layoutSubtreeIfNeeded()
                 window.displayIfNeeded()
+                try assertVisibleLayout(content, key: key)
                 let path = evidenceRoot.appendingPathComponent("onboarding-\(key)-\(label).png")
                 guard capture(content, to: path) else { throw ProbeError.captureFailure }
             }
+        }
+
+        func assertVisibleLayout(_ content: NSView, key: String) throws {
+            func descendants(_ view: NSView) -> [NSView] {
+                guard !view.isHidden else { return [] }
+                return [view] + view.subviews.flatMap(descendants)
+            }
+            let views = descendants(content)
+            guard abs(content.bounds.width - 640) < 1,
+                  content.bounds.height <= 540,
+                  !views.contains(where: { $0.accessibilityIdentifier().hasPrefix("oigo.onboarding.progress.stage-") }),
+                  let heading = views.first(where: { $0.accessibilityIdentifier() == "oigo.onboarding.heading" }),
+                  let footer = views.first(where: { $0.accessibilityIdentifier() == "oigo.onboarding.footer" }),
+                  abs(heading.frame.width - 576) < 1,
+                  abs(footer.frame.height - 58) < 1 else { throw ProbeError.stageSemanticsMismatch }
+            for view in views where view is NSControl || view.accessibilityIdentifier() == "oigo.onboarding.detail-card" {
+                let frame = view.convert(view.bounds, to: content)
+                guard content.bounds.insetBy(dx: -1, dy: -1).contains(frame) else {
+                    print("CLIPPED \(key) \(view.accessibilityIdentifier()) \(frame)")
+                    throw ProbeError.captureFailure
+                }
+            }
+            if key == "system" || key == "done" {
+                guard views.contains(where: { $0.accessibilityIdentifier() == "oigo.onboarding.detail-card" }) else {
+                    throw ProbeError.stageSemanticsMismatch
+                }
+                if key == "done" {
+                    let summaries = views.filter { $0.accessibilityIdentifier().hasPrefix("oigo.onboarding.summary.") }
+                    guard summaries.map({ $0.accessibilityIdentifier() }) == [
+                        "shortcut", "microphone", "language", "default mode", "insertion"
+                    ].map({ "oigo.onboarding.summary." + $0 }),
+                          let help = views.first(where: { $0.accessibilityIdentifier() == "oigo.onboarding.completion-help" }) as? NSTextField,
+                          help.stringValue.contains("Automatic paste verified"),
+                          help.stringValue.contains("Storage ready"),
+                          help.font!.pointSize < 13 else {
+                        throw ProbeError.stageSemanticsMismatch
+                    }
+                }
+            }
+            if key == "language" {
+                let popups = views.compactMap { $0 as? NSPopUpButton }
+                guard popups.count == 3,
+                      popups.allSatisfy({
+                          $0.frame.width <= 240 && abs($0.convert($0.bounds, to: content).maxX - 608) < 1
+                      }),
+                      let meter = views.first(where: { $0.accessibilityIdentifier() == "oigo.onboarding.input-level" }) as? NSLevelIndicator,
+                      meter.frame.width <= 100,
+                      meter.doubleValue == 0.5,
+                      abs(meter.convert(meter.bounds, to: content).maxX - 608) < 1,
+                      visibleText(in: content, identifier: "oigo.onboarding.input-level-help").contains("Nothing is stored"),
+                      visibleText(in: content, identifier: "oigo.onboarding.asset-status") == "Not installed" else {
+                    throw ProbeError.stageSemanticsMismatch
+                }
+            }
+            if key == "shortcut" {
+                guard let recorder = findRecorder(in: content),
+                      let change = findButton(in: content, identifier: "oigo.onboarding.change-shortcut"),
+                      recorder.frame.width <= 160, recorder.frame.height <= 30,
+                      change.superview === recorder.superview, !change.isHidden else {
+                    throw ProbeError.stageSemanticsMismatch
+                }
+            }
+            if key == "tryIt" {
+                guard let field = findField(in: content, identifier: fixture.controls.testField),
+                      let action = findButton(in: content, identifier: fixture.controls.stageAction),
+                      let instructions = views.first(where: { $0.accessibilityIdentifier() == "oigo.onboarding.test-instructions" }) as? NSTextField,
+                      let checklist = views.first(where: { $0.accessibilityLabel() as? String == "Try It checklist" }),
+                      (1...4).allSatisfy({ instructions.stringValue.contains("\($0).") }),
+                      action.superview === field.superview,
+                      action.frame.width < 170,
+                      action.convert(action.bounds, to: content).maxY < field.convert(field.bounds, to: content).minY,
+                      instructions.convert(instructions.bounds, to: content).minY > field.convert(field.bounds, to: content).maxY,
+                      checklist.subviews.count == 9 else { throw ProbeError.stageSemanticsMismatch }
+            }
+            print("PASS visible-layout \(key) width=640 heading=576 footer=58")
         }
 
         func productionReport(sessionID: UUID) -> OigoOnboardingProductionReport {
@@ -908,6 +996,10 @@ final class OnboardingStatesScenario: NativeUIContractScenario {
             view.displayIgnoringOpacity(view.bounds, in: context)
         }
         NSGraphicsContext.restoreGraphicsState()
+        for (x, y) in [(0, 0), (bitmap.pixelsWide - 1, 0), (0, bitmap.pixelsHigh - 1),
+                       (bitmap.pixelsWide - 1, bitmap.pixelsHigh - 1)] {
+            guard let color = bitmap.colorAt(x: x, y: y), color.alphaComponent > 0.99 else { return false }
+        }
         guard let png = bitmap.representation(using: .png, properties: [:]) else { return false }
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
