@@ -283,7 +283,10 @@ public final class FunctionKeyShortcutBackend: GlobalShortcutRegistrationBackend
             callback: { _, type, event, context in
                 guard let context else { return Unmanaged.passUnretained(event) }
                 let handle = Unmanaged<Handle>.fromOpaque(context).takeUnretainedValue()
-                return MainActor.assumeIsolated { handle.handle(type: type, event: event) }
+                let consumed = MainActor.assumeIsolated {
+                    handle.handle(type: type, event: event) == nil
+                }
+                return consumed ? nil : Unmanaged.passUnretained(event)
             },
             userInfo: Unmanaged.passUnretained(handle).toOpaque()
         ) else {
