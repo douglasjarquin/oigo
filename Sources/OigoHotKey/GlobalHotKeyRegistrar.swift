@@ -1,4 +1,6 @@
 import Carbon.HIToolbox
+import ApplicationServices
+import CoreGraphics
 import OigoCore
 
 public enum GlobalShortcutRegistrationError: Error, Equatable, CustomStringConvertible, Sendable {
@@ -7,9 +9,15 @@ public enum GlobalShortcutRegistrationError: Error, Equatable, CustomStringConve
     case registerHotKeyCleanup(registerStatus: OSStatus, removeHandlerStatus: OSStatus)
     case unregisterHotKey(OSStatus)
     case removeHandler(OSStatus)
+    case functionKeyPermissionRequired
+    case functionKeyTapUnavailable
 
     public var description: String {
         switch self {
+        case .functionKeyPermissionRequired:
+            return "Fn requires Accessibility permission. Enable Oigo in System Settings > Privacy & Security > Accessibility, then save the shortcut again"
+        case .functionKeyTapUnavailable:
+            return "Could not create the Fn keyboard event tap. Check Oigo's Accessibility permission, then save the shortcut again"
         case .installHandler(let status):
             return "could not install the global shortcut handler (OSStatus \(status))"
         case .registerHotKey(let status):
@@ -116,14 +124,20 @@ public final class CarbonGlobalShortcutBackend: GlobalShortcutRegistrationBacken
 
     private var nextEventID: UInt32 = 0
     private var retainedFailedRegistrations: [RegistrationHandle] = []
+    private let functionKeyBackend: any GlobalShortcutRegistrationBackend
 
-    public init() {}
+    public init(functionKeyBackend: any GlobalShortcutRegistrationBackend = FunctionKeyShortcutBackend()) {
+        self.functionKeyBackend = functionKeyBackend
+    }
 
     public func register(
         shortcut: ToggleShortcut,
         generation: UInt64,
         receive: @escaping @MainActor (GlobalShortcutEvent) -> Void
     ) throws -> any GlobalShortcutRegistrationHandle {
+        if shortcut.isFunctionKey {
+            return try functionKeyBackend.register(shortcut: shortcut, generation: generation, receive: receive)
+        }
         nextEventID = nextEventID == UInt32.max ? 1 : nextEventID + 1
         let handle = RegistrationHandle(
             generation: generation,
@@ -185,7 +199,113 @@ public final class CarbonGlobalShortcutBackend: GlobalShortcutRegistrationBacken
     }
 
     public func unregister(_ handle: any GlobalShortcutRegistrationHandle) throws {
-        try (handle as? RegistrationHandle)?.close()
+        if let handle = handle as? RegistrationHandle {
+            try handle.close()
+        } else {
+            try functionKeyBackend.unregister(handle)
+        }
+    }
+}
+
+@MainActor
+public final class FunctionKeyShortcutBackend: GlobalShortcutRegistrationBackend {
+    private let accessibilityTrusted: () -> Bool
+
+    public init(accessibilityTrusted: @escaping () -> Bool = { AXIsProcessTrusted() }) {
+        self.accessibilityTrusted = accessibilityTrusted
+    }
+
+    private final class Handle: GlobalShortcutRegistrationHandle {
+        let generation: UInt64
+        let receive: @MainActor (GlobalShortcutEvent) -> Void
+        var tap: CFMachPort?
+        var source: CFRunLoopSource?
+        var state = FunctionKeyShortcutState(
+            isDown: CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn)
+        )
+
+        init(generation: UInt64, receive: @escaping @MainActor (GlobalShortcutEvent) -> Void) {
+            self.generation = generation
+            self.receive = receive
+        }
+
+        func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                if let edge = state.reset(
+                    isDown: CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn)
+                ) {
+                    deliver(edge)
+                }
+                if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+                return Unmanaged.passUnretained(event)
+            }
+            guard type == .flagsChanged,
+                  event.getIntegerValueField(.keyboardEventKeycode) == Int64(ToggleShortcut.fnKeyCode) else {
+                return Unmanaged.passUnretained(event)
+            }
+            if let edge = state.update(isDown: event.flags.contains(.maskSecondaryFn)) {
+                deliver(edge)
+            }
+            return nil
+        }
+
+        private func deliver(_ edge: GlobalShortcutEdge) {
+            let event = GlobalShortcutEvent(edge: edge, generation: generation)
+            Task { @MainActor [receive] in receive(event) }
+        }
+
+        func close() {
+            if let tap {
+                CGEvent.tapEnable(tap: tap, enable: false)
+                CFMachPortInvalidate(tap)
+            }
+            if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
+            tap = nil
+            source = nil
+        }
+    }
+
+    public func register(
+        shortcut: ToggleShortcut,
+        generation: UInt64,
+        receive: @escaping @MainActor (GlobalShortcutEvent) -> Void
+    ) throws -> any GlobalShortcutRegistrationHandle {
+        guard shortcut == .fn else {
+            throw ShortcutConfigurationError.invalidCommittedShortcut("The Fn backend only accepts Fn by itself")
+        }
+        guard accessibilityTrusted() else {
+            throw GlobalShortcutRegistrationError.functionKeyPermissionRequired
+        }
+        let handle = Handle(generation: generation, receive: receive)
+        guard let tap = CGEvent.tapCreate(
+            tap: .cghidEventTap, place: .headInsertEventTap, options: .defaultTap,
+            eventsOfInterest: CGEventMask(1 << CGEventType.flagsChanged.rawValue),
+            callback: { _, type, event, context in
+                guard let context else { return Unmanaged.passUnretained(event) }
+                let handle = Unmanaged<Handle>.fromOpaque(context).takeUnretainedValue()
+                return MainActor.assumeIsolated { handle.handle(type: type, event: event) }
+            },
+            userInfo: Unmanaged.passUnretained(handle).toOpaque()
+        ) else {
+            throw GlobalShortcutRegistrationError.functionKeyTapUnavailable
+        }
+        handle.tap = tap
+        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
+            handle.close()
+            throw GlobalShortcutRegistrationError.functionKeyTapUnavailable
+        }
+        handle.source = source
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        guard CGEvent.tapIsEnabled(tap: tap) else {
+            handle.close()
+            throw GlobalShortcutRegistrationError.functionKeyTapUnavailable
+        }
+        return handle
+    }
+
+    public func unregister(_ handle: any GlobalShortcutRegistrationHandle) throws {
+        (handle as? Handle)?.close()
     }
 }
 

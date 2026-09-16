@@ -30,11 +30,16 @@ public final class ShortcutConfigurationTransaction {
     private let onEvent: @MainActor (GlobalShortcutEvent) -> Void
     private var configurationError: String?
     private var registrationReady: Bool
+    private var recording = false
+    private var saving = false
 
     public private(set) var committedShortcut: ToggleShortcut
     public private(set) var candidateShortcut: ToggleShortcut
 
     public var registrationStatus: GlobalShortcutRegistrationStatus {
+        guard !recording, !saving else {
+            return .inactive("Global shortcut is suspended while recording a shortcut")
+        }
         guard registrationReady else {
             return .inactive("Global shortcut registration is waiting for setup")
         }
@@ -105,15 +110,18 @@ public final class ShortcutConfigurationTransaction {
             return basicValidation
         }
 
-        if registrationReady {
-            do {
-                try registrar.register(shortcut: candidate, onEvent: onEvent)
-            } catch {
-                candidateShortcut = committedShortcut
-                let validation = OigoShortcutValidation.conflict(String(describing: error))
-                configurationError = Self.message(for: validation)
-                return validation
+        saving = true
+        defer { saving = false }
+        do {
+            try registrar.register(shortcut: candidate, onEvent: eventReceiver)
+            if !registrationReady {
+                try registrar.unregister()
             }
+        } catch {
+            candidateShortcut = committedShortcut
+            let validation = OigoShortcutValidation.conflict(String(describing: error))
+            configurationError = Self.message(for: validation)
+            return validation
         }
 
         do {
@@ -137,7 +145,7 @@ public final class ShortcutConfigurationTransaction {
             }
             if registrationReady {
                 do {
-                    try registrar.register(shortcut: committedShortcut, onEvent: onEvent)
+                    try registrar.register(shortcut: committedShortcut, onEvent: eventReceiver)
                 } catch let restoreRegistrationError {
                     failure += ". Previous shortcut registration could not be restored: \(restoreRegistrationError)"
                     candidateShortcut = committedShortcut
@@ -171,6 +179,7 @@ public final class ShortcutConfigurationTransaction {
 
     public func activateCommittedShortcut() throws {
         registrationReady = true
+        guard !recording else { return }
         guard !isCommittedShortcutActive else {
             return
         }
@@ -182,7 +191,7 @@ public final class ShortcutConfigurationTransaction {
             )
         }
         do {
-            try registrar.register(shortcut: committedShortcut, onEvent: onEvent)
+            try registrar.register(shortcut: committedShortcut, onEvent: eventReceiver)
             configurationError = nil
         } catch {
             let validation = OigoShortcutValidation.conflict(String(describing: error))
@@ -193,9 +202,7 @@ public final class ShortcutConfigurationTransaction {
 
     public func deactivateShortcut() throws {
         registrationReady = false
-        if registrar.status.isActive {
-            try registrar.unregister()
-        }
+        try registrar.unregister()
     }
 
     public func setRegistrationReady(_ ready: Bool) throws {
@@ -215,6 +222,29 @@ public final class ShortcutConfigurationTransaction {
 
     public func clearError() {
         configurationError = nil
+    }
+
+    public func setRecording(_ recording: Bool) throws {
+        guard self.recording != recording else { return }
+        self.recording = recording
+        if recording {
+            do {
+                try registrar.unregister()
+            } catch {
+                self.recording = false
+                configurationError = String(describing: error)
+                throw error
+            }
+        } else if registrationReady {
+            try activateCommittedShortcut()
+        }
+    }
+
+    private var eventReceiver: @MainActor (GlobalShortcutEvent) -> Void {
+        { [weak self] event in
+            guard let self, self.isOperationReady else { return }
+            self.onEvent(event)
+        }
     }
 
     private static func message(for validation: OigoShortcutValidation) -> String? {

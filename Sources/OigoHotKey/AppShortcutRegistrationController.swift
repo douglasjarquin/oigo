@@ -65,6 +65,10 @@ public final class AppShortcutRegistrationController {
         transaction.setCandidate(candidate)
     }
 
+    public func setRecording(_ recording: Bool) throws {
+        try transaction.setRecording(recording)
+    }
+
     public func validate(_ candidate: ToggleShortcut) -> OigoShortcutValidation {
         transaction.validate(candidate)
     }

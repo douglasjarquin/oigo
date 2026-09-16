@@ -5,6 +5,34 @@ public enum GlobalShortcutEdge: Equatable, Sendable {
     case released
 }
 
+public struct FunctionKeyShortcutState: Sendable {
+    private var isDown: Bool
+    private var deliveredPress = false
+
+    public init(isDown: Bool) {
+        self.isDown = isDown
+    }
+
+    public mutating func update(isDown: Bool) -> GlobalShortcutEdge? {
+        guard self.isDown != isDown else { return nil }
+        self.isDown = isDown
+        if isDown {
+            deliveredPress = true
+            return .pressed
+        }
+        guard deliveredPress else { return nil }
+        deliveredPress = false
+        return .released
+    }
+
+    public mutating func reset(isDown: Bool) -> GlobalShortcutEdge? {
+        let edge: GlobalShortcutEdge? = deliveredPress ? .released : nil
+        self.isDown = isDown
+        deliveredPress = false
+        return edge
+    }
+}
+
 public struct GlobalShortcutEvent: Equatable, Sendable {
     public let edge: GlobalShortcutEdge
     public let generation: UInt64

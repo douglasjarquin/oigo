@@ -9,6 +9,7 @@ public final class ShortcutRecorderControl: NSControl {
 
     public var onCandidateChange: ((ToggleShortcut) -> Void)?
     public var onValidationError: ((String) -> Void)?
+    public var onRecordingChange: ((Bool) throws -> Void)?
 
     private var shortcutBeforeRecording: ToggleShortcut
 
@@ -38,7 +39,7 @@ public final class ShortcutRecorderControl: NSControl {
     }
 
     public func beginRecording() {
-        guard isEnabled else {
+        guard isEnabled, !isRecording else {
             return
         }
         if let window, window.firstResponder !== self, !window.makeFirstResponder(self) {
@@ -46,6 +47,12 @@ public final class ShortcutRecorderControl: NSControl {
         }
         shortcutBeforeRecording = shortcut
         validationError = nil
+        do {
+            try onRecordingChange?(true)
+        } catch {
+            reject(String(describing: error))
+            return
+        }
         isRecording = true
         updatePresentation()
     }
@@ -57,10 +64,12 @@ public final class ShortcutRecorderControl: NSControl {
         shortcut = shortcutBeforeRecording
         validationError = nil
         isRecording = false
+        finishRecording()
         updatePresentation()
     }
 
     public func clearShortcut() {
+        cancelRecording()
         shortcutBeforeRecording = .default
         shortcut = .default
         validationError = nil
@@ -71,6 +80,7 @@ public final class ShortcutRecorderControl: NSControl {
     }
 
     public func restoreCandidate(_ shortcut: ToggleShortcut) {
+        cancelRecording()
         shortcutBeforeRecording = shortcut
         self.shortcut = shortcut
         validationError = nil
@@ -86,6 +96,14 @@ public final class ShortcutRecorderControl: NSControl {
         beginRecording()
     }
 
+    public override func accessibilityPerformPress() -> Bool {
+        guard isEnabled else {
+            return false
+        }
+        beginRecording()
+        return isRecording
+    }
+
     public override func resignFirstResponder() -> Bool {
         guard super.resignFirstResponder() else {
             return false
@@ -97,6 +115,40 @@ public final class ShortcutRecorderControl: NSControl {
     public override func cancelOperation(_ sender: Any?) {
         _ = sender
         cancelRecording()
+    }
+
+    public override func viewWillMove(toWindow newWindow: NSWindow?) {
+        cancelRecording()
+        if let window {
+            NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: window)
+            NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: window)
+        }
+        if let newWindow {
+            for name in [NSWindow.didResignKeyNotification, NSWindow.willCloseNotification] {
+                NotificationCenter.default.addObserver(self, selector: #selector(windowEndedRecording(_:)), name: name, object: newWindow)
+            }
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    @objc private func windowEndedRecording(_ notification: Notification) {
+        cancelRecording()
+    }
+
+    public override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard isRecording else { return false }
+        keyDown(with: event)
+        return true
+    }
+
+    public override func flagsChanged(with event: NSEvent) {
+        guard isRecording, event.keyCode == ToggleShortcut.fnKeyCode else {
+            super.flagsChanged(with: event)
+            return
+        }
+        guard event.modifierFlags.contains(.function) else { return }
+        let otherModifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        capture(ToggleShortcut(keyCode: ToggleShortcut.fnKeyCode, modifiers: carbonModifiers(for: otherModifiers)))
     }
 
     public override func keyDown(with event: NSEvent) {
@@ -122,6 +174,10 @@ public final class ShortcutRecorderControl: NSControl {
 
         let modifiers = carbonModifiers(for: flags)
         let candidate = ToggleShortcut(keyCode: UInt32(event.keyCode), modifiers: modifiers)
+        capture(candidate)
+    }
+
+    private func capture(_ candidate: ToggleShortcut) {
         switch OigoShortcutValidator.validate(candidate, occupied: []) {
         case .available:
             shortcut = candidate
@@ -129,6 +185,7 @@ public final class ShortcutRecorderControl: NSControl {
             isRecording = false
             onCandidateChange?(candidate)
             sendAction(action, to: target)
+            finishRecording()
             updatePresentation()
         case .conflict(let message), .invalid(let message):
             reject(message)
@@ -178,6 +235,7 @@ public final class ShortcutRecorderControl: NSControl {
     private func configureAppearance() {
         wantsLayer = true
         toolTip = "Click to record a global shortcut"
+        setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityLabel("Global shortcut")
         updatePresentation()
@@ -204,6 +262,14 @@ public final class ShortcutRecorderControl: NSControl {
         validationError = message
         onValidationError?(message)
         updatePresentation()
+    }
+
+    private func finishRecording() {
+        do {
+            try onRecordingChange?(false)
+        } catch {
+            reject(String(describing: error))
+        }
     }
 
     private func updatePresentation() {
