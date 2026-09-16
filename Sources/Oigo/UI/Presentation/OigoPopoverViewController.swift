@@ -277,9 +277,10 @@ public final class OigoPopoverViewController: NSViewController {
         copy.orientation = .vertical
         copy.alignment = .leading
         copy.spacing = MacUITokens.Spacing.tight
-        let title = NSTextField(labelWithString: notice.title)
+        let title = NSTextField(wrappingLabelWithString: notice.title)
         title.font = .systemFont(ofSize: 12.5, weight: .semibold)
         title.textColor = MacUITokens.Colors.primaryLabel
+        title.maximumNumberOfLines = 2
         let body = MacUIFieldHelpText(notice.body)
         body.font = .systemFont(ofSize: 11.5)
         copy.addArrangedSubview(title)
