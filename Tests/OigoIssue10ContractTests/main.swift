@@ -34,6 +34,8 @@ private struct OigoIssue10ContractTests {
             ("transcription shutdown cancels active transcription", testTranscriptionShutdownCancelsActiveTranscription),
             ("insertion terminal paths release store references", testInsertionTerminalPathsReleaseStoreReferences),
             ("live speech degradation preserves recording and retry", testLiveSpeechDegradationPreservesRecordingAndRetry),
+            ("app delegate clears stop during preparation after startup failure", testAppDelegateClearsStopDuringPreparationAfterStartupFailure),
+            ("app delegate clears stop during preparation after async capture failure", testAppDelegateClearsStopDuringPreparationAfterAsyncCaptureFailure),
             ("asynchronous failure releases app operation ownership", testAsynchronousFailureReleasesAppOperationOwnership),
             ("speech evidence rejects wrong valid SHA", testSpeechEvidenceRejectsWrongValidSHA),
             ("speech reference cross surface", SpeechReferenceCrossSurfaceScenario.run)
@@ -1082,6 +1084,104 @@ private struct OigoIssue10ContractTests {
         gate.complete(secondHandle)
     }
 
+    private static func testAppDelegateClearsStopDuringPreparationAfterStartupFailure() async throws {
+        var finishIntent = AppDelegateFinishIntent()
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let coordinator = DictationCoordinator()
+        let gate = AppOperationGate()
+        let firstHandle = try beginDictation(using: gate)
+
+        // Given: stop arrives while the AppDelegate is preparing its first startup.
+        finishIntent.request(for: firstHandle)
+
+        // When: capture startup fails, the AppDelegate terminalizes its generation, and a fresh startup succeeds.
+        do {
+            _ = try await coordinator.startRecordingWithTranscription(
+                using: StartupFailingCapture(),
+                store: store,
+                transcription: ProcessingTranscriptionController(),
+                format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+            )
+            throw ContractFailure(message: "startup failure fixture unexpectedly started recording")
+        } catch let failure as ContractFailure {
+            throw failure
+        } catch {
+            finishIntent.clear(for: firstHandle)
+        }
+        gate.complete(firstHandle)
+        let freshHandle = try beginDictation(using: gate)
+        let freshCapture = ScriptedAudioCapture()
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: freshCapture,
+            store: store,
+            transcription: ProcessingTranscriptionController(),
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        let finishFreshStart = finishIntent.consumeAfterSuccessfulStart(for: freshHandle)
+
+        // Then: the fresh recording does not inherit the failed startup's stop request.
+        guard coordinator.state == .recording, !finishFreshStart else {
+            throw ContractFailure(message: "fresh startup immediately finished after a failed preparation")
+        }
+        _ = try await coordinator.cancelRecordingWithTranscription()
+        gate.complete(freshHandle)
+    }
+
+    private static func testAppDelegateClearsStopDuringPreparationAfterAsyncCaptureFailure() async throws {
+        var finishIntent = AppDelegateFinishIntent()
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let coordinator = DictationCoordinator()
+        let gate = AppOperationGate()
+        let firstHandle = try beginDictation(using: gate)
+        let firstCapture = ScriptedAudioCapture()
+
+        // Given: stop arrives while the AppDelegate is preparing its first startup.
+        finishIntent.request(for: firstHandle)
+
+        // When: capture terminalizes asynchronously, the AppDelegate terminalizes its generation, and a fresh startup succeeds.
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: firstCapture,
+            store: store,
+            transcription: ProcessingTranscriptionController(),
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1),
+            onAsynchronousTerminal: { _ in
+                finishIntent.clear(for: firstHandle)
+                gate.complete(firstHandle)
+            }
+        )
+        firstCapture.emitFailure("deterministic asynchronous capture failure")
+        for _ in 0..<200 where !gate.isIdle { await Task.yield() }
+        let freshHandle = try beginDictation(using: gate)
+        let freshCapture = ScriptedAudioCapture()
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: freshCapture,
+            store: store,
+            transcription: ProcessingTranscriptionController(),
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        let finishFreshStart = finishIntent.consumeAfterSuccessfulStart(for: freshHandle)
+
+        // Then: the fresh recording does not inherit the asynchronously terminalized stop request.
+        guard coordinator.state == .recording, !finishFreshStart else {
+            throw ContractFailure(message: "fresh startup immediately finished after asynchronous capture failure")
+        }
+        _ = try await coordinator.cancelRecordingWithTranscription()
+        gate.complete(freshHandle)
+    }
+
+    private static func beginDictation(using gate: AppOperationGate) throws -> AppOperationHandle {
+        switch gate.begin(.dictation) {
+        case .success(let handle):
+            return handle
+        case .failure(let reason):
+            throw ContractFailure(message: "fixture could not begin dictation: \(reason)")
+        }
+    }
+
     private static func testSpeechEvidenceRejectsWrongValidSHA() throws {
         let actual = String(repeating: "a", count: 40)
         let expected = String(repeating: "b", count: 40)
@@ -1206,6 +1306,27 @@ private final class ScriptedAudioCapture: AudioCapturing, @unchecked Sendable {
         }
         callbacks[index].onInterruption(reason)
     }
+}
+
+private final class StartupFailingCapture: AudioCapturing, @unchecked Sendable {
+    func start(
+        to descriptor: AudioFileDescriptor,
+        onBuffer: @escaping @Sendable (AudioCaptureBuffer) -> Void,
+        onFinish: @escaping @Sendable () -> Void,
+        onInterruption: @escaping @Sendable (String) -> Void,
+        onFailure: @escaping @Sendable (String) -> Void
+    ) throws {
+        _ = descriptor
+        _ = onBuffer
+        _ = onFinish
+        _ = onInterruption
+        _ = onFailure
+        throw TranscriptionError.notRunning
+    }
+
+    func stop() throws {}
+
+    func cancel() {}
 }
 
 @available(macOS 26.0, *)

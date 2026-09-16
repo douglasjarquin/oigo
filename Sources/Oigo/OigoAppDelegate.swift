@@ -273,7 +273,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             self?.updateSurface()
         }
     )
-    private var finishRequestedAfterStart = false
+    private var finishIntent = AppDelegateFinishIntent()
     private var shortcutFeedbackDetail: String?
     private var lastKeyboardStartupGeneration: UInt64 = 0
     private var lastKeyboardTerminalizedGeneration: UInt64?
@@ -341,6 +341,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
         resetShortcutInput()
+        finishIntent.clear()
         speechAssetCheckTask?.cancel()
         speechAssetCheckTask = nil
         presentationPublicationFence.shutdown()
@@ -826,6 +827,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         resetShortcutInput()
+        if let handle = operationGate.currentHandle {
+            finishIntent.clear(for: handle)
+        }
         let interruptedGeneration = hudGeneration
         let handle = operationGate.preempt(.interruption)
         operationGate.run(handle, completes: true) { @MainActor [weak self] in
@@ -910,9 +914,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func requestKeyboardStop() {
-        if operationGate.currentKind?.isDictationLifecycle == true,
+        if let handle = operationGate.currentHandle,
+           handle.kind.isDictationLifecycle,
            coordinator.state != .recording {
-            finishRequestedAfterStart = true
+            finishIntent.request(for: handle)
             return
         }
         finishDictation()
@@ -921,6 +926,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func startDictation(kind: AppOperationKind = .dictation) {
         maintenanceCoordinator.preempt()
         guard storageCapability.health.isReady else {
+            finishIntent.clear()
             reportOnboardingTestFailure()
             presentKeyboardStartupRecovery(
                 category: "storage-unavailable",
@@ -931,6 +937,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         let availability = commandAvailability
         guard kind == .onboardingTest ? availability.canRunOnboardingTest : availability.canStartDictation else {
+            finishIntent.clear()
             if let reason = availability.busyReason {
                 showBusy(reason)
             } else {
@@ -941,6 +948,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         }
         switch operationGate.begin(kind) {
         case .failure(let reason):
+            finishIntent.clear()
             resetShortcutInput()
             showBusy(reason)
         case .success(let handle):
@@ -948,17 +956,20 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             operationGate.run(handle, completes: false) { @MainActor [weak self] in
                 guard let self else { return }
                 await self.performStartDictation(handle: handle)
-                guard self.operationGate.isCurrent(handle) else { return }
+                guard self.operationGate.isCurrent(handle) else {
+                    self.finishIntent.clear(for: handle)
+                    return
+                }
                 if self.coordinator.state == .recording {
                     _ = self.productionShortcutBridge.observeState()
-                    if self.finishRequestedAfterStart {
-                        self.finishRequestedAfterStart = false
+                    if self.finishIntent.consumeAfterSuccessfulStart(for: handle) {
                         await self.performFinishDictation(handle: handle)
                         if self.operationGate.isCurrent(handle) {
                             self.operationGate.complete(handle)
                         }
                     }
                 } else {
+                    self.finishIntent.clear(for: handle)
                     self.resetShortcutInput()
                     self.operationGate.complete(handle)
                 }
@@ -970,10 +981,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         let availability = commandAvailability
         guard availability.canStopDictation else {
             if coordinator.state != .recording,
-               operationGate.currentKind?.isDictationLifecycle == true {
-                finishRequestedAfterStart = true
+               let handle = operationGate.currentHandle,
+               handle.kind.isDictationLifecycle {
+                finishIntent.request(for: handle)
                 return
             }
+            finishIntent.clear()
             if let reason = availability.busyReason {
                 showBusy(reason)
             } else {
@@ -987,8 +1000,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
 
     private func continueDictationStop() {
         if coordinator.state != .recording,
-           operationGate.currentKind?.isDictationLifecycle == true {
-            finishRequestedAfterStart = true
+           let handle = operationGate.currentHandle,
+           handle.kind.isDictationLifecycle {
+            finishIntent.request(for: handle)
             updateSurface()
             return
         }
@@ -1008,6 +1022,9 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     private func cancelTestDictation() {
         resetShortcutInput()
         let handle = operationGate.currentHandle
+        if let handle {
+            finishIntent.clear(for: handle)
+        }
         operationGate.cancelCurrent()
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1246,6 +1263,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             observeKeyboardTerminalization(generation: handle.generation)
             updateSurface()
         } catch is CancellationError {
+            finishIntent.clear(for: handle)
             await coordinator.cancelActiveWork()
             settlePendingSessionBoundary(
                 reason: "dictation operation cancelled",
@@ -1261,6 +1279,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 generation: handle.generation
             )
         } catch {
+            finishIntent.clear(for: handle)
             let failureReason = Self.failureReason(for: error)
             if coordinator.hasActiveWork {
                 await coordinator.cancelActiveWork(reason: failureReason)
@@ -1374,8 +1393,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 refreshHistory()
             }
             scheduleIdleMaintenance(.sessionTerminal)
+            finishIntent.clear(for: handle)
             updateSurface()
         } catch is CancellationError {
+            finishIntent.clear(for: handle)
             await coordinator.cancelActiveWork()
             resetShortcutInput()
             lastSession = coordinator.currentSession ?? lastSession
@@ -1387,6 +1408,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             observeKeyboardTerminalization(generation: handle.generation)
             updateSurface()
         } catch {
+            finishIntent.clear(for: handle)
             let failureReason = Self.failureReason(for: error)
             if coordinator.hasActiveWork {
                 await coordinator.cancelActiveWork(reason: failureReason)
@@ -1413,6 +1435,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         _ session: DictationSession,
         handle: AppOperationHandle
     ) {
+        finishIntent.clear(for: handle)
         guard operationGate.isCurrent(handle) else {
             return
         }
@@ -3273,6 +3296,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         copy: String,
         generation: UInt64?
     ) {
+        if let handle = operationGate.currentHandle,
+           handle.generation == generation {
+            finishIntent.clear(for: handle)
+        }
         if let generation {
             statusSurface.hideHUD(generation: generation)
         }
