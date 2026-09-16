@@ -73,13 +73,13 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
         }
         let fixtureRoot = fixtureRoot(for: arguments)
         let fixture = try loadFixture(fixtureRoot.appendingPathComponent("fixture.json"))
+        try validateGenerationFence(fixture)
         try validate(fixture)
         let selectedRows = try selectedRows(for: arguments.caseName)
         guard arguments.fixtureName == nil || arguments.fixtureName == "exhaustive"
             || arguments.caseName != nil else {
             throw ContractInputError(category: "unsupported-fixture")
         }
-        try validateGenerationFence(fixture)
         if let duration = fixture.commandDurationMilliseconds {
             _ = try runProcess(
                 executable: URL(fileURLWithPath: "/bin/sleep"),
@@ -306,6 +306,10 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
             }
             let notice = descendant(identifier: "popover-prioritized-notice", in: controller.view)
             let noticeAction = notice.flatMap(firstButton(in:))
+            guard descendant(identifier: "popover-status-icon", in: controller.view) is NSImageView,
+                  descendant(identifier: "popover-status-label", in: controller.view) is NSTextField else {
+                throw ContractInputError(category: "popover-status-icon-label-missing")
+            }
             let screenshotName = selection.slug + ".png"
             let screenshotURL = statesRoot.appendingPathComponent(screenshotName)
             guard let bitmap = controller.view.bitmapImageRepForCachingDisplay(in: controller.view.bounds) else {

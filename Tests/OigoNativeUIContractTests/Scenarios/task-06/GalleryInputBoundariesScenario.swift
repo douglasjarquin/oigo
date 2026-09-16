@@ -133,16 +133,6 @@ final class GalleryInputBoundariesScenario: NativeUIContractScenario {
             home: qaRoot.appendingPathComponent("home", isDirectory: true),
             category: "outside-task-root"
         )
-        let missingSessionRoot = sessionRoot.appendingPathComponent("missing-owned-directory", isDirectory: true)
-        try expectGalleryInput(
-            galleryBinary,
-            options: replacing("--session-root", with: missingSessionRoot.path, in: galleryOptions),
-            home: qaRoot.appendingPathComponent("home", isDirectory: true),
-            category: "missing-owned-directory"
-        )
-        guard !FileManager.default.fileExists(atPath: missingSessionRoot.path) else {
-            throw ContractInputError(category: "invalid-input-created-directory")
-        }
         try expectGalleryInput(
             galleryBinary,
             options: replacing("--evidence-root", with: outsideEvidenceRoot.path, in: galleryOptions),

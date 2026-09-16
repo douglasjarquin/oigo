@@ -82,7 +82,7 @@ final class HUDRendererScenario: NativeUIContractScenario {
               fixture.states.count == 18,
               Set(fixture.states.map(\.id)) == required,
               fixture.states.allSatisfy({ $0.width == 252 }),
-              fixture.states.allSatisfy({ [38, 54, 58].contains(Int($0.height)) }) else {
+              fixture.states.allSatisfy({ [42, 54, 58].contains(Int($0.height)) }) else {
             throw ContractInputError(category: "incomplete-hud-renderer-fixture")
         }
     }
@@ -122,9 +122,9 @@ final class HUDRendererScenario: NativeUIContractScenario {
             "fixture": fixture.fixture,
             "states": fixture.states.count,
             "targetScreen": fixture.targetDisplayID,
-            "compact": "252x38",
+            "compact": "252x42",
             "recording": "252x54",
-            "expanded": "252x73",
+            "expanded": "252x64",
             "terminal": "252x58",
             "radius": fixture.radius,
             "previewItalicPointSize": 12,
@@ -241,11 +241,13 @@ final class HUDRendererScenario: NativeUIContractScenario {
                   initialInspection.semanticColor == "system-red" else { exit(15) }
             guard controller.updatePreview("preview", generation: fixture.currentGeneration, at: 10) else { exit(12) }
             guard let previewInspection = controller.renderInspection,
-                  controller.renderedSize == HUDSize(width: 252, height: 73),
+                  controller.renderedSize == HUDSize(width: 252, height: 64),
                   controller.resourceSnapshot.previewCharacters > 0,
                   previewInspection.preview == "preview",
+                  previewInspection.detail.isEmpty,
                   previewInspection.previewPointSize == 12,
                   previewInspection.previewIsItalic,
+                  previewInspection.previewMaximumNumberOfLines == 1,
                   previewInspection.renderPasses > initialInspection.renderPasses else { exit(13) }
             let beforeThrottleInspection = previewInspection
             let beforeThrottleResources = controller.resourceSnapshot
@@ -279,7 +281,7 @@ final class HUDRendererScenario: NativeUIContractScenario {
                 generation: fixture.staleGeneration,
                 shortcutReleaseHint: fixture.shortcutReleaseHint
             ), controller.resourceSnapshot.state == .recording,
-                  controller.renderedSize == HUDSize(width: 252, height: 73) else { exit(14) }
+                  controller.renderedSize == HUDSize(width: 252, height: 64) else { exit(14) }
 
             var generation = fixture.currentGeneration + 1
             for expected in fixture.states {

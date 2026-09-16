@@ -185,12 +185,9 @@ final class IdentityScenario: NativeUIContractScenario {
         let modulePath = moduleRoot.appendingPathComponent("OigoPresentation.swiftmodule")
         let libraryPath = moduleRoot.appendingPathComponent("libOigoPresentation.dylib")
         let packageBuildRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent(".build/arm64-apple-macosx/debug", isDirectory: true)
-        let coreObjectRoot = packageBuildRoot.appendingPathComponent("OigoCore.build", isDirectory: true)
-        let coreObjects = (try? FileManager.default.contentsOfDirectory(
-            at: coreObjectRoot,
-            includingPropertiesForKeys: [.isRegularFileKey]
-        ))?.filter { $0.pathExtension == "o" }.sorted { $0.path < $1.path } ?? []
+            .appendingPathComponent(".build/out/Products/Debug", isDirectory: true)
+        let coreObjects = [packageBuildRoot.appendingPathComponent("OigoCore.o")]
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
         guard !coreObjects.isEmpty else {
             throw ContractInputError(category: "missing-core-build-artifacts")
         }
@@ -202,7 +199,7 @@ final class IdentityScenario: NativeUIContractScenario {
                 "swiftc", "-enable-testing", "-parse-as-library", "-emit-library", "-emit-module",
                 "-module-name", "OigoPresentation",
                 sources[0].path, sources[1].path,
-                "-I", packageBuildRoot.appendingPathComponent("Modules", isDirectory: true).path,
+                "-I", packageBuildRoot.path,
                 "-L", packageBuildRoot.path,
                 "-emit-module-path", modulePath.path, "-o", libraryPath.path
             ] + coreObjects.map(\.path)
@@ -211,7 +208,7 @@ final class IdentityScenario: NativeUIContractScenario {
             executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
             arguments: [
                 "swiftc", "-enable-testing", "-I", moduleRoot.path,
-                "-I", packageBuildRoot.appendingPathComponent("Modules", isDirectory: true).path
+                "-I", packageBuildRoot.path
             ]
                 + sources.dropFirst(2).map(\.path)
                 + [

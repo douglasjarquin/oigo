@@ -5,7 +5,7 @@ public enum OigoHUDShellPolicy {
     public static let previewInterval: TimeInterval = 0.2
     public static let maxPreviewUpdatesPerSecond = 5
     public static let previewMaxCharacters = 180
-    public static let previewMaxLines = 2
+    public static let previewMaxLines = 1
     public static let ordinaryTerminalDismissal: TimeInterval = 1.8
     public static let actionableTerminalDismissal: TimeInterval = 3.0
 
@@ -25,7 +25,7 @@ public enum OigoHUDShellPolicy {
         case .recording:
             content(
                 title: "Recording",
-                detail: releaseHint,
+                detail: preview.isEmpty ? releaseHint : "",
                 tone: .recording,
                 iconRole: .recording,
                 showsRecordingElapsed: true,
@@ -80,7 +80,7 @@ public enum OigoHUDShellPolicy {
                 tone: .success,
                 iconRole: .confirmation,
                 actionability: .pasteAgain,
-                dismissal: .timed(after: actionableTerminalDismissal),
+                dismissal: .timed(after: ordinaryTerminalDismissal),
                 isTerminal: true,
                 size: .terminal
             )
@@ -91,13 +91,13 @@ public enum OigoHUDShellPolicy {
                 tone: .informational,
                 iconRole: .information,
                 actionability: .pasteAgain,
-                dismissal: .timed(after: actionableTerminalDismissal),
+                dismissal: .timed(after: ordinaryTerminalDismissal),
                 isTerminal: true,
                 size: .terminal
             )
         case .savedRetry:
             content(
-                title: "Recording Saved - Retry Needed",
+                title: "Recording Saved — Retry Needed",
                 detail: "Audio is preserved for transcription retry.",
                 tone: .warning,
                 iconRole: .attention,
@@ -108,7 +108,7 @@ public enum OigoHUDShellPolicy {
             )
         case .preservedFailure:
             content(
-                title: "Failed - Recording Preserved",
+                title: "Failed — Recording Preserved",
                 detail: "Audio and text are preserved for recovery.",
                 tone: .critical,
                 iconRole: .failure,
@@ -124,7 +124,7 @@ public enum OigoHUDShellPolicy {
                 tone: .warning,
                 iconRole: .attention,
                 actionability: .pasteAgain,
-                dismissal: .timed(after: actionableTerminalDismissal),
+                dismissal: .timed(after: ordinaryTerminalDismissal),
                 isTerminal: true,
                 size: .terminal
             )
@@ -145,7 +145,7 @@ public enum OigoHUDShellPolicy {
                 tone: .informational,
                 iconRole: .information,
                 actionability: .openHistory,
-                dismissal: .timed(after: actionableTerminalDismissal),
+                dismissal: .timed(after: ordinaryTerminalDismissal),
                 isTerminal: true,
                 size: .terminal
             )
@@ -181,7 +181,7 @@ public enum OigoHUDShellPolicy {
             )
         case .shutdown:
             content(
-                title: "Quitting...",
+                title: "Quitting…",
                 detail: "HUD released.",
                 tone: .neutral,
                 iconRole: .information,
@@ -196,7 +196,7 @@ public enum OigoHUDShellPolicy {
             .split(whereSeparator: { $0.isNewline })
             .map(String.init)
             .filter { !$0.isEmpty }
-        return String(lines.suffix(previewMaxLines).joined(separator: "\n").prefix(previewMaxCharacters))
+        return String((lines.last ?? "").prefix(previewMaxCharacters))
     }
 
     public static func isRecording(_ state: OigoHUDState) -> Bool {

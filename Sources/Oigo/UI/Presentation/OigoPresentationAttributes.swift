@@ -58,7 +58,7 @@ extension OigoPresentationState {
              .pasteOwnedFieldVerified:
             return .disabled(nil, .checking)
         case .preparing:
-            return .enabled(.stopDictation)
+            return .disabled(nil, .checking)
         case .microphonePermissionUnavailable:
             return .disabled(.startDictation, .microphoneUnavailable)
         case .selectedInputUnavailable:

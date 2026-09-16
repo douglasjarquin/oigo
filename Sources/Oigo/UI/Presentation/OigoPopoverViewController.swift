@@ -517,20 +517,21 @@ public final class OigoPopoverViewController: NSViewController {
         let text = NSTextField(labelWithString: label)
         text.font = .systemFont(ofSize: 12)
         text.textColor = statusColor(for: tone)
-        text.setAccessibilityIdentifier("popover-status")
+        text.setAccessibilityIdentifier("popover-status-label")
         text.setAccessibilityLabel(label)
-        guard tone != .neutral && tone != .recording else { return text }
         let symbol: String
         switch tone {
         case .critical: symbol = "xmark.octagon.fill"
         case .warning: symbol = "exclamationmark.triangle.fill"
         case .informational: symbol = "info.circle.fill"
         case .success: symbol = "checkmark.circle.fill"
-        case .recording, .neutral: return text
+        case .recording: symbol = "record.circle.fill"
+        case .neutral: symbol = "circle.fill"
         }
         let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: label) ?? NSImage())
         icon.contentTintColor = statusColor(for: tone)
         icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
+        icon.setAccessibilityIdentifier("popover-status-icon")
         let row = NSStackView(views: [icon, text])
         row.orientation = .horizontal
         row.alignment = .centerY

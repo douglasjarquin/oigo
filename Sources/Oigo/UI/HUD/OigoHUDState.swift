@@ -43,9 +43,9 @@ public struct OigoHUDShellSize: Equatable, Sendable {
         self.height = height
     }
 
-    public static let compact = Self(width: 252, height: 38)
+    public static let compact = Self(width: 252, height: 42)
     public static let recording = Self(width: 252, height: 54)
-    public static let expanded = Self(width: 252, height: 73)
+    public static let expanded = Self(width: 252, height: 64)
     public static let terminal = Self(width: 252, height: 58)
 }
 

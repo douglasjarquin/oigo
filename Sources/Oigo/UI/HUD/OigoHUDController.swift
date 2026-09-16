@@ -75,6 +75,7 @@ public struct OigoHUDRenderInspection: Equatable, Sendable {
     public let detailPointSize: Double
     public let previewPointSize: Double
     public let previewIsItalic: Bool
+    public let previewMaximumNumberOfLines: Int
     public let iconRole: OigoHUDIconRole?
     public let iconTreatment: String
     public let symbolName: String
@@ -92,6 +93,7 @@ public struct OigoHUDRenderInspection: Equatable, Sendable {
         detailPointSize: Double,
         previewPointSize: Double,
         previewIsItalic: Bool,
+        previewMaximumNumberOfLines: Int,
         iconRole: OigoHUDIconRole?,
         iconTreatment: String,
         symbolName: String,
@@ -108,6 +110,7 @@ public struct OigoHUDRenderInspection: Equatable, Sendable {
         self.detailPointSize = detailPointSize
         self.previewPointSize = previewPointSize
         self.previewIsItalic = previewIsItalic
+        self.previewMaximumNumberOfLines = previewMaximumNumberOfLines
         self.iconRole = iconRole
         self.iconTreatment = iconTreatment
         self.symbolName = symbolName
@@ -206,6 +209,7 @@ public final class OigoHUDController {
             detailPointSize: Double(detailLabel.font?.pointSize ?? 0),
             previewPointSize: Double(previewLabel.font?.pointSize ?? 0),
             previewIsItalic: previewLabel.font?.fontDescriptor.symbolicTraits.contains(.italic) == true,
+            previewMaximumNumberOfLines: previewLabel.maximumNumberOfLines,
             iconRole: renderedContent.iconRole,
             iconTreatment: iconTreatment(for: renderedContent.iconRole),
             symbolName: renderedSymbolName,

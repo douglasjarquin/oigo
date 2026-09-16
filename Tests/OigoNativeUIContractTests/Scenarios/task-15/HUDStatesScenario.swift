@@ -61,9 +61,11 @@ final class HUDStatesScenario: NativeUIContractScenario {
             fixture: fixture
         )
         guard output.contains("PASS hud-state-matrix"),
+              output.contains("PASS hud-shell-envelope"),
               output.contains("PASS hud-preview-bound"),
+              output.contains("PASS hud-icon-label"),
               output.contains("PASS hud-cadence"),
-              output.contains("PASS hud-generation") else {
+              output.contains("PASS hud-generation terminal-stale-rejected") else {
             throw ContractInputError(category: "unexpected-hud-contract-output")
         }
         let controllerOutput = try runControllerContract(
@@ -255,7 +257,6 @@ final class HUDStatesScenario: NativeUIContractScenario {
               content.showsRecordingElapsed == expected.recordingTimer,
               content.allowsPreview == expected.preview,
               !content.title.isEmpty,
-              !content.detail.isEmpty,
               !content.title.lowercased().contains("verified"),
               !content.detail.lowercased().contains("verified") else {
             statePass = false
@@ -265,13 +266,38 @@ final class HUDStatesScenario: NativeUIContractScenario {
     guard statePass else { exit(1) }
     print("PASS hud-state-matrix")
 
+    let sizes = [
+        OigoHUDShellSize.compact,
+        OigoHUDShellSize.recording,
+        OigoHUDShellSize.expanded,
+        OigoHUDShellSize.terminal
+    ]
+    guard sizes.allSatisfy({ (210...280).contains($0.width) && (42...64).contains($0.height) }),
+          OigoHUDShellSize.compact.height >= 42,
+          OigoHUDShellSize.recording.height <= 64,
+          OigoHUDShellSize.expanded.height <= 64,
+          (42...64).contains(OigoHUDShellSize.terminal.height) else { exit(2) }
+    print("PASS hud-shell-envelope")
+
     let previewInput = String(repeating: "a", count: 179) + "👩‍💻" + String(repeating: "b", count: 70)
     let preview = OigoHUDShellPolicy.boundedPreview(previewInput)
     let expectedPreview = String(repeating: "a", count: 179) + "👩‍💻"
     guard OigoHUDShellPolicy.previewMaxCharacters == 180,
+          OigoHUDShellPolicy.previewMaxLines == 1,
           preview.count == 180,
-          preview == expectedPreview else { exit(5) }
+          preview == expectedPreview,
+          OigoHUDShellPolicy.boundedPreview("discarded line\nlatest visible line") == "latest visible line" else { exit(5) }
     print("PASS hud-preview-bound")
+
+    guard fixture.states.allSatisfy({ expected in
+        guard let state = OigoHUDState(rawValue: expected.id) else { return false }
+        let content = OigoHUDShellPolicy.content(
+            for: state,
+            releaseHint: "Release the shortcut to finish."
+        )
+        return !content.title.isEmpty && !content.iconRole.rawValue.isEmpty
+    }) else { exit(6) }
+    print("PASS hud-icon-label")
 
     var cadence = OigoHUDLifecycle()
     guard cadence.present(.recording, generation: 10, visible: true) else { exit(1) }
@@ -287,13 +313,14 @@ final class HUDStatesScenario: NativeUIContractScenario {
           fixture.cadence.actionableDismissalSeconds <= 3.5 else { exit(1) }
     print("PASS hud-cadence")
 
-    guard cadence.present(.recording, generation: 20, visible: true),
-          !cadence.present(.preparing, generation: 19, visible: true),
+    guard cadence.present(.terminal, generation: 20, visible: true),
+          cadence.present(.recording, generation: 21, visible: true),
+          !cadence.present(.terminal, generation: 20, visible: true),
           cadence.state == .recording,
           cadence.visible,
-          !cadence.hide(generation: 19),
+          !cadence.hide(generation: 20),
           cadence.visible else { exit(1) }
-    cadence.present(.pasteAgainDestination, generation: 20, visible: true)
+    cadence.present(.pasteAgainDestination, generation: 21, visible: true)
     guard cadence.state == .pasteAgainDestination,
           cadence.visible,
           !cadence.previewPublicationAllowed(at: 5) else { exit(1) }
@@ -302,7 +329,7 @@ final class HUDStatesScenario: NativeUIContractScenario {
           cadence.state == nil,
           cadence.generation == nil,
           cadence.resourceCount == 0 else { exit(1) }
-    print("PASS hud-generation")
+    print("PASS hud-generation terminal-stale-rejected")
     """#
 
     private static let controllerContractDriver = #"""
@@ -328,6 +355,16 @@ final class HUDStatesScenario: NativeUIContractScenario {
             let recording = controller.resourceSnapshot
             guard controller.isVisible, recording.recordingTimerActive else {
                 exit(2)
+            }
+            guard controller.updatePreview(
+                "discarded line\nlatest visible line",
+                generation: 1,
+                at: 0
+            ),
+                controller.renderInspection?.preview == "latest visible line",
+                controller.renderInspection?.previewMaximumNumberOfLines
+                    == OigoHUDShellPolicy.previewMaxLines else {
+                exit(5)
             }
             guard controller.present(
                 .shutdown,

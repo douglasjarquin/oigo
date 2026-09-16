@@ -85,7 +85,7 @@ final class HUDStateMatrixScenario: NativeUIContractScenario {
         let receipts = try parseReceipts(output)
         guard receipts.count == fixture.states.count + 1,
               output.contains("PASS hud-state-matrix states=18"),
-              output.contains("PASS hud-size processing=252x38 recording=252x54 preview=252x73 terminal=252x58"),
+              output.contains("PASS hud-size processing=252x42 recording=252x54 preview=252x64 terminal=252x58"),
               output.contains("PASS hud-generation stale-rejected preview-ineligible") else {
             throw ContractInputError(category: "unexpected-hud-contract-output")
         }
@@ -95,7 +95,7 @@ final class HUDStateMatrixScenario: NativeUIContractScenario {
         try writeReceipts(receipts, evidenceRoot: arguments.evidenceRoot)
         print(
             "PASS hud-state-matrix states=\(fixture.states.count) receipts=\(receipts.count) "
-                + "shortcut=\(shortcut.keyCode):\(shortcut.modifiers) sizes=252x38/252x54/252x73/252x58"
+                + "shortcut=\(shortcut.keyCode):\(shortcut.modifiers) sizes=252x42/252x54/252x64/252x58"
         )
     }
 
@@ -162,8 +162,8 @@ final class HUDStateMatrixScenario: NativeUIContractScenario {
             "scenario": "hud-state-matrix",
             "stateCount": 18,
             "receiptCount": receipts.count,
-            "compactSize": ["width": 224, "height": 42],
-            "expandedSize": ["width": 280, "height": 64],
+            "compactSize": ["width": 252, "height": 42],
+            "expandedSize": ["width": 252, "height": 64],
             "recordingWithoutPreview": "compact",
             "recordingWithPreview": "expanded",
             "dynamicShortcut": receipts.first?.shortcutReleaseHint ?? "",
@@ -267,9 +267,9 @@ final class HUDStateMatrixScenario: NativeUIContractScenario {
     }
 
     func sizeName(_ width: Double, _ height: Double) -> String {
-        if width == 252 && height == 38 { return "compact" }
+        if width == 252 && height == 42 { return "compact" }
         if width == 252 && height == 54 { return "recording" }
-        if width == 252 && height == 73 { return "expanded" }
+        if width == 252 && height == 64 { return "expanded" }
         if width == 252 && height == 58 { return "terminal" }
         return "invalid"
     }
@@ -357,7 +357,7 @@ final class HUDStateMatrixScenario: NativeUIContractScenario {
               releaseHint: releaseHint
           ).showsRecordingElapsed == false else { exit(4) }
     print("PASS hud-state-matrix states=18")
-    print("PASS hud-size processing=252x38 recording=252x54 preview=252x73 terminal=252x58")
+    print("PASS hud-size processing=252x42 recording=252x54 preview=252x64 terminal=252x58")
 
     var lifecycle = OigoHUDLifecycle()
     guard lifecycle.present(.recording, generation: fixture.currentGeneration, visible: true),
