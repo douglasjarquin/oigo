@@ -38,6 +38,7 @@
         A0000001000000000000004D /* libOigoCapture.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000001000000000000000E /* libOigoCapture.a */; };
         A0000001000000000000000D /* AudioPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000010 /* AudioPlayback.swift */; };
         A0000001000000000000000E /* AudioCapturing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000011 /* AudioCapturing.swift */; };
+        A00000010000000000000077 /* AppDelegateFinishIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000077 /* AppDelegateFinishIntent.swift */; };
         A0000001000000000000000F /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000010000000000000012 /* SessionStore.swift */; };
         A00000010000000000000007 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000007 /* Foundation.framework */; };
         A00000010000000000000008 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B00000010000000000000008 /* AppKit.framework */; };
@@ -233,6 +234,7 @@
         B0000001000000000000000F /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
         B00000010000000000000010 /* AudioPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayback.swift; sourceTree = "<group>"; };
         B00000010000000000000011 /* AudioCapturing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCapturing.swift; sourceTree = "<group>"; };
+        B00000010000000000000077 /* AppDelegateFinishIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateFinishIntent.swift; sourceTree = "<group>"; };
         B00000010000000000000012 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
         B00000010000000000000013 /* libOigoTranscription.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libOigoTranscription.a; sourceTree = BUILT_PRODUCTS_DIR; };
         B00000010000000000000014 /* TranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionService.swift; sourceTree = "<group>"; };
@@ -483,6 +485,7 @@
             children = (
                 B00000010000000000000006 /* DictationCoordinator.swift */,
                 B00000010000000000000011 /* AudioCapturing.swift */,
+                B00000010000000000000077 /* AppDelegateFinishIntent.swift */,
                 B00000010000000000000012 /* SessionStore.swift */,
                 B00000010000000000000016 /* TranscriptionContracts.swift */,
                 B00000010000000000000026 /* ProductContracts.swift */,
@@ -957,6 +960,7 @@
             files = (
                 A00000010000000000000006 /* DictationCoordinator.swift in Sources */,
                 A0000001000000000000000E /* AudioCapturing.swift in Sources */,
+                A00000010000000000000077 /* AppDelegateFinishIntent.swift in Sources */,
                 A0000001000000000000000F /* SessionStore.swift in Sources */,
                 A00000010000000000000016 /* TranscriptionContracts.swift in Sources */,
                 A00000010000000000000029 /* ProductContracts.swift in Sources */,
@@ -1145,6 +1149,7 @@
         G00000010000000000000001 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
+                ALWAYS_SEARCH_USER_PATHS = NO;
                 MACOSX_DEPLOYMENT_TARGET = 26.0;
                 ONLY_ACTIVE_ARCH = NO;
                 SWIFT_VERSION = 6.0;
@@ -1154,6 +1159,7 @@
         G00000010000000000000002 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
+                ALWAYS_SEARCH_USER_PATHS = NO;
                 MACOSX_DEPLOYMENT_TARGET = 26.0;
                 ONLY_ACTIVE_ARCH = NO;
                 SWIFT_VERSION = 6.0;

@@ -80,8 +80,9 @@ extension OigoIssue82ContractTests {
             events.append(event)
         })
         backend.emitRetired(.pressed, generation: firstGeneration)
+        backend.emitMalformed(.pressed, generation: firstGeneration)
         guard events.isEmpty else {
-            throw ContractFailure(message: "stale callback from a replaced generation was delivered")
+            throw ContractFailure(message: "retired or malformed generation callback was delivered")
         }
 
         let teardownBackend = RecordingRegistrationBackend()

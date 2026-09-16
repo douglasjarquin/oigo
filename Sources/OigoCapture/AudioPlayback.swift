@@ -42,13 +42,17 @@ public struct AudioPlaybackState: Equatable, Sendable {
     }
 }
 
+@MainActor
 @_spi(Testing)
 public protocol AudioPlaybackPerforming: AnyObject {
     func start() -> Bool
     func stop()
-    func setFinishHandler(_ handler: @escaping @Sendable (AudioPlaybackTerminalOutcome) -> Void)
+    func setFinishHandler(
+        _ handler: @escaping @MainActor @Sendable (AudioPlaybackTerminalOutcome) -> Void
+    )
 }
 
+@MainActor
 public final class AudioPlayback: @unchecked Sendable {
     private let lock = NSLock()
     private var generation: UInt64 = 0
@@ -275,13 +279,14 @@ public final class AudioPlayback: @unchecked Sendable {
     }
 }
 
+@MainActor
 @_spi(Testing)
 public final class ControllableAudioPlaybackPerformer: AudioPlaybackPerforming, @unchecked Sendable {
     public var startShouldFail = false
     public private(set) var startCount = 0
     public private(set) var stopCount = 0
     private let lock = NSLock()
-    private var finishHandler: (@Sendable (AudioPlaybackTerminalOutcome) -> Void)?
+    private var finishHandler: (@MainActor @Sendable (AudioPlaybackTerminalOutcome) -> Void)?
 
     public init() {}
 
@@ -300,7 +305,7 @@ public final class ControllableAudioPlaybackPerformer: AudioPlaybackPerforming, 
     }
 
     public func setFinishHandler(
-        _ handler: @escaping @Sendable (AudioPlaybackTerminalOutcome) -> Void
+        _ handler: @escaping @MainActor @Sendable (AudioPlaybackTerminalOutcome) -> Void
     ) {
         lock.lock()
         finishHandler = handler
@@ -322,9 +327,10 @@ public final class ControllableAudioPlaybackPerformer: AudioPlaybackPerforming, 
     }
 }
 
-private final class AVAudioPlayerPerformer: NSObject, AVAudioPlayerDelegate, AudioPlaybackPerforming {
+@MainActor
+private final class AVAudioPlayerPerformer: NSObject, @MainActor AVAudioPlayerDelegate, AudioPlaybackPerforming {
     private let player: AVAudioPlayer
-    private var finishHandler: (@Sendable (AudioPlaybackTerminalOutcome) -> Void)?
+    private var finishHandler: (@MainActor @Sendable (AudioPlaybackTerminalOutcome) -> Void)?
 
     init(url: URL) throws {
         player = try AVAudioPlayer(contentsOf: url)
@@ -343,7 +349,7 @@ private final class AVAudioPlayerPerformer: NSObject, AVAudioPlayerDelegate, Aud
     }
 
     func setFinishHandler(
-        _ handler: @escaping @Sendable (AudioPlaybackTerminalOutcome) -> Void
+        _ handler: @escaping @MainActor @Sendable (AudioPlaybackTerminalOutcome) -> Void
     ) {
         finishHandler = handler
     }

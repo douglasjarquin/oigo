@@ -72,4 +72,9 @@ public final class GlobalShortcutProductionBridge {
     public func observeState() -> GlobalShortcutIntentResult? {
         operations.observeState()
     }
+
+    @discardableResult
+    public func reset() -> GlobalShortcutIntentResult {
+        operations.reset()
+    }
 }

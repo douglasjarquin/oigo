@@ -1,3 +1,4 @@
+import AVFAudio
 import Foundation
 @_spi(Testing) import OigoCapture
 
@@ -10,6 +11,7 @@ private struct ContractFailure: Error, CustomStringConvertible {
 }
 
 @main
+@MainActor
 private struct OigoIssue92ContractTests {
     static func main() {
         let tests: [(String, () throws -> Void)] = [
@@ -17,7 +19,9 @@ private struct OigoIssue92ContractTests {
             ("natural-completion-releases-player", testNaturalCompletionReleasesPlayer),
             ("explicit-stop-releases-player", testExplicitStopReleasesPlayer),
             ("replacement-releases-previous", testReplacementReleasesPrevious),
+            ("empty-audio-releases-player", testEmptyAudioReleasesPlayer),
             ("start-failure-releases-player", testStartFailureReleasesPlayer),
+            ("main-actor-performer-preserves-lifecycle", testMainActorPerformerPreservesLifecycle),
             ("late-callback-cannot-clear-successor", testLateCallbackCannotClearSuccessor),
             ("stop-after-completion-is-idempotent", testStopAfterCompletionIsIdempotent),
             ("repeated-stop-is-idempotent", testRepeatedStopIsIdempotent),
@@ -27,8 +31,15 @@ private struct OigoIssue92ContractTests {
             ("same-session-identity-is-toggleable", testSameSessionIdentityIsToggleable)
         ]
 
+        let requested = Set(CommandLine.arguments.dropFirst())
+        let selected = requested.isEmpty ? tests : tests.filter { requested.contains($0.0) }
+        guard selected.count == (requested.isEmpty ? tests.count : requested.count) else {
+            print("FAIL: unknown issue #92 contract scenario")
+            exit(2)
+        }
+
         var failures = 0
-        for (name, test) in tests {
+        for (name, test) in selected {
             do {
                 try test()
                 print("GREEN: issue #92 " + name)
@@ -123,10 +134,9 @@ private struct OigoIssue92ContractTests {
         do {
             _ = try playback.play(using: failing)
             throw ContractFailure(message: "failed start was treated as success")
-        } catch let failure as ContractFailure {
-            throw failure
+        } catch AudioPlaybackError.startFailed {
         } catch {
-            _ = error
+            throw ContractFailure(message: "failed start returned an untyped outcome: \(error)")
         }
         guard playback.activePlayerCount == 0,
               playback.lastTerminalOutcome == .failed,
@@ -134,6 +144,47 @@ private struct OigoIssue92ContractTests {
               failing.startCount == 1,
               playback.playingSessionID == nil else {
             throw ContractFailure(message: "start failure leaked a player")
+        }
+    }
+
+    private static func testEmptyAudioReleasesPlayer() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue92-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("empty.caf")
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) else {
+            throw ContractFailure(message: "could not create the empty-audio fixture format")
+        }
+        _ = try AVAudioFile(forWriting: url, settings: format.settings)
+
+        let playback = AudioPlayback()
+        do {
+            _ = try playback.play(url: url)
+            throw ContractFailure(message: "empty audio was treated as playable")
+        } catch AudioPlaybackError.noPlayableFrames {
+        } catch let failure as ContractFailure {
+            throw failure
+        } catch {
+            throw ContractFailure(message: "empty audio returned an untyped outcome: \(error)")
+        }
+        guard playback.activePlayerCount == 0,
+              playback.lastTerminalOutcome == .failed,
+              playback.playingSessionID == nil else {
+            throw ContractFailure(message: "empty audio retained an active performer")
+        }
+    }
+
+    private static func testMainActorPerformerPreservesLifecycle() throws {
+        let playback = AudioPlayback()
+        let performer = MainActorPlaybackPerformer()
+        _ = try playback.play(using: performer)
+        performer.finishNaturally()
+        guard playback.activePlayerCount == 0,
+              playback.lastTerminalOutcome == .completed,
+              performer.startCount == 1,
+              performer.stopCount == 1 else {
+            throw ContractFailure(message: "main-actor performer did not preserve playback lifecycle")
         }
     }
 
@@ -257,6 +308,32 @@ private struct OigoIssue92ContractTests {
               playback.activePlayerCount == 0 else {
             throw ContractFailure(message: "stopped session still appeared to be playing")
         }
+    }
+}
+
+@MainActor
+private final class MainActorPlaybackPerformer: AudioPlaybackPerforming {
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+    private var finishHandler: (@MainActor @Sendable (AudioPlaybackTerminalOutcome) -> Void)?
+
+    func start() -> Bool {
+        startCount += 1
+        return true
+    }
+
+    func stop() {
+        stopCount += 1
+    }
+
+    func setFinishHandler(
+        _ handler: @escaping @MainActor @Sendable (AudioPlaybackTerminalOutcome) -> Void
+    ) {
+        finishHandler = handler
+    }
+
+    func finishNaturally() {
+        finishHandler?(.completed)
     }
 }
 

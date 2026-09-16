@@ -73,13 +73,13 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
         }
         let fixtureRoot = fixtureRoot(for: arguments)
         let fixture = try loadFixture(fixtureRoot.appendingPathComponent("fixture.json"))
+        try validateGenerationFence(fixture)
         try validate(fixture)
         let selectedRows = try selectedRows(for: arguments.caseName)
         guard arguments.fixtureName == nil || arguments.fixtureName == "exhaustive"
             || arguments.caseName != nil else {
             throw ContractInputError(category: "unsupported-fixture")
         }
-        try validateGenerationFence(fixture)
         if let duration = fixture.commandDurationMilliseconds {
             _ = try runProcess(
                 executable: URL(fileURLWithPath: "/bin/sleep"),
@@ -306,6 +306,13 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
             }
             let notice = descendant(identifier: "popover-prioritized-notice", in: controller.view)
             let noticeAction = notice.flatMap(firstButton(in:))
+            let noticeTitle = notice.flatMap {
+                firstTextField(with: presentation.notice?.title ?? "", in: $0)
+            }
+            guard descendant(identifier: "popover-status-icon", in: controller.view) is NSImageView,
+                  descendant(identifier: "popover-status-label", in: controller.view) is NSTextField else {
+                throw ContractInputError(category: "popover-status-icon-label-missing")
+            }
             let screenshotName = selection.slug + ".png"
             let screenshotURL = statesRoot.appendingPathComponent(screenshotName)
             guard let bitmap = controller.view.bitmapImageRepForCachingDisplay(in: controller.view.bounds) else {
@@ -346,6 +353,7 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
                 shortcut: shortcut,
                 latest: latest,
                 notice: notice,
+                noticeTitle: noticeTitle,
                 noticeAction: noticeAction
             )
             let encoder = JSONEncoder()
@@ -368,6 +376,7 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
         shortcut: NSView,
         latest: NSTextField,
         notice: NSView?,
+        noticeTitle: NSTextField?,
         noticeAction: NSButton?
     ) throws {
         guard receipt.title == expected.title,
@@ -398,6 +407,12 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
                   notice.accessibilityRole() == .group,
                   noticeAction.isEnabled == expected.noticeActionable else {
                 throw ContractInputError(category: "notice-action-contract-mismatch")
+            }
+            if receipt.row == "mic-permission-unavailable" || receipt.row == "accessibility-unavailable" {
+                guard noticeTitle?.lineBreakMode == .byWordWrapping,
+                      noticeTitle?.maximumNumberOfLines == 2 else {
+                    throw ContractInputError(category: "notice-title-layout-contract")
+                }
             }
         } else if expected.noticeCategory != "none" {
             throw ContractInputError(category: "missing-state-notice")
@@ -739,6 +754,12 @@ final class PopoverStateMatrixScenario: NativeUIContractScenario {
     private static func firstButton(in root: NSView) -> NSButton? {
         if let button = root as? NSButton { return button }
         return root.subviews.lazy.compactMap(firstButton(in:)).first
+    }
+
+    @MainActor
+    private static func firstTextField(with text: String, in root: NSView) -> NSTextField? {
+        if let textField = root as? NSTextField, textField.stringValue == text { return textField }
+        return root.subviews.lazy.compactMap { firstTextField(with: text, in: $0) }.first
     }
 
     private static func validateAuthoritativeMapper(_ repository: URL) throws {

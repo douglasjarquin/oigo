@@ -22,6 +22,8 @@ private struct OigoIssue5ContractTests {
         let filter = CommandLine.arguments.dropFirst().drop(while: { $0 != "--filter" }).dropFirst().first
         let tests: [(String, () async throws -> Void)] = [
             ("live transcription lifecycle", testLiveTranscriptionLifecycle),
+            ("coordinator finalization ordering", testCoordinatorFinalizationOrdering),
+            ("startup speech failure preserves durable audio", testStartupSpeechFailurePreservesDurableAudio),
             ("cancellation preserves canonical data", testCancellationPreservesCanonicalData),
             ("cancellation persistence failure", testCancellationPersistenceFailure),
             ("startup shutdown handshake", testStartupShutdownHandshake),
@@ -189,6 +191,91 @@ private struct OigoIssue5ContractTests {
               !transcription.isRunning,
               !capture.isActive else {
             throw ContractFailure(message: "live transcription did not separate volatile/final text or release resources")
+        }
+    }
+
+    @MainActor
+    private static func testCoordinatorFinalizationOrdering() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-ordering-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let events = LifecycleEvents()
+        let store = try SessionStore(rootDirectory: root)
+        let capture = FakeAudioCapture()
+        capture.events = events
+        let transcription = FakeTranscriptionController()
+        transcription.events = events
+        transcription.finalizedText = "ordered final transcript"
+        let coordinator = DictationCoordinator()
+
+        _ = try await coordinator.startRecordingWithTranscription(
+            using: capture,
+            store: store,
+            transcription: transcription,
+            format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+        )
+        capture.sendBuffer()
+        let completed = try await coordinator.stopRecordingWithTranscription()
+        let rawText = try store.readRawText(for: completed)
+
+        guard events.values == [
+            "speech-start",
+            "capture-start",
+            "capture-stop",
+            "speech-finalized"
+        ],
+        rawText == "ordered final transcript",
+        completed.metadata.rawTextByteCount == Int64(rawText.utf8.count),
+        coordinator.activeResourceCount == 0,
+        coordinator.activeOwnedOperationCount == 0,
+        !coordinator.hasActiveWork else {
+            throw ContractFailure(
+                message: "coordinator consumed final text before Speech finalization or retained resources: "
+                    + events.values.joined(separator: ",")
+            )
+        }
+    }
+
+    @MainActor
+    private static func testStartupSpeechFailurePreservesDurableAudio() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-issue5-startup-speech-failure-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SessionStore(rootDirectory: root)
+        let capture = FakeAudioCapture()
+        let transcription = FakeTranscriptionController()
+        transcription.startError = TranscriptionError.analysisFailed("startup fixture")
+        let coordinator = DictationCoordinator()
+
+        do {
+            _ = try await coordinator.startRecordingWithTranscription(
+                using: capture,
+                store: store,
+                transcription: transcription,
+                format: AudioCaptureFormat(sampleRate: 16_000, channelCount: 1)
+            )
+            throw ContractFailure(message: "startup Speech failure unexpectedly started recording")
+        } catch let error as TranscriptionError {
+            guard error == .analysisFailed("startup fixture") else {
+                throw ContractFailure(message: "startup Speech failure changed category: " + error.description)
+            }
+        }
+
+        guard let failed = coordinator.currentSession,
+              failed.metadata.state == .failed,
+              failed.metadata.failureCode == .transcriptionFailed,
+              transcription.audioFileExistedAtStart,
+              FileManager.default.fileExists(atPath: failed.audioURL.path),
+              coordinator.activeResourceCount == 0,
+              coordinator.activeOwnedOperationCount == 0,
+              !coordinator.hasActiveWork,
+              !capture.isActive,
+              !transcription.isRunning else {
+            throw ContractFailure(
+                message: "startup Speech failure ran before durable audio setup or leaked lifecycle ownership"
+            )
         }
     }
 
@@ -1764,6 +1851,19 @@ private final class UpdateCollector: @unchecked Sendable {
     }
 }
 
+private final class LifecycleEvents: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+
+    var values: [String] {
+        lock.withLock { recorded }
+    }
+
+    func record(_ event: String) {
+        lock.withLock { recorded.append(event) }
+    }
+}
+
 @available(macOS 26.0, *)
 private final class FakeTranscriptionController: TranscriptionController, @unchecked Sendable {
     private var session: DictationSession?
@@ -1771,9 +1871,12 @@ private final class FakeTranscriptionController: TranscriptionController, @unche
     private var onUpdate: (@Sendable (TranscriptionUpdate) -> Void)?
     private(set) var isRunning = false
     private(set) var appendedBufferCount = 0
+    private(set) var audioFileExistedAtStart = false
     var finalizedText = ""
     var finishError: Error?
+    var startError: Error?
     var emitDegradationOnStart: LiveTranscriptionDegradation?
+    var events: LifecycleEvents?
 
     func start(
         session: DictationSession,
@@ -1783,6 +1886,11 @@ private final class FakeTranscriptionController: TranscriptionController, @unche
     ) async throws {
         guard format.isValid, format.channelCount == 1 else {
             throw TranscriptionError.invalidCaptureFormat
+        }
+        audioFileExistedAtStart = FileManager.default.fileExists(atPath: session.audioURL.path)
+        events?.record("speech-start")
+        if let startError {
+            throw startError
         }
         self.session = session
         self.store = store
@@ -1812,6 +1920,7 @@ private final class FakeTranscriptionController: TranscriptionController, @unche
         isRunning = false
         defer { clearResources() }
         let result = try persist()
+        events?.record("speech-finalized")
         return result
     }
 
@@ -2187,6 +2296,7 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
     private var writer: CAFWriter?
     private(set) var isActive = false
     var writesCanonicalCAF = false
+    var events: LifecycleEvents?
 
     func start(
         to descriptor: AudioFileDescriptor,
@@ -2196,6 +2306,7 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
         onFailure: @escaping @Sendable (String) -> Void
     ) throws {
         _ = onInterruption
+        events?.record("capture-start")
         outputDescriptor = descriptor
         self.onBuffer = onBuffer
         self.onFinish = onFinish
@@ -2208,6 +2319,7 @@ private final class FakeAudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     func stop() throws {
+        events?.record("capture-stop")
         isActive = false
         writer?.close()
         writer = nil
