@@ -272,7 +272,8 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
         geometry: HUDTargetGeometrySnapshot?,
         startedAt: Date? = nil,
         preview: String = "",
-        shortcutCopy: OigoShortcutCopy
+        shortcutCopy: OigoShortcutCopy,
+        targetApplicationName: String? = nil
     ) {
         if hudGeneration != generation || hudState != state {
             let displays = AccessibilityHUDGeometryCapture.displayGeometry()
@@ -291,7 +292,7 @@ final class StatusSurfaceController: NSObject, NSMenuDelegate, NSPopoverDelegate
                 placementInput: placement,
                 startedAt: startedAt,
                 shortcutReleaseHint: shortcutCopy.releaseHint,
-                targetApplicationName: NSWorkspace.shared.frontmostApplication?.localizedName
+                targetApplicationName: targetApplicationName
             ) else {
                 return
             }

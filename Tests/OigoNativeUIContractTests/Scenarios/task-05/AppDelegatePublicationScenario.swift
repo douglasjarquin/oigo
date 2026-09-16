@@ -29,6 +29,10 @@ final class AppDelegatePublicationScenario: NativeUIContractScenario {
         guard arguments.defaultsSuite == "com.oigo.qa.task05" else {
             throw ContractInputError(category: "invalid-defaults-suite")
         }
+        if arguments.caseName == "onboarding-lifecycle" {
+            try OnboardingDelegateLifecycleDriver.run(evidenceRoot: arguments.evidenceRoot)
+            return
+        }
         let fixture = try loadFixture(from: arguments.fixtureRoot)
         try validate(fixture)
 
