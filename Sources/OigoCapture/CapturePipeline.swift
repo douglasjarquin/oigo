@@ -28,6 +28,7 @@ public final class CapturePipeline: @unchecked Sendable {
     private let adapter: CanonicalMonoAdapter
     private let writer: CanonicalAudioWriting
     private let workQueue: DispatchQueue
+    private let workSignal: DispatchSourceUserDataAdd
     private let speechQueue: DispatchQueue
     private let lock = NSLock()
     private let finishedGroup = DispatchGroup()
@@ -81,14 +82,21 @@ public final class CapturePipeline: @unchecked Sendable {
         self.onTerminalized = onTerminalized
         self.permissionCheck = permissionCheck
         self.workQueue = DispatchQueue(label: "com.oigo.capture.producer")
+        self.workSignal = DispatchSource.makeUserDataAddSource(queue: workQueue)
         self.speechQueue = DispatchQueue(label: "com.oigo.capture.speech")
         self.slots = (0..<max(1, capacity)).map { _ in
             Slot(sampleCapacity: max(1, maxFrames))
         }
         finishedGroup.enter()
+        pending.reserveCapacity(self.capacity)
+        workSignal.setEventHandler { [weak self] in
+            self?.processAvailable()
+        }
+        workSignal.activate()
     }
 
     deinit {
+        workSignal.cancel()
         for slot in slots {
             slot.deallocate()
         }
@@ -114,51 +122,51 @@ public final class CapturePipeline: @unchecked Sendable {
         guard frameCount > 0 else {
             return .accepted
         }
-        if frameCount > maxFrames {
-            requestTerminal(.failure("audio buffer exceeds the capture pipeline frame bound"))
-            return .conversionFailed
-        }
         let byteCount = frameCount * MemoryLayout<Float>.size
+        let chunkCount = 1 + (frameCount - 1) / maxFrames
 
         lock.lock()
         guard accepting, !finalized, terminal == .none else {
             lock.unlock()
             return .ignored
         }
-        guard let slotIndex = reserveSlotLocked(byteCount: byteCount) else {
+        // Reserve room for the entire callback so overflow never accepts a partial buffer.
+        let freeSlots = slots.reduce(0) { $0 + ($1.inUse ? 0 : 1) }
+        guard chunkCount <= freeSlots, byteCount <= maxBytes - pendingBytes else {
+            accepting = false
+            terminal = .overflow
             lock.unlock()
-            requestTerminal(.overflow)
+            workSignal.add(data: 1)
             return .overflow
         }
+        var frameOffset = 0
+        for slotIndex in slots.indices where !slots[slotIndex].inUse {
+            let slot = slots[slotIndex]
+            let chunkFrames = min(maxFrames, frameCount - frameOffset)
+            do {
+                _ = try adapter.convert(
+                    buffer, into: slot.samples, frameCapacity: maxFrames,
+                    frameOffset: frameOffset, frameCount: chunkFrames
+                )
+            } catch {
+                accepting = false
+                terminal = .failure(String(describing: error))
+                lock.unlock()
+                workSignal.add(data: 1)
+                return .conversionFailed
+            }
+            slot.inUse = true
+            slot.frameCount = chunkFrames
+            slot.sampleRate = adapter.outputFormat.sampleRate
+            pending.append(slotIndex)
+            pendingBytes += slot.byteCount
+            frameOffset += chunkFrames
+            if frameOffset == frameCount {
+                break
+            }
+        }
         lock.unlock()
-
-        let converted: Int
-        do {
-            converted = try adapter.convert(
-                buffer,
-                into: slots[slotIndex].samples,
-                frameCapacity: maxFrames
-            )
-        } catch {
-            recycle(slotIndex)
-            requestTerminal(.failure(String(describing: error)))
-            return .conversionFailed
-        }
-
-        lock.lock()
-        if !accepting || finalized || terminal == .overflow {
-            lock.unlock()
-            recycle(slotIndex)
-            return .ignored
-        }
-        slots[slotIndex].frameCount = converted
-        slots[slotIndex].sampleRate = adapter.outputFormat.sampleRate
-        pending.append(slotIndex)
-        pendingBytes += converted * MemoryLayout<Float>.size
-        lock.unlock()
-        workQueue.async { [weak self] in
-            self?.processAvailable()
-        }
+        workSignal.add(data: 1)
         return .accepted
     }
 
@@ -219,9 +227,7 @@ public final class CapturePipeline: @unchecked Sendable {
             terminal = kind
         }
         lock.unlock()
-        workQueue.async { [weak self] in
-            self?.processAvailable()
-        }
+        workSignal.add(data: 1)
     }
 
     private func processAvailable() {
@@ -347,16 +353,6 @@ public final class CapturePipeline: @unchecked Sendable {
         }
         onTerminalized?()
         finishedGroup.leave()
-    }
-
-    private func reserveSlotLocked(byteCount: Int) -> Int? {
-        guard pending.count < capacity,
-              pendingBytes + byteCount <= maxBytes,
-              let index = slots.firstIndex(where: { !$0.inUse }) else {
-            return nil
-        }
-        slots[index].inUse = true
-        return index
     }
 
     private func recycle(_ index: Int) {

@@ -135,6 +135,7 @@ public final class CAFReader: @unchecked Sendable {
             throw CAFReaderError.readFailed(kAudioFileUnsupportedDataFormatError)
         }
         var frames = frameCount
+        buffer.frameLength = frameCount
         let status = ExtAudioFileRead(extFile, &frames, buffer.mutableAudioBufferList)
         guard status == noErr else {
             throw CAFReaderError.readFailed(status)

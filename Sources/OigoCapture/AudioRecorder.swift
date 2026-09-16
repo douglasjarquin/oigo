@@ -69,6 +69,18 @@ public final class SystemAudioInputDeviceRouter: AudioInputDeviceRouting, @unche
         }
         var device = AudioDeviceID(deviceID)
         let size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var currentDevice = AudioDeviceID(kAudioObjectUnknown)
+        var currentSize = size
+        if AudioUnitGetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &currentDevice,
+            &currentSize
+        ) == noErr, currentDevice == device {
+            return
+        }
         guard AudioUnitSetProperty(
             audioUnit,
             kAudioOutputUnitProperty_CurrentDevice,
@@ -931,7 +943,9 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                 selection,
                 from: devices,
                 route: { [inputRouter] device in
-                    try inputRouter.route(inputNode: inputNode, to: device.deviceID)
+                    if case .pinned = selection {
+                        try inputRouter.route(inputNode: inputNode, to: device.deviceID)
+                    }
                 },
                 inspect: { _ in
                     inputConfiguration = try Self.inputConfiguration(
@@ -972,11 +986,14 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                 throw AudioRecorderError.selectedInputUnavailable
             }
         }
-        try inputRouter.route(inputNode: inputNode, to: device.deviceID)
         let configuration = try Self.inputConfiguration(
             for: inputNode,
             selectedChannel: preparedInput.selectedChannel
         )
+        guard configuration.sampleRate == preparedInput.configuration.sampleRate,
+              configuration.channelCount == preparedInput.configuration.channelCount else {
+            throw AudioRecorderError.invalidInputFormat
+        }
         lock.lock()
         activeDeviceUID = device.uid
         lock.unlock()
@@ -1084,7 +1101,7 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
         selectedChannel: Int
     ) throws -> AVAudioFormat {
         try tapSourceFormat(
-            inputNode.outputFormat(forBus: 0),
+            inputNode.inputFormat(forBus: 0),
             selectedChannel: selectedChannel
         )
     }

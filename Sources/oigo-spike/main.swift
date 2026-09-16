@@ -137,6 +137,11 @@ private struct OigoSpikeCLI {
             try await runInstallAssets()
         case "live":
             try await runLive(output: options.output, duration: options.duration)
+        case "production-speech":
+            guard let fixture = options.fixture else {
+                throw CLIError.missingValue("--fixture")
+            }
+            try await runProductionSpeech(fixture: fixture)
         default:
             throw CLIError.unknownArgument("--scenario " + scenario)
         }
@@ -308,6 +313,65 @@ private struct OigoSpikeCLI {
         print("final_text=" + pipeline.latestSnapshot.finalizedText)
     }
 
+    private static func runProductionSpeech(fixture: URL) async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oigo-production-speech-" + UUID().uuidString)
+        let store = try SessionStore(rootDirectory: root)
+        let file = try AVAudioFile(forReading: fixture)
+        guard file.processingFormat.channelCount == 1,
+              file.processingFormat.commonFormat == .pcmFormatFloat32,
+              file.length > 0 else {
+            throw CLIError.invalidValue("--fixture", "expected nonempty mono Float32 speech audio")
+        }
+        let liveSession = try store.update(store.createSession(), state: .recording)
+        let service = TranscriptionService(locale: Locale(identifier: "en-US"))
+        _ = try await service.installSpeechAssets()
+        try await service.start(
+            session: liveSession,
+            format: AudioCaptureFormat(sampleRate: file.processingFormat.sampleRate, channelCount: 1),
+            store: store,
+            onUpdate: { _ in }
+        )
+        do {
+            while file.framePosition < file.length {
+                guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096) else {
+                    throw CLIError.invalidValue("--fixture", "could not allocate an audio buffer")
+                }
+                try file.read(into: buffer)
+                guard let samples = buffer.floatChannelData?.pointee else {
+                    throw CLIError.invalidValue("--fixture", "missing Float32 audio samples")
+                }
+                service.append(AudioCaptureBuffer(
+                    frameCount: Int(buffer.frameLength),
+                    sampleRate: file.processingFormat.sampleRate,
+                    channelCount: 1,
+                    pcmData: Data(bytes: samples, count: Int(buffer.frameLength) * MemoryLayout<Float>.size)
+                ))
+                try await Task.sleep(for: .seconds(Double(buffer.frameLength) / file.processingFormat.sampleRate))
+            }
+            let live = try await service.finish()
+            guard !live.finalizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw CLIError.invalidValue("--fixture", "production live transcription returned no text")
+            }
+            var retrySession = try store.createSession()
+            try FileManager.default.copyItem(at: fixture, to: retrySession.audioURL)
+            retrySession = try store.update(retrySession, state: .failed, failureReason: "Production speech smoke")
+            retrySession = try store.beginTranscriptionRetry(for: retrySession)
+            let retry = try await TranscriptionService(locale: Locale(identifier: "en-US"))
+                .retrySavedAudio(for: retrySession, store: store)
+            guard !retry.finalizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw CLIError.invalidValue("--fixture", "production saved-audio transcription returned no text")
+            }
+            print("production_live_text_bytes=" + String(live.rawTextByteCount))
+            print("production_retry_text_bytes=" + String(retry.rawTextByteCount))
+            print("production_speech_pass=true")
+            print("evidence_directory=" + root.path)
+        } catch {
+            _ = try? await service.cancel()
+            throw error
+        }
+    }
+
     private static func createSilentCAF(at url: URL) throws {
         let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)
         guard let format else {
@@ -336,6 +400,7 @@ private struct OigoSpikeCLI {
         print("oigo-spike --scenario capabilities")
         print("oigo-spike --scenario install-assets")
         print("oigo-spike --scenario live [--duration seconds] [--output path]")
+        print("oigo-spike --scenario production-speech --fixture mono-speech.caf")
         print("oigo-spike --verify-record path")
     }
 }

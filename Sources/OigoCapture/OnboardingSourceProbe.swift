@@ -89,7 +89,9 @@ public final class OnboardingSourceProbe: @unchecked Sendable {
             selection,
             from: devices,
             route: { [inputRouter] device in
-                try inputRouter.route(inputNode: inputNode, to: device.deviceID)
+                if case .pinned = selection {
+                    try inputRouter.route(inputNode: inputNode, to: device.deviceID)
+                }
             },
             inspect: { _ in
                 let format = inputNode.inputFormat(forBus: 0)

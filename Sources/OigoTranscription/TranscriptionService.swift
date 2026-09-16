@@ -519,13 +519,11 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
             let intake = AnalyzerInputBackpressure(generation: operationID)
             preparedIntake = intake
             let analyzer = SpeechAnalyzer(
-                inputSequence: intake.stream,
                 modules: [module],
                 options: SpeechAnalyzer.Options(
                     priority: .userInitiated,
                     modelRetention: .whileInUse
-                ),
-                analysisContext: makeAnalysisContext(path: .live)
+                )
             )
             preparedAnalyzer = analyzer
 
@@ -535,6 +533,7 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 timeout: timeoutPolicy.budget(for: .startup),
                 registry: operationRegistry
             ) {
+                try await analyzer.setContext(self.makeAnalysisContext(path: .live))
                 try await analyzer.prepareToAnalyze(in: audioFormat)
             }
             try checkCancellationRequested()
@@ -965,14 +964,13 @@ public final class TranscriptionService: TranscriptionController, @unchecked Sen
                 registry: operationRegistry
             ) {
                 let analyzer = SpeechAnalyzer(
-                    inputSequence: retryIntake.stream,
                     modules: [module],
                     options: SpeechAnalyzer.Options(
                         priority: .userInitiated,
                         modelRetention: .whileInUse
-                    ),
-                    analysisContext: self.makeAnalysisContext(path: .retry)
+                    )
                 )
+                try await analyzer.setContext(self.makeAnalysisContext(path: .retry))
                 try await analyzer.prepareToAnalyze(in: audioFormat)
                 return analyzer
             }
