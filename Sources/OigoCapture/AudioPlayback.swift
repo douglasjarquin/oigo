@@ -328,7 +328,7 @@ public final class ControllableAudioPlaybackPerformer: AudioPlaybackPerforming, 
 }
 
 @MainActor
-private final class AVAudioPlayerPerformer: NSObject, AVAudioPlayerDelegate, AudioPlaybackPerforming {
+private final class AVAudioPlayerPerformer: NSObject, @MainActor AVAudioPlayerDelegate, AudioPlaybackPerforming {
     private let player: AVAudioPlayer
     private var finishHandler: (@MainActor @Sendable (AudioPlaybackTerminalOutcome) -> Void)?
 
