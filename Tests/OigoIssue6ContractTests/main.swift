@@ -265,6 +265,7 @@ private struct OigoIssue6ContractTests {
             eventSender: eventSender
         ).insertRawText(for: session, store: store, target: target)
         guard result.outcome == .secureRejected,
+              result.reasonCode == .secureField,
               pasteboard.writes == ["secret transcript"],
               eventSender.sendCalls == 0 else {
             throw ContractFailure(message: "secure target was not copied without an automatic paste")
@@ -290,6 +291,7 @@ private struct OigoIssue6ContractTests {
             eventSender: eventSender
         ).insertRawText(for: session, store: store, target: target)
         guard result.outcome == .copied,
+              result.reasonCode == .applicationChanged,
               pasteboard.writes == ["changed application transcript"],
               eventSender.sendCalls == 0 else {
             throw ContractFailure(message: "changed application did not produce copy-only fallback")
@@ -318,6 +320,7 @@ private struct OigoIssue6ContractTests {
             eventSender: eventSender
         ).insertRawText(for: session, store: store, target: target)
         guard result.outcome == .copied,
+              result.reasonCode == .focusedElementChanged,
               environment.validationCalls == 2,
               eventSender.sendCalls == 0 else {
             throw ContractFailure(message: "focus changed after initial validation but Command-V was still sent")
@@ -325,12 +328,15 @@ private struct OigoIssue6ContractTests {
     }
 
     private static func testUnsafeTargetValidationCopiesWithoutPaste() throws {
-        let validations: [TargetValidation] = [
-            .accessibilityUnavailable,
-            .applicationChanged,
-            .focusedElementChanged,
-            .missingFocusedElement,
-            .unsupportedTarget
+        let validations: [(TargetValidation, InsertionReasonCode)] = [
+            (.accessibilityUnavailable, .accessibilityUnavailable),
+            (.applicationChanged, .applicationChanged),
+            (.focusedElementChanged, .focusedElementChanged),
+            (.missingFocusedElement, .missingFocusedElement),
+            (.unsupportedTarget, .unsupportedTarget),
+            (.readOnlyTarget, .readOnlyTarget),
+            (.disabledTarget, .disabledTarget),
+            (.ambiguousTarget, .ambiguousTarget)
         ]
         let target = InsertionTargetSnapshot(
             frontmostProcessIdentifier: 42,
@@ -340,7 +346,7 @@ private struct OigoIssue6ContractTests {
             isSecureTextField: false
         )
 
-        for validation in validations {
+        for (validation, reasonCode) in validations {
             let rawText = String(describing: validation)
             let (store, session) = try persistedSession(rawText: rawText)
             defer { try? FileManager.default.removeItem(at: store.rootDirectory) }
@@ -352,6 +358,7 @@ private struct OigoIssue6ContractTests {
                 eventSender: eventSender
             ).insertRawText(for: session, store: store, target: target)
             guard result.outcome == .copied,
+                  result.reasonCode == reasonCode,
                   pasteboard.currentText == rawText,
                   eventSender.sendCalls == 0 else {
                 throw ContractFailure(
@@ -427,7 +434,8 @@ private struct OigoIssue6ContractTests {
               persistedRetry.outcome == .failed,
               next.outcome == .dispatched,
               pasteboard.writes == ["one shot transcript", "next session transcript"],
-              eventSender.sendCalls == 2 else {
+              eventSender.sendCalls == 2,
+              environment.discardedTargets == [target, target, target, target] else {
             throw ContractFailure(message: "duplicate completion attempted more than one insertion")
         }
     }
@@ -472,6 +480,7 @@ private final class FakeTargetEnvironment: InsertionTargetEnvironment {
     let snapshot: InsertionTargetSnapshot
     private var validations: [TargetValidation]
     private(set) var validationCalls = 0
+    private(set) var discardedTargets: [InsertionTargetSnapshot] = []
 
     init(snapshot: InsertionTargetSnapshot, validation: TargetValidation) {
         self.snapshot = snapshot
@@ -491,6 +500,10 @@ private final class FakeTargetEnvironment: InsertionTargetEnvironment {
         _ = snapshot
         validationCalls += 1
         return validations[min(validationCalls - 1, validations.count - 1)]
+    }
+
+    func discard(_ snapshot: InsertionTargetSnapshot) {
+        discardedTargets.append(snapshot)
     }
 }
 

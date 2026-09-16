@@ -459,9 +459,14 @@ private struct OigoIssue102ContractTests {
         guard coordinator.activeResourceCount > 0 else {
             throw ContractFailure(message: "insertion did not take an operation-only store reference")
         }
-        _ = try coordinator.finishInsertion(outcome: .pasted)
+        let firstCompletion = try coordinator.finishInsertion(outcome: .pasted)
+        let repeatedCompletion = try coordinator.finishInsertion(outcome: .failed)
+        let lateFailure = coordinator.failInsertion(reason: "late failure")
         guard coordinator.activeResourceCount == 0,
-              !coordinator.hasActiveWork else {
+              !coordinator.hasActiveWork,
+              repeatedCompletion.id == firstCompletion.id,
+              repeatedCompletion.metadata.insertionOutcome == .pasted,
+              lateFailure?.metadata.insertionOutcome == .pasted else {
             throw ContractFailure(message: "successful insertion leaked operation-only store references")
         }
     }
@@ -482,9 +487,14 @@ private struct OigoIssue102ContractTests {
         )
         _ = try await coordinator.stopRecordingWithTranscription()
         _ = try coordinator.beginInsertion(using: store)
-        _ = coordinator.failInsertion(reason: "paste failed")
+        let firstFailure = coordinator.failInsertion(reason: "paste failed")
+        let repeatedFailure = coordinator.failInsertion(reason: "late failure")
+        let lateSuccess = try coordinator.finishInsertion(outcome: .pasted)
         guard coordinator.activeResourceCount == 0,
-              !coordinator.hasActiveWork else {
+              !coordinator.hasActiveWork,
+              repeatedFailure?.id == firstFailure?.id,
+              repeatedFailure?.metadata.insertionOutcome == .failed,
+              lateSuccess.metadata.insertionOutcome == .failed else {
             throw ContractFailure(message: "failed insertion leaked operation-only store references")
         }
     }
