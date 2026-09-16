@@ -2104,6 +2104,10 @@ public final class DictationCoordinator {
 }
 
 public struct ToggleShortcut: Codable, Equatable, Hashable, Sendable {
+    public static let fnKeyCode: UInt32 = 63
+    public static let fn = ToggleShortcut(keyCode: fnKeyCode, modifiers: 0)
+    public var isFunctionKey: Bool { keyCode == Self.fnKeyCode }
+
     public let keyCode: UInt32
     public let modifiers: UInt32
 

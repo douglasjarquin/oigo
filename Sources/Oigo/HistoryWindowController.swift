@@ -440,6 +440,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             root.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             root.topAnchor.constraint(equalTo: contentView.topAnchor),
             root.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            splitView.widthAnchor.constraint(equalTo: root.widthAnchor),
             splitView.heightAnchor.constraint(greaterThanOrEqualToConstant: 400),
             footer.heightAnchor.constraint(equalToConstant: 44),
             listStack.widthAnchor.constraint(equalToConstant: 340)
@@ -543,7 +544,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         stack.alignment = .leading
         stack.translatesAutoresizingMaskIntoConstraints = false
         transcriptVersionPopup.translatesAutoresizingMaskIntoConstraints = false
-        transcriptScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
+        NSLayoutConstraint.activate([
+            transcriptScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 220),
+            transcriptScroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -48)
+        ])
         return stack
     }
 

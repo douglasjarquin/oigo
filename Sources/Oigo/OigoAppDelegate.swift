@@ -338,6 +338,17 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         refreshPermissionPresentation()
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if onboardingStore.load().isComplete {
+            openSettings()
+        } else if let onboardingWindow {
+            onboardingWindow.showAndFocus()
+        } else {
+            showOnboarding(OigoSystemSupportEvaluator.current())
+        }
+        return true
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         _ = sender
         resetShortcutInput()
@@ -446,6 +457,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             registrationError: { [weak self] in
                 self?.shortcutRegistration.lastError
             },
+            setShortcutRecording: { [weak self] recording in
+                guard let self else { return }
+                defer { self.updateSurface() }
+                _ = self.productionShortcutBridge.reset()
+                try self.shortcutRegistration.setRecording(recording)
+            },
             validateShortcut: shortcutOwner.callbacks.validate,
             saveShortcut: shortcutOwner.callbacks.saveShortcut,
             save: shortcutOwner.callbacks.saveSettings,
@@ -544,6 +561,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showOnboarding(_ support: OigoSystemSupportResult) {
+        if let onboardingWindow {
+            onboardingWindow.showAndFocus()
+            return
+        }
         let storedState = onboardingStore.load()
         let initialStep: OigoOnboardingStep = storedState.isComplete
             ? .system
@@ -629,6 +650,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             registrationError: { [weak self] in
                 self?.shortcutRegistration.lastError
             },
+            setShortcutRecording: { [weak self] recording in
+                guard let self else { return }
+                defer { self.updateSurface() }
+                _ = self.productionShortcutBridge.reset()
+                try self.shortcutRegistration.setRecording(recording)
+            },
             validateShortcut: { [weak self] candidate in
                 self?.validateShortcut(candidate) ?? .invalid("Oigo is no longer available")
             },
@@ -684,8 +711,11 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 self.onboardingStore.markCompleted()
+                if !self.speechAssetReadiness.isReady {
+                    self.preflightSpeechAssetsIfNeeded()
+                }
                 self.synchronizeShortcutRegistration()
-                guard self.shortcutRegistration.isOperationReady else {
+                guard !self.speechAssetReadiness.isReady || self.shortcutRegistration.isOperationReady else {
                     self.onboardingWindow?.showRegistrationFailure(
                         self.shortcutRegistration.lastError
                             ?? self.shortcutRegistration.registrationStatus.message
@@ -973,6 +1003,7 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     self.resetShortcutInput()
                     self.operationGate.complete(handle)
                 }
+                self.updateSurface()
             }
         }
     }
@@ -1013,8 +1044,13 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
             updateSurface()
             return
         }
-        operationGate.run(handle, completes: true) { @MainActor [weak self] in
-            await self?.performFinishDictation(handle: handle)
+        operationGate.run(handle, completes: false) { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performFinishDictation(handle: handle)
+            if self.operationGate.isCurrent(handle) {
+                self.operationGate.complete(handle)
+            }
+            self.updateSurface()
         }
         updateSurface()
     }
@@ -2423,7 +2459,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                     geometry: geometry,
                     startedAt: startedAt,
                     preview: preview,
-                    shortcutCopy: shortcutCopy
+                    shortcutCopy: shortcutCopy,
+                    targetApplicationName: targetSnapshot.flatMap {
+                        NSRunningApplication(processIdentifier: $0.frontmostProcessIdentifier)?.localizedName
+                    }
                 )
             case .hidden(let generation):
                 if let generation {
@@ -3013,6 +3052,10 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             speechAssetCheckTask = nil
+            let committedIdentifier = settings.localeIdentifier.isEmpty
+                ? Locale.current.identifier : settings.localeIdentifier
+            guard Locale.identifier(.bcp47, from: identifier)
+                == Locale.identifier(.bcp47, from: committedIdentifier) else { return }
             speechAssetReadiness = status
             if !status.isReady {
                 let stored = onboardingStore.load()
@@ -3084,7 +3127,12 @@ final class OigoAppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             status = Self.localeAssetStatus(from: service.currentAssetState)
         }
+        let committedIdentifier = settings.localeIdentifier.isEmpty
+            ? Locale.current.identifier : settings.localeIdentifier
+        guard Locale.identifier(.bcp47, from: identifier)
+            == Locale.identifier(.bcp47, from: committedIdentifier) else { return status }
         speechAssetReadiness = status
+        synchronizeShortcutRegistration()
         updateSurface()
         return status
     }

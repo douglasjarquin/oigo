@@ -1,38 +1,57 @@
 import AppKit
+import MacUtilityUI
 
 @available(macOS 26.0, *)
 @MainActor
 enum OigoOnboardingShellLayout {
-    static func configureProgress(
-        _ progressStages: NSStackView,
-        titles: [String]
-    ) -> [NSTextField] {
-        progressStages.orientation = .horizontal
-        progressStages.alignment = .centerY
-        progressStages.distribution = .fillEqually
-        progressStages.spacing = 8
-        progressStages.translatesAutoresizingMaskIntoConstraints = false
-        return titles.enumerated().map { index, title in
-            let label = NSTextField(labelWithString: String(index + 1) + "  " + title)
-            label.font = .systemFont(ofSize: 11, weight: .medium)
-            label.textColor = .secondaryLabelColor
-            label.alignment = .center
-            let identifier = "oigo.onboarding.progress.stage-" + String(index + 1)
-            label.identifier = NSUserInterfaceItemIdentifier(identifier)
-            label.setAccessibilityIdentifier(identifier)
-            label.setAccessibilityRole(.staticText)
-            label.setAccessibilityLabel("Stage " + String(index + 1) + ". " + title)
-            progressStages.addArrangedSubview(label)
-            return label
+    static func configureTrailingRow(_ row: NSStackView, label: NSTextField, control: NSView) {
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = MacUITokens.Spacing.controlGroup
+        label.font = MacUITokens.Typography.label
+        row.addArrangedSubview(label)
+        row.addArrangedSubview(NSView())
+        row.addArrangedSubview(control)
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        control.setContentHuggingPriority(.required, for: .horizontal)
+    }
+
+    static func configureCard(_ card: NSBox, rows: NSStackView) {
+        card.boxType = .custom
+        card.titlePosition = .noTitle
+        card.cornerRadius = MacUITokens.Radius.contained
+        card.fillColor = MacUITokens.Colors.controlBackground
+        card.borderColor = MacUITokens.Colors.separator
+        card.borderWidth = 0.5
+        card.contentViewMargins = NSSize(width: 14, height: 0)
+        card.contentView = rows
+        card.setAccessibilityIdentifier("oigo.onboarding.detail-card")
+        rows.orientation = .vertical
+        rows.alignment = .leading
+        rows.spacing = 0
+    }
+
+    static func addCardRow(_ row: NSView, to rows: NSStackView) {
+        if !rows.arrangedSubviews.isEmpty {
+            let separator = NSBox()
+            separator.boxType = .separator
+            rows.addArrangedSubview(separator)
+            separator.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
         }
+        let container = NSStackView(views: [row])
+        container.orientation = .vertical
+        container.edgeInsets = NSEdgeInsets(top: 11, left: 0, bottom: 11, right: 0)
+        rows.addArrangedSubview(container)
+        container.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+        row.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
     }
 
     static func install(
         window: NSWindow,
         contentView: NSView,
         chromeTitleLabel: NSTextField,
-        progressStages: NSStackView,
         stack: NSStackView,
+        skipButton: NSButton,
         backButton: NSButton,
         nextButton: NSButton
     ) {
@@ -56,14 +75,13 @@ enum OigoOnboardingShellLayout {
         nextButton.setAccessibilityLabel("Continue")
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 14
+        stack.spacing = MacUITokens.Spacing.row
         stack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(stack)
+        chromeTitleLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let chrome = NSView()
         chrome.translatesAutoresizingMaskIntoConstraints = false
-        chrome.wantsLayer = true
-        chrome.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         chrome.setAccessibilityRole(.group)
         chrome.setAccessibilityIdentifier("oigo.onboarding.chrome")
         chrome.setAccessibilityLabel("Set Up Oigo window header")
@@ -81,10 +99,24 @@ enum OigoOnboardingShellLayout {
             chromeTitleLabel.centerYAnchor.constraint(equalTo: chrome.centerYAnchor)
         ])
 
-        let buttons = stack.arrangedSubviews.last!
-        (buttons as? NSStackView)?.spacing = 8
-        (buttons as? NSStackView)?.alignment = .trailing
+        let buttons = NSStackView(views: [skipButton, NSView(), backButton, nextButton])
+        buttons.spacing = MacUITokens.Spacing.controlGroup
+        buttons.alignment = .centerY
+        buttons.translatesAutoresizingMaskIntoConstraints = false
+        buttons.setAccessibilityIdentifier("oigo.onboarding.footer")
+        contentView.addSubview(buttons)
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(separator)
         NSLayoutConstraint.activate([
+            buttons.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            buttons.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            buttons.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            buttons.heightAnchor.constraint(equalToConstant: OigoOnboardingShellMetrics.footerHeight),
+            separator.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            separator.bottomAnchor.constraint(equalTo: buttons.topAnchor),
             stack.leadingAnchor.constraint(
                 equalTo: contentView.leadingAnchor,
                 constant: OigoOnboardingShellMetrics.contentHorizontalPadding
@@ -99,11 +131,9 @@ enum OigoOnboardingShellLayout {
                     + OigoOnboardingShellMetrics.contentVerticalPadding
             ),
             stack.bottomAnchor.constraint(
-                equalTo: contentView.bottomAnchor,
+                lessThanOrEqualTo: buttons.topAnchor,
                 constant: -OigoOnboardingShellMetrics.contentVerticalPadding
-            ),
-            progressStages.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            backButton.superview!.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            )
         ])
         _ = window
     }

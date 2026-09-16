@@ -119,10 +119,12 @@ final class HistoryLayoutScenario: NativeUIContractScenario {
     }
 
     private static func dependencyObjects(_ repositoryRoot: URL) -> [String] {
-        let objectRoot = repositoryRoot.appendingPathComponent(".build/arm64-apple-macosx/debug/OigoCore.build")
-        return (try? FileManager.default.contentsOfDirectory(at: objectRoot, includingPropertiesForKeys: nil))?
-            .filter { $0.pathExtension == "o" }
-            .map(\.path) ?? []
+        ["OigoCore.build", "OigoHotKey.build"].flatMap { directory in
+            let objectRoot = repositoryRoot.appendingPathComponent(".build/arm64-apple-macosx/debug/" + directory)
+            return (try? FileManager.default.contentsOfDirectory(at: objectRoot, includingPropertiesForKeys: nil))?
+                .filter { $0.pathExtension == "o" }
+                .map(\.path) ?? []
+        }
     }
 
     private static func runProcess(executable: URL, arguments: [String]) throws -> Data {
@@ -290,6 +292,14 @@ final class HistoryLayoutScenario: NativeUIContractScenario {
             let table = controller.task29TableViewForTesting()
             let listWidth = views.first { $0.accessibilityIdentifier() == fixture.listIdentifier }?.bounds.width ?? 0
             try assert(abs(listWidth - fixture.listColumnWidth) < 1, "list column width \(listWidth)")
+            guard let split = views.first(where: { $0.accessibilityIdentifier() == "oigo.history.split" }),
+                  let detail = views.first(where: { $0.accessibilityIdentifier() == fixture.detailIdentifier }),
+                  let transcript = views.first(where: { $0.accessibilityIdentifier() == "oigo.history.transcript" }) as? NSTextView,
+                  let transcriptScroll = transcript.enclosingScrollView else {
+                throw DriverError.assertion("missing history layout regions")
+            }
+            try assert(abs(split.frame.width - content.bounds.width) < 1, "split fills window width")
+            try assert(abs(transcriptScroll.frame.width - (detail.bounds.width - 48)) < 1, "transcript fills detail width")
             try assert(controller.task29MoreMenuTitlesForTesting() == fixture.moreItems, "More menu excludes maintenance")
             let menuIdentifiers = controller.task29MoreMenuSnapshotForTesting().map(\.identifier)
             try assert(menuIdentifiers == [

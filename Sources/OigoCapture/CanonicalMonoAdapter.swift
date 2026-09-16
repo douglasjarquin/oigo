@@ -94,7 +94,9 @@ public final class CanonicalMonoAdapter: @unchecked Sendable {
     public func convert(
         _ input: AVAudioPCMBuffer,
         into samples: UnsafeMutablePointer<Float>,
-        frameCapacity: Int
+        frameCapacity: Int,
+        frameOffset: Int = 0,
+        frameCount requestedFrameCount: Int? = nil
     ) throws -> Int {
         guard input.format.sampleRate == sourceFormat.sampleRate,
               input.format.channelCount == sourceFormat.channelCount else {
@@ -102,8 +104,13 @@ public final class CanonicalMonoAdapter: @unchecked Sendable {
                 "input format does not match the recording source format"
             )
         }
-        let frameCount = Int(input.frameLength)
-        guard frameCount <= frameCapacity else {
+        let inputFrameCount = Int(input.frameLength)
+        guard frameOffset >= 0, frameOffset <= inputFrameCount else {
+            throw CanonicalMonoAdapterError.conversionFailed("input frame offset is out of range")
+        }
+        let frameCount = requestedFrameCount ?? (inputFrameCount - frameOffset)
+        guard frameCount >= 0, frameCount <= inputFrameCount - frameOffset,
+              frameCount <= frameCapacity else {
             throw CanonicalMonoAdapterError.conversionFailed("input frame count exceeds the conversion buffer")
         }
         if frameCount == 0 {
@@ -112,6 +119,7 @@ public final class CanonicalMonoAdapter: @unchecked Sendable {
         try extract(
             bufferList: input.audioBufferList,
             frameCount: frameCount,
+            frameOffset: frameOffset,
             into: samples
         )
         return frameCount
@@ -161,6 +169,7 @@ public final class CanonicalMonoAdapter: @unchecked Sendable {
     private func extract(
         bufferList: UnsafePointer<AudioBufferList>,
         frameCount: Int,
+        frameOffset: Int = 0,
         into destination: UnsafeMutablePointer<Float>
     ) throws {
         let buffers = UnsafeMutableAudioBufferListPointer(
@@ -183,6 +192,7 @@ public final class CanonicalMonoAdapter: @unchecked Sendable {
                     from: buffer,
                     localChannel: selectedChannel - channelBase,
                     frameCount: frameCount,
+                    frameOffset: frameOffset,
                     into: destination
                 )
                 extracted = true
@@ -202,6 +212,7 @@ public final class CanonicalMonoAdapter: @unchecked Sendable {
         from buffer: AudioBuffer,
         localChannel: Int,
         frameCount: Int,
+        frameOffset: Int,
         into destination: UnsafeMutablePointer<Float>
     ) throws {
         guard let data = buffer.mData else {
@@ -210,7 +221,7 @@ public final class CanonicalMonoAdapter: @unchecked Sendable {
         let channelsInBuffer = max(1, Int(buffer.mNumberChannels))
         let bytesPerSample = try self.bytesPerSample()
         let frameStride = channelsInBuffer
-        let requiredBytes = frameCount * frameStride * bytesPerSample
+        let requiredBytes = (frameOffset + frameCount) * frameStride * bytesPerSample
         guard requiredBytes <= Int(buffer.mDataByteSize) else {
             throw CanonicalMonoAdapterError.unsupportedLayout(
                 "AudioBuffer is smaller than the declared frame count"
@@ -221,17 +232,17 @@ public final class CanonicalMonoAdapter: @unchecked Sendable {
         case .pcmFormatFloat32:
             let source = data.assumingMemoryBound(to: Float.self)
             for frame in 0..<frameCount {
-                destination[frame] = source[frame * frameStride + localChannel]
+                destination[frame] = source[(frameOffset + frame) * frameStride + localChannel]
             }
         case .pcmFormatInt16:
             let source = data.assumingMemoryBound(to: Int16.self)
             for frame in 0..<frameCount {
-                destination[frame] = Float(source[frame * frameStride + localChannel]) / 32_768.0
+                destination[frame] = Float(source[(frameOffset + frame) * frameStride + localChannel]) / 32_768.0
             }
         case .pcmFormatInt32:
             let source = data.assumingMemoryBound(to: Int32.self)
             for frame in 0..<frameCount {
-                destination[frame] = Float(source[frame * frameStride + localChannel]) / 2_147_483_648.0
+                destination[frame] = Float(source[(frameOffset + frame) * frameStride + localChannel]) / 2_147_483_648.0
             }
         default:
             throw CanonicalMonoAdapterError.unsupportedLayout(

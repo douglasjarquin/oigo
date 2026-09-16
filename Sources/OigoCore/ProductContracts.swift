@@ -927,11 +927,23 @@ public enum OigoShortcutValidator {
         _ shortcut: ToggleShortcut,
         occupied: [ToggleShortcut]
     ) -> OigoShortcutValidation {
+        if shortcut.isFunctionKey {
+            guard shortcut.modifiers == 0 else {
+                return .invalid("Use Fn by itself, without other modifiers")
+            }
+            return occupied.contains(shortcut)
+                ? .conflict("That shortcut is already registered by another application")
+                : .available
+        }
         guard shortcut.modifiers & ToggleShortcutModifiers.supportedMask != 0 else {
             return .invalid("Choose at least one supported modifier for the global shortcut")
         }
         guard shortcut.modifiers & ~ToggleShortcutModifiers.supportedMask == 0 else {
             return .invalid("Choose only supported modifiers for the global shortcut")
+        }
+        guard shortcut.keyCode <= 126,
+              ![54, 55, 56, 57, 58, 59, 60, 61, 62].contains(shortcut.keyCode) else {
+            return .invalid("Choose a key with modifiers, or Fn by itself")
         }
         guard !occupied.contains(shortcut) else {
             return .conflict("That shortcut is already registered by another application")

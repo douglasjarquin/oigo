@@ -72,7 +72,8 @@ final class ShortcutRegistrationScenario: NativeUIContractScenario {
         try primary.synchronize()
         rows.append(primary.row("storage-ready"))
         guard primary.settingsStore.load().globalShortcut == customShortcut,
-              primary.backend.registrationCount == 0,
+              primary.backend.registrationCount == 1,
+              primary.backend.unregistrationCount == 1,
               !primary.row("probe").keyboardActive else {
             throw ContractInputError(category: "registration-before-readiness-gate")
         }
@@ -82,7 +83,7 @@ final class ShortcutRegistrationScenario: NativeUIContractScenario {
         try primary.synchronize()
         primary.backend.emitCurrent(.pressed)
         rows.append(primary.row("onboarding-ready"))
-        guard primary.backend.registrationCount == 1,
+        guard primary.backend.registrationCount == 2,
               primary.operationCount == 1,
               primary.row("probe").keyboardActive else {
             throw ContractInputError(category: "registration-after-readiness-not-once")

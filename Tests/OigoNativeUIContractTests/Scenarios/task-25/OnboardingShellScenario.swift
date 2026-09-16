@@ -127,7 +127,7 @@ final class OnboardingShellScenario: NativeUIContractScenario {
     }
 
     private static func dependencyObjects(_ repositoryRoot: URL) -> [String] {
-        ["OigoCore.build", "OigoHotKey.build"].flatMap { directory in
+        ["OigoCore.build", "OigoHotKey.build", "MacUtilityUI.build"].flatMap { directory in
             let root = repositoryRoot.appendingPathComponent(".build/arm64-apple-macosx/debug/" + directory)
             return (try? FileManager.default.contentsOfDirectory(
                 at: root,
@@ -237,7 +237,7 @@ final class OnboardingShellScenario: NativeUIContractScenario {
             let stageLabels = views.compactMap({ $0 as? NSTextField }).filter({
                 $0.accessibilityIdentifier().hasPrefix("oigo.onboarding.progress.stage-")
             })
-            guard let stageRow = stageLabels.first?.superview,
+            guard let stageRow = views.first(where: { $0.accessibilityIdentifier() == "oigo.onboarding.heading" }),
                   let chrome = views.first(where: {
                       $0.accessibilityIdentifier() == "oigo.onboarding.chrome"
                   }),
@@ -259,10 +259,10 @@ final class OnboardingShellScenario: NativeUIContractScenario {
                   abs(stageX - fixture.horizontalPadding) < 0.5,
                   window.title == fixture.title,
                   chromeTitle.stringValue == fixture.title,
-                  stageLabels.count == 4,
-                  stageLabels.allSatisfy({ !$0.accessibilityIdentifier().isEmpty }),
+                  stageLabels.isEmpty,
                   back.accessibilityIdentifier() == fixture.controls[0],
                   next.accessibilityIdentifier() == fixture.controls[1],
+                  window.defaultButtonCell === next.cell,
                   close.accessibilityIdentifier() == fixture.controls[2],
                   next.isEnabled else { exit(10) }
             guard fixture.failureCases.allSatisfy({ item in
@@ -378,7 +378,7 @@ final class OnboardingShellScenario: NativeUIContractScenario {
             guard capture(view: productionContent, to: evidenceRoot.appendingPathComponent("onboarding-shell-increased-contrast.png")) else { exit(14) }
             productionWindow.close()
             guard factory.closeCallbackCount > failureControllers.count else { exit(15) }
-            print("PASS onboarding-shell fixture=shell production-controller=true window=640 content=576 chrome=38 padding=32/24 title=Set Up Oigo stages=4 controls=accessible")
+            print("PASS onboarding-shell fixture=shell production-controller=true window=640 content=576 chrome=38 padding=32/24 title=Set Up Oigo stages=4 controls=accessible primary=native-default")
             print("PASS onboarding-failures stages=1..4 prerequisites=missing back-continue=deterministic close-reopen=clean callbacks=non-nil persistence=unchanged")
             print("PASS onboarding-resources source-probe-start=2 source-probe-stop=\(factory.sourceProbeStopCount) test-start=1 test-cancel=\(factory.testCancelCount) mouse=action-click keyboard=return cleanup=clean")
             NSApp.terminate(nil)

@@ -19,6 +19,7 @@ struct OigoIssue82ContractTests {
         let scenarios: [(String, () async throws -> Void)] = [
             ("registrar atomic replacement", testRegistrarAtomicReplacement),
             ("registrar failure and generation", testRegistrarFailureAndGeneration),
+            ("fn tap lifecycle", testFunctionKeyTapLifecycle),
             ("intent press release duplicate characterization", testIntentPressReleaseDuplicateCharacterization),
             ("gesture press starts before release", testGesturePressStartsBeforeRelease),
             ("gesture 349 ms tap", testGestureTapAt349Milliseconds),

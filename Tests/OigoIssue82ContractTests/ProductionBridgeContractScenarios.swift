@@ -176,7 +176,10 @@ extension OigoIssue82ContractTests {
         )
         let capture = try requiredOffset("let capturedTarget = try await insertion.captureTargetBeforeMicrophonePermission", in: start)
         let publish = try requiredOffset("hudGeometrySnapshot = hudGeometrySession.beginDictation", in: start)
-        guard !acceptedStart.contains("updateSurface()"),
+        guard try requiredOffset("await self.performStartDictation(handle: handle)", in: acceptedStart)
+                < requiredOffset("self.updateSurface()", in: acceptedStart),
+              try requiredOffset("self.operationGate.complete(handle)", in: acceptedStart)
+                < requiredOffset("self.updateSurface()", in: acceptedStart),
               capture < publish,
               start.contains("onAsynchronousTerminal:"),
               asynchronousTerminal.contains("guard operationGate.isCurrent(handle)"),

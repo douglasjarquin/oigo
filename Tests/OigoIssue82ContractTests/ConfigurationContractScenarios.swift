@@ -188,12 +188,14 @@ extension OigoIssue82ContractTests {
         ).isAvailable,
               persisted == customShortcut,
               controller.committedShortcut == customShortcut,
-              backend.calls.isEmpty,
+              backend.calls == ["register:0/256", "unregister:0/256"],
+              !registrar.status.isActive,
+              receivedEvents.isEmpty,
               !controller.state(commandAvailability: commandAvailability(
                   setupComplete: false,
                   storageReady: true
               )).keyboardOperationEnabled else {
-            throw ContractFailure(message: "AppDelegate shortcut registered or enabled operation before readiness")
+            throw ContractFailure(message: "AppDelegate shortcut save did not verify registration without enabling operation before readiness")
         }
 
         try controller.synchronize(storageReady: true, onboardingComplete: false)
@@ -203,7 +205,7 @@ extension OigoIssue82ContractTests {
             setupComplete: true,
             storageReady: true
         ))
-        guard backend.calls == ["register:0/256"],
+        guard backend.calls == ["register:0/256", "unregister:0/256", "register:0/256"],
               ready.registrationStatus.isActive,
               ready.keyboardOperationEnabled,
               ready.mouseStartEnabled,
@@ -221,7 +223,7 @@ extension OigoIssue82ContractTests {
             setupComplete: true,
             storageReady: false
         ))
-        guard backend.calls == ["register:0/256", "unregister:0/256"],
+        guard backend.calls == ["register:0/256", "unregister:0/256", "register:0/256", "unregister:0/256"],
               !disabled.registrationStatus.isActive,
               !disabled.keyboardOperationEnabled,
               !disabled.mouseStartEnabled else {

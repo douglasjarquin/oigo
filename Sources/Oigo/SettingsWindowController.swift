@@ -5,7 +5,7 @@ import OigoHotKey
 import MacUtilityUI
 
 @MainActor
-final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSTableViewDataSource, NSTableViewDelegate {
+final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     private static let selectedPaneKey = "oigo.settings.selected-pane"
     private static let shellWidth: CGFloat = 720
     private static let paneHorizontalPadding: CGFloat = 40
@@ -70,6 +70,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     var dictionaryEntries: [DictionaryEntry]
     private var committedDictionaryEntries: [DictionaryEntry]
     private let dictionaryTable = NSTableView()
+    private let dictionarySearch = NSSearchField()
+    private let canonicalField = NSTextField()
+    private let dictionaryLocale = NSPopUpButton()
+    private let dictionaryEnabled = NSButton(checkboxWithTitle: "Enabled", target: nil, action: nil)
+    private let aliasStack = NSStackView()
+    private let addAliasButton = NSButton(title: "+ Add Alias", target: nil, action: nil)
+    private let removeTermButton = NSButton(title: "−", target: nil, action: nil)
+    private var editingDictionaryEntry: DictionaryEntry?
+    private var visibleDictionaryEntries: [DictionaryEntry] = []
+    private var refreshingDictionary = false
     private let dictionaryMessage = NSTextField(wrappingLabelWithString: "")
     private let sampleField = NSTextField()
     private let previewLabel = NSTextField(wrappingLabelWithString: "")
@@ -111,6 +121,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         openLoginItemsSettings: @escaping () -> Void,
         registrationStatus: @escaping () -> GlobalShortcutRegistrationStatus,
         registrationError: @escaping () -> String?,
+        setShortcutRecording: @escaping (Bool) throws -> Void = { _ in },
         validateShortcut: @escaping (ToggleShortcut) -> OigoShortcutValidation,
         saveShortcut: @escaping (ToggleShortcut) -> OigoShortcutValidation,
         save: @escaping (OigoSettings) -> String?,
@@ -192,6 +203,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         window.isRestorable = true
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        shortcutRecorder.onRecordingChange = { [weak self] recording in
+            defer {
+                if !recording { self?.updateShortcutStatus() }
+            }
+            try setShortcutRecording(recording)
+        }
         window.delegate = self
         window.onEscape = { [weak self] in
             guard let self else { return }
@@ -310,6 +327,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         UserDefaults.standard.set(pane.rawValue, forKey: Self.selectedPaneKey)
         let incomingView = paneViews[pane]
         let outgoingView = paneViews[previousPane]
+        if let window {
+            let contentHeight: CGFloat = 400 + 24 + MacUITokens.Spacing.section + Self.paneTopPadding + Self.paneBottomPadding
+            let dictionaryMinimum = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: Self.shellWidth, height: contentHeight)).height
+            window.minSize.height = pane == .dictionary ? max(520, dictionaryMinimum) : 520
+            if pane == .dictionary, window.frame.height < window.minSize.height {
+                var frame = window.frame
+                frame.origin.y -= window.minSize.height - frame.height
+                frame.size.height = window.minSize.height
+                window.setFrame(frame, display: false)
+            }
+        }
         if previousPane != pane, window?.isVisible == true, let incomingView {
             outgoingView?.isHidden = true
             incomingView.isHidden = false
@@ -443,24 +471,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             return label
         }
 
-        let generalTitle = heading("General")
         let dictationTitle = heading("Dictation")
         let dictionaryPaneTitle = heading("Dictionary")
         let privacyPaneTitle = heading("Data & Privacy")
-        identify(generalTitle, as: "section-general")
         identify(dictationTitle, as: "section-dictation")
         identify(dictionaryPaneTitle, as: "section-dictionary")
         identify(privacyPaneTitle, as: "section-data-privacy")
-        let description = NSTextField(
-            wrappingLabelWithString: "Changes apply immediately. Oigo checks permissions when this window becomes active or when you refresh them."
-        )
-        description.textColor = MacUITokens.Colors.secondaryLabel
         nextDictationNotice.textColor = MacUITokens.Colors.secondaryLabel
         nextDictationNotice.isHidden = true
 
-        let shortcutTitle = NSTextField(labelWithString: "Dictation key:")
+        let shortcutTitle = NSTextField(labelWithString: "Dictation shortcut:")
         shortcutHelp.stringValue = committedShortcutCopy.settingsHint
         shortcutHelp.textColor = MacUITokens.Colors.secondaryLabel
+        shortcutHelp.font = MacUITokens.Typography.secondary
+        shortcutStatus.font = MacUITokens.Typography.secondary
+        shortcutStatus.textColor = MacUITokens.Colors.secondaryLabel
         identify(shortcutHelp, as: "shortcut-help")
         identify(shortcutStatus, as: "shortcut-status")
         identify(messageLabel, as: "save-message")
@@ -506,7 +531,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         let helpTitle = NSTextField(labelWithString: "About")
         helpTitle.font = MacUITokens.Typography.section
         let helpBody = NSTextField(
-            wrappingLabelWithString: "Oigo is a menu-bar dictation app for macOS 26 or later on Apple silicon. Microphone and Accessibility permissions are required. Instant inserts the recognized transcript; Clean optionally rewrites it on this Mac. Recordings, transcripts, and the custom dictionary live in Application Support/Oigo. The README and privacy statement ship with the download."
+            wrappingLabelWithString: "Oigo is a menu-bar dictation app for macOS 26 or later on Apple silicon. Microphone access is required. Accessibility enables Fn and automatic paste; modified shortcuts and copy-only work without it. Instant inserts the recognized transcript; Clean optionally rewrites it on this Mac. Recordings, transcripts, and the custom dictionary live in Application Support/Oigo. The README and privacy statement ship with the download."
         )
         helpBody.textColor = MacUITokens.Colors.secondaryLabel
         microphoneStatus.font = MacUITokens.Typography.secondary
@@ -525,15 +550,23 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         dictationMessage.textColor = MacUITokens.Colors.warning
         dictationMessage.maximumNumberOfLines = 3
 
-        let shortcutRow = NSStackView(views: [shortcutTitle, shortcutRecorder])
+        func generalControlGroup(_ views: [NSView]) -> NSStackView {
+            let group = NSStackView(views: views)
+            group.orientation = .vertical
+            group.alignment = .leading
+            group.spacing = 4
+            return group
+        }
+        let shortcutGroup = generalControlGroup([shortcutRecorder, shortcutHelp, shortcutStatus])
+        let shortcutRow = NSStackView(views: [shortcutTitle, shortcutGroup])
         shortcutRow.orientation = .horizontal
-        shortcutRow.alignment = .centerY
-        shortcutRow.spacing = MacUITokens.Spacing.controlGroup
+        shortcutRow.alignment = .top
+        shortcutRow.spacing = 10
         shortcutTitle.alignment = .right
         shortcutTitle.widthAnchor.constraint(equalToConstant: 180).isActive = true
         shortcutRow.translatesAutoresizingMaskIntoConstraints = false
-        shortcutRecorder.widthAnchor.constraint(equalToConstant: 280).isActive = true
-        shortcutRecorder.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        shortcutRecorder.widthAnchor.constraint(equalToConstant: 160).isActive = true
+        shortcutRecorder.heightAnchor.constraint(equalToConstant: 24).isActive = true
 
         let modeRow = row(label: modeLabel, control: modePopup)
         let localeRow = row(label: localeLabel, control: localePopup)
@@ -547,37 +580,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         )
         dictionaryHelp.textColor = MacUITokens.Colors.secondaryLabel
         identify(dictionaryHelp, as: "dictionary-helper")
-        configureDictionaryTable()
-        let dictionaryScroll = NSScrollView()
-        dictionaryScroll.hasVerticalScroller = true
-        dictionaryScroll.autohidesScrollers = true
-        dictionaryScroll.borderType = .bezelBorder
-        dictionaryScroll.documentView = dictionaryTable
-        dictionaryScroll.translatesAutoresizingMaskIntoConstraints = false
-        dictionaryScroll.heightAnchor.constraint(equalToConstant: 240).isActive = true
-        let addTermButton = NSButton(title: "Add", target: self, action: #selector(addDictionaryEntry))
-        let editTermButton = NSButton(title: "Edit", target: self, action: #selector(editDictionaryEntry))
-        let toggleTermButton = NSButton(title: "Enable/Disable", target: self, action: #selector(toggleDictionaryEntry))
-        let deleteTermButton = NSButton(title: "Delete", target: self, action: #selector(deleteDictionaryEntry))
-        let starterButton = NSButton(title: "Add starter terms", target: self, action: #selector(addStarterTermsAction))
-        identify(addTermButton, as: "dictionary-add")
-        identify(editTermButton, as: "dictionary-edit")
-        identify(toggleTermButton, as: "dictionary-toggle")
-        identify(deleteTermButton, as: "dictionary-delete")
-        identify(starterButton, as: "dictionary-starter-terms")
-        let dictionaryButtons = NSStackView(views: [addTermButton, editTermButton, toggleTermButton, deleteTermButton, starterButton])
-        dictionaryButtons.orientation = .horizontal
-        dictionaryButtons.spacing = 8
-        let sampleLabel = NSTextField(labelWithString: "Sample")
-        sampleField.placeholderString = "Type a sentence to preview normalized spelling"
-        sampleField.target = self
-        sampleField.action = #selector(previewSampleChanged)
-        identify(sampleField, as: "dictionary-preview")
-        previewLabel.textColor = MacUITokens.Colors.secondaryLabel
-        previewLabel.maximumNumberOfLines = 3
+        let dictionarySplit = makeDictionarySplit(helper: dictionaryHelp)
         dictionaryMessage.textColor = MacUITokens.Colors.warning
         dictionaryMessage.maximumNumberOfLines = 3
-        let sampleRow = row(label: sampleLabel, control: sampleField)
+        identify(dictionaryMessage, as: "dictionary-status")
 
         let permissionsTitle = NSTextField(labelWithString: "Permissions")
         permissionsTitle.font = MacUITokens.Typography.section
@@ -597,17 +603,32 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         privacyActionStack.alignment = .leading
         privacyActionStack.spacing = 8
 
+        func generalRow(_ title: String, _ controls: [NSView]) -> NSStackView {
+            let label = NSTextField(labelWithString: title)
+            label.alignment = .right
+            label.widthAnchor.constraint(equalToConstant: 180).isActive = true
+            let group = generalControlGroup(controls)
+            let row = NSStackView(views: [label, group])
+            row.alignment = .top
+            row.spacing = 10
+            return row
+        }
+        let launchRow = generalRow("Launch at login:", [launchAtLoginCheckbox, launchAtLoginStatusLabel, openLoginItemsButton])
+        let previewHelp = NSTextField(wrappingLabelWithString: "One line of in-progress text beneath the timer. Never stored.")
+        previewHelp.font = MacUITokens.Typography.secondary
+        previewHelp.textColor = .secondaryLabelColor
+        identify(previewHelp, as: "volatile-preview-help")
+        let previewRow = generalRow("Recording HUD:", [previewCheckbox, previewHelp])
+        let setupSeparator = NSBox()
+        setupSeparator.boxType = .separator
+        let setupRow = generalRow("Setup:", [rerunButton])
+
         let generalStack = NSStackView(views: [
-            generalTitle,
-            description,
             shortcutRow,
-            shortcutHelp,
-            shortcutStatus,
-            launchAtLoginCheckbox,
-            launchAtLoginStatusLabel,
-            openLoginItemsButton,
-            previewCheckbox,
-            rerunButton,
+            launchRow,
+            previewRow,
+            setupSeparator,
+            setupRow,
             messageLabel
         ])
         let dictationStack = NSStackView(views: [
@@ -623,12 +644,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         ])
         let dictionaryStack = NSStackView(views: [
             dictionaryPaneTitle,
-            dictionaryHelp,
-            dictionaryScroll,
-            dictionaryButtons,
-            sampleRow,
-            previewLabel,
-            dictionaryMessage
+            dictionarySplit
         ])
         let privacyStack = NSStackView(views: [
             privacyPaneTitle,
@@ -677,25 +693,25 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             ])
         }
         NSLayoutConstraint.activate([
-            generalTitle.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             dictationTitle.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             dictionaryPaneTitle.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
-            shortcutHelp.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
-            shortcutStatus.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            shortcutRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            shortcutHelp.widthAnchor.constraint(equalTo: paneContainer.widthAnchor, constant: -190),
+            shortcutStatus.widthAnchor.constraint(equalTo: shortcutHelp.widthAnchor),
+            launchRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            previewRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            previewHelp.widthAnchor.constraint(equalTo: shortcutHelp.widthAnchor),
+            setupSeparator.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            setupRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             messageLabel.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             dictationMessage.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
-            description.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             nextDictationNotice.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             modeRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             localeRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             retentionRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             inputRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             channelRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
-            dictionaryHelp.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
-            dictionaryScroll.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
-            sampleRow.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
-            previewLabel.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
-            dictionaryMessage.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
+            dictionarySplit.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             helpBody.widthAnchor.constraint(equalTo: paneContainer.widthAnchor),
             localePopup.widthAnchor.constraint(equalToConstant: 260),
             inputPopup.widthAnchor.constraint(equalTo: localePopup.widthAnchor),
@@ -837,6 +853,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     private func updateShortcutStatus() {
         shortcutHelp.stringValue = committedShortcutCopy.settingsHint
+        shortcutRecorder.toolTip = committedShortcutCopy.settingsHint
         switch registrationStatus() {
         case .active:
             let suffix = registrationError().map { ". Last error: " + $0 } ?? ""
@@ -1083,21 +1100,330 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         shortcutRecorder.restoreCandidate(committedShortcut)
     }
 
+    private func makeDictionarySplit(helper: NSTextField) -> NSView {
+        configureDictionaryTable()
+        let split = NSView()
+        split.identifier = NSUserInterfaceItemIdentifier("oigo.settings.dictionary-split")
+        split.setAccessibilityIdentifier("oigo.settings.dictionary-split")
+        split.wantsLayer = true
+        split.layer?.cornerRadius = 8
+        split.layer?.masksToBounds = true
+        let sidebar = NSBox()
+        sidebar.boxType = .custom
+        sidebar.borderWidth = 0
+        sidebar.fillColor = .controlBackgroundColor
+        sidebar.contentViewMargins = .zero
+        dictionarySearch.placeholderString = "Search"
+        dictionarySearch.delegate = self
+        identify(dictionarySearch, as: "dictionary-search")
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = dictionaryTable
+        let add = NSButton(title: "+", target: self, action: #selector(addDictionaryEntry))
+        identify(add, as: "dictionary-add")
+        add.setAccessibilityLabel("Add dictionary term")
+        removeTermButton.target = self
+        removeTermButton.action = #selector(deleteDictionaryEntry)
+        identify(removeTermButton, as: "dictionary-delete")
+        removeTermButton.setAccessibilityLabel("Remove dictionary term")
+        let starter = NSButton(title: "Starter terms", target: self, action: #selector(addStarterTermsAction))
+        starter.controlSize = .small
+        identify(starter, as: "dictionary-starter-terms")
+        starter.setAccessibilityLabel("Add starter terms")
+        let buttons = NSStackView(views: [add, removeTermButton, starter])
+        buttons.spacing = 2
+        let divider = NSBox()
+        divider.boxType = .separator
+        let editor = DictionaryEditorStack()
+        editor.orientation = .vertical
+        editor.alignment = .leading
+        editor.spacing = 12
+        editor.edgeInsets = NSEdgeInsets(top: 16, left: 20, bottom: 16, right: 20)
+        let editorScroll = NSScrollView()
+        editorScroll.hasVerticalScroller = true
+        editorScroll.autohidesScrollers = true
+        editorScroll.drawsBackground = true
+        editorScroll.backgroundColor = .textBackgroundColor
+        editorScroll.documentView = editor
+        canonicalField.placeholderString = "Canonical spelling"
+        canonicalField.delegate = self
+        identify(canonicalField, as: "dictionary-canonical")
+        canonicalField.setAccessibilityLabel("Canonical spelling")
+        dictionaryLocale.addItem(withTitle: "All languages")
+        dictionaryLocale.lastItem?.representedObject = ""
+        dictionaryLocale.target = self
+        dictionaryLocale.action = #selector(dictionaryOptionsChanged)
+        identify(dictionaryLocale, as: "dictionary-locale")
+        dictionaryLocale.setAccessibilityLabel("Dictionary language")
+        dictionaryEnabled.target = self
+        dictionaryEnabled.action = #selector(dictionaryOptionsChanged)
+        identify(dictionaryEnabled, as: "dictionary-toggle")
+        let options = NSStackView(views: [dictionaryLocale, dictionaryEnabled])
+        options.spacing = 8
+        dictionaryLocale.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        aliasStack.orientation = .vertical
+        aliasStack.alignment = .leading
+        aliasStack.spacing = 4
+        addAliasButton.target = self
+        addAliasButton.action = #selector(addDictionaryAlias)
+        addAliasButton.controlSize = .small
+        identify(addAliasButton, as: "dictionary-add-alias")
+        let aliases = NSStackView(views: [aliasStack, addAliasButton])
+        aliases.orientation = .vertical
+        aliases.alignment = .leading
+        aliases.spacing = 4
+        sampleField.placeholderString = "Type a sentence with an alias"
+        sampleField.delegate = self
+        identify(sampleField, as: "dictionary-preview")
+        sampleField.setAccessibilityLabel("Test dictionary normalization")
+        identify(previewLabel, as: "dictionary-result")
+        previewLabel.maximumNumberOfLines = 3
+        previewLabel.textColor = .secondaryLabelColor
+        let test = NSStackView(views: [sampleField, previewLabel])
+        test.orientation = .vertical
+        test.alignment = .leading
+        test.spacing = 5
+        let separator = NSBox()
+        separator.boxType = .separator
+        let rows = [
+            dictionaryFormRow("Canonical:", canonicalField),
+            dictionaryFormRow("Locale:", options),
+            dictionaryFormRow("Aliases:", aliases),
+            separator,
+            dictionaryFormRow("Test:", test),
+            helper,
+            dictionaryMessage
+        ]
+        for row in rows {
+            editor.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: editor.widthAnchor, constant: -40).isActive = true
+        }
+        for view in [sidebar, divider, editorScroll] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            split.addSubview(view)
+        }
+        for view in [dictionarySearch, scroll, buttons] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            sidebar.addSubview(view)
+        }
+        editor.translatesAutoresizingMaskIntoConstraints = false
+        split.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            split.heightAnchor.constraint(equalToConstant: 400),
+            sidebar.leadingAnchor.constraint(equalTo: split.leadingAnchor),
+            sidebar.topAnchor.constraint(equalTo: split.topAnchor),
+            sidebar.bottomAnchor.constraint(equalTo: split.bottomAnchor),
+            sidebar.widthAnchor.constraint(equalToConstant: 200),
+            divider.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            divider.widthAnchor.constraint(equalToConstant: 1),
+            divider.topAnchor.constraint(equalTo: split.topAnchor),
+            divider.bottomAnchor.constraint(equalTo: split.bottomAnchor),
+            editorScroll.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+            editorScroll.trailingAnchor.constraint(equalTo: split.trailingAnchor),
+            editorScroll.topAnchor.constraint(equalTo: split.topAnchor),
+            editorScroll.bottomAnchor.constraint(equalTo: split.bottomAnchor),
+            editor.widthAnchor.constraint(equalTo: editorScroll.contentView.widthAnchor),
+            editor.leadingAnchor.constraint(equalTo: editorScroll.contentView.leadingAnchor),
+            editor.topAnchor.constraint(equalTo: editorScroll.contentView.topAnchor),
+            dictionarySearch.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 10),
+            dictionarySearch.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 10),
+            dictionarySearch.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -10),
+            scroll.topAnchor.constraint(equalTo: dictionarySearch.bottomAnchor, constant: 6),
+            scroll.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: buttons.topAnchor, constant: -6),
+            buttons.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 8),
+            buttons.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -6),
+            aliasStack.widthAnchor.constraint(equalTo: aliases.widthAnchor),
+            sampleField.widthAnchor.constraint(equalTo: test.widthAnchor),
+            previewLabel.widthAnchor.constraint(equalTo: test.widthAnchor)
+        ])
+        reloadDictionarySelection()
+        refreshDictionaryEditor()
+        return split
+    }
+
+    private func dictionaryFormRow(_ title: String, _ control: NSView) -> NSView {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .secondaryLabelColor
+        label.alignment = .right
+        label.widthAnchor.constraint(equalToConstant: 70).isActive = true
+        let row = NSStackView(views: [label, control])
+        row.alignment = .top
+        row.spacing = 10
+        control.widthAnchor.constraint(equalTo: row.widthAnchor, constant: -80).isActive = true
+        control.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return row
+    }
+
+    private func reloadDictionarySelection() {
+        refreshingDictionary = true
+        defer { refreshingDictionary = false }
+        let query = dictionarySearch.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        visibleDictionaryEntries = dictionaryEntries.filter {
+            query.isEmpty || ([$0.canonical] + $0.aliases).contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+        if let draft = editingDictionaryEntry,
+           !dictionaryEntries.contains(where: { $0.id == draft.id }) {
+            visibleDictionaryEntries.append(draft)
+        }
+        dictionaryTable.reloadData()
+        if let selected = visibleDictionaryEntries.firstIndex(where: { $0.id == editingDictionaryEntry?.id }) {
+            dictionaryTable.selectRowIndexes(IndexSet(integer: selected), byExtendingSelection: false)
+        } else {
+            dictionaryTable.deselectAll(nil)
+            editingDictionaryEntry = nil
+        }
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !refreshingDictionary else { return }
+        let row = dictionaryTable.selectedRow
+        editingDictionaryEntry = visibleDictionaryEntries.indices.contains(row) ? visibleDictionaryEntries[row] : nil
+        dictionaryMessage.stringValue = ""
+        refreshDictionaryEditor()
+    }
+
+    private func refreshDictionaryEditor() {
+        let entry = editingDictionaryEntry
+        canonicalField.stringValue = entry?.canonical ?? ""
+        dictionaryEnabled.state = entry?.isEnabled == true ? .on : .off
+        let locales = Set(localeMenuIdentifiers + [committedSettings.localeIdentifier] + dictionaryEntries.compactMap(\.localeIdentifier))
+        dictionaryLocale.removeAllItems()
+        dictionaryLocale.addItem(withTitle: "All languages")
+        dictionaryLocale.lastItem?.representedObject = ""
+        for locale in locales.sorted() {
+            dictionaryLocale.addItem(withTitle: Locale.current.localizedString(forIdentifier: locale) ?? locale)
+            dictionaryLocale.lastItem?.representedObject = locale
+        }
+        dictionaryLocale.selectItem(at: dictionaryLocale.itemArray.firstIndex {
+            ($0.representedObject as? String) == (entry?.localeIdentifier ?? "")
+        } ?? 0)
+        for control: NSControl in [canonicalField, dictionaryLocale, dictionaryEnabled, addAliasButton, removeTermButton, sampleField] {
+            control.isEnabled = entry != nil
+        }
+        let aliases = entry?.aliases ?? []
+        if aliasStack.arrangedSubviews.count == aliases.count {
+            for (index, row) in aliasStack.arrangedSubviews.enumerated() {
+                if let row = row as? NSStackView, let field = row.arrangedSubviews.first as? NSTextField {
+                    field.stringValue = aliases[index]
+                }
+            }
+            previewSampleChanged()
+            return
+        }
+        for view in aliasStack.arrangedSubviews {
+            aliasStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        for (index, alias) in aliases.enumerated() {
+            let field = NSTextField(string: alias)
+            field.placeholderString = "Alias"
+            field.tag = index
+            field.delegate = self
+            identify(field, as: "dictionary-alias-\(index)")
+            field.setAccessibilityLabel("Alias \(index + 1)")
+            let remove = NSButton(title: "−", target: self, action: #selector(removeDictionaryAlias(_:)))
+            remove.tag = index
+            remove.controlSize = .small
+            identify(remove, as: "dictionary-remove-alias-\(index)")
+            remove.setAccessibilityLabel("Remove alias \(index + 1)")
+            let row = NSStackView(views: [field, remove])
+            row.spacing = 8
+            aliasStack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: aliasStack.widthAnchor).isActive = true
+            field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        }
+        previewSampleChanged()
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        guard let field = notification.object as? NSTextField else { return }
+        if field === sampleField {
+            previewSampleChanged()
+        } else if field === dictionarySearch {
+            reloadDictionarySelection()
+            refreshDictionaryEditor()
+        } else if field === canonicalField {
+            editingDictionaryEntry?.canonical = field.stringValue
+        } else if editingDictionaryEntry?.aliases.indices.contains(field.tag) == true {
+            editingDictionaryEntry?.aliases[field.tag] = field.stringValue
+        }
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        guard let field = notification.object as? NSTextField,
+              field !== sampleField, field !== dictionarySearch else { return }
+        controlTextDidChange(notification)
+        commitDictionaryEditor()
+    }
+
+    @objc private func dictionaryOptionsChanged() {
+        editingDictionaryEntry?.isEnabled = dictionaryEnabled.state == .on
+        let locale = dictionaryLocale.selectedItem?.representedObject as? String ?? ""
+        editingDictionaryEntry?.localeIdentifier = locale.isEmpty ? nil : locale
+        commitDictionaryEditor()
+    }
+
+    @objc private func addDictionaryAlias() {
+        guard editingDictionaryEntry != nil else { return }
+        editingDictionaryEntry?.aliases.append("")
+        dictionaryMessage.stringValue = "Enter an alias to save."
+        refreshDictionaryEditor()
+        if let row = aliasStack.arrangedSubviews.last as? NSStackView,
+           let field = row.arrangedSubviews.first as? NSTextField {
+            window?.makeFirstResponder(field)
+        }
+    }
+
+    @objc private func removeDictionaryAlias(_ sender: NSButton) {
+        guard editingDictionaryEntry?.aliases.indices.contains(sender.tag) == true else { return }
+        editingDictionaryEntry?.aliases.remove(at: sender.tag)
+        commitDictionaryEditor()
+        refreshDictionaryEditor()
+    }
+
+    private func commitDictionaryEditor() {
+        guard var entry = editingDictionaryEntry else { return }
+        entry.canonical = entry.canonical.trimmingCharacters(in: .whitespacesAndNewlines)
+        entry.aliases = entry.aliases.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        var candidate = dictionaryEntries
+        if let index = candidate.firstIndex(where: { $0.id == entry.id }) {
+            candidate[index] = entry
+        } else {
+            candidate.append(entry)
+        }
+        do {
+            try DictionaryCompiler.validate(candidate)
+        } catch {
+            dictionaryMessage.stringValue = String(describing: error)
+            return
+        }
+        guard candidate != committedDictionaryEntries else { return }
+        if persistDictionaryEntries(candidate) {
+            editingDictionaryEntry = entry
+            dictionarySearch.stringValue = ""
+        } else if let committed = committedDictionaryEntries.first(where: { $0.id == entry.id }) {
+            editingDictionaryEntry = committed
+        }
+        reloadDictionarySelection()
+        refreshDictionaryEditor()
+    }
+
     private func configureDictionaryTable() {
         dictionaryTable.identifier = NSUserInterfaceItemIdentifier("oigo.settings.dictionary-table")
         dictionaryTable.setAccessibilityIdentifier("oigo.settings.dictionary-table")
         dictionaryTable.setAccessibilityElement(true)
         dictionaryTable.setAccessibilityRole(.table)
         dictionaryTable.setAccessibilityLabel("Custom dictionary entries")
-        dictionaryTable.addTableColumn(column(identifier: "canonical", title: "Canonical", width: 140))
-        dictionaryTable.addTableColumn(column(identifier: "aliases", title: "Aliases", width: 220))
-        dictionaryTable.addTableColumn(column(identifier: "locale", title: "Locale", width: 80))
-        dictionaryTable.addTableColumn(column(identifier: "enabled", title: "Enabled", width: 70))
-        dictionaryTable.headerView = NSTableHeaderView()
+        dictionaryTable.addTableColumn(column(identifier: "canonical", title: "Terms", width: 180))
+        dictionaryTable.headerView = nil
         dictionaryTable.delegate = self
         dictionaryTable.dataSource = self
-        dictionaryTable.usesAlternatingRowBackgroundColors = true
-        dictionaryTable.rowHeight = 24
+        dictionaryTable.style = .sourceList
+        dictionaryTable.rowHeight = 28
         dictionaryTable.allowsEmptySelection = true
     }
 
@@ -1109,29 +1435,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        dictionaryEntries.count
+        visibleDictionaryEntries.count
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard dictionaryEntries.indices.contains(row), let tableColumn else {
+        guard visibleDictionaryEntries.indices.contains(row) else {
             return nil
         }
-        let entry = dictionaryEntries[row]
-        let text: String
-        switch tableColumn.identifier.rawValue {
-        case "canonical":
-            text = entry.canonical
-        case "aliases":
-            text = entry.aliases.joined(separator: ", ")
-        case "locale":
-            text = entry.localeIdentifier ?? "Global"
-        case "enabled":
-            text = entry.isEnabled ? "Yes" : "No"
-        default:
-            text = ""
-        }
+        let entry = visibleDictionaryEntries[row]
+        let text = (entry.canonical.isEmpty ? "New term" : entry.canonical) + (entry.isEnabled ? "" : "  off")
         let view = NSTableCellView()
         let field = NSTextField(labelWithString: text)
+        field.lineBreakMode = .byTruncatingTail
+        view.textField = field
         field.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(field)
         NSLayoutConstraint.activate([
@@ -1143,39 +1459,27 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     @objc private func addDictionaryEntry() {
-        presentDictionaryEditor(existing: nil)
-    }
-
-    @objc private func editDictionaryEntry() {
-        let row = dictionaryTable.selectedRow
-        guard dictionaryEntries.indices.contains(row) else {
-            dictionaryMessage.stringValue = "Select a dictionary entry to edit."
-            return
-        }
-        presentDictionaryEditor(existing: dictionaryEntries[row])
-    }
-
-    @objc private func toggleDictionaryEntry() {
-        let row = dictionaryTable.selectedRow
-        guard dictionaryEntries.indices.contains(row) else {
-            dictionaryMessage.stringValue = "Select a dictionary entry to enable or disable."
-            return
-        }
-        dictionaryEntries[row].isEnabled.toggle()
-        persistDictionaryEntries()
-        dictionaryTable.reloadData()
-        dictionaryTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        dictionarySearch.stringValue = ""
+        editingDictionaryEntry = DictionaryEntry(canonical: "", aliases: [])
+        dictionaryMessage.stringValue = "Enter a canonical spelling to save a new term."
+        reloadDictionarySelection()
+        refreshDictionaryEditor()
+        window?.makeFirstResponder(canonicalField)
     }
 
     @objc private func deleteDictionaryEntry() {
+        guard let entry = editingDictionaryEntry else { return }
         let row = dictionaryTable.selectedRow
-        guard dictionaryEntries.indices.contains(row) else {
-            dictionaryMessage.stringValue = "Select a dictionary entry to delete."
-            return
+        if dictionaryEntries.contains(where: { $0.id == entry.id }) {
+            guard persistDictionaryEntries(dictionaryEntries.filter { $0.id != entry.id }) else { return }
         }
-        dictionaryEntries.remove(at: row)
-        persistDictionaryEntries()
-        dictionaryTable.reloadData()
+        editingDictionaryEntry = nil
+        reloadDictionarySelection()
+        if !visibleDictionaryEntries.isEmpty {
+            dictionaryTable.selectRowIndexes(IndexSet(integer: min(max(row, 0), visibleDictionaryEntries.count - 1)), byExtendingSelection: false)
+        }
+        refreshDictionaryEditor()
+        previewSampleChanged()
     }
 
     @objc private func addStarterTermsAction() {
@@ -1186,69 +1490,40 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         }
         dictionaryEntries = document.entries
         committedDictionaryEntries = document.entries
-        dictionaryTable.reloadData()
+        reloadDictionarySelection()
+        refreshDictionaryEditor()
         dictionaryMessage.stringValue = ""
         previewSampleChanged()
     }
 
     @objc private func previewSampleChanged() {
-        previewLabel.stringValue = previewDictionary(sampleField.stringValue)
-    }
-
-    private func presentDictionaryEditor(existing: DictionaryEntry?) {
-        let alert = NSAlert()
-        alert.messageText = existing == nil ? "Add dictionary entry" : "Edit dictionary entry"
-        alert.informativeText = "Canonical spelling is emitted exactly. Aliases are comma-separated recognizer outputs."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        let canonicalField = NSTextField(string: existing?.canonical ?? "")
-        canonicalField.placeholderString = "Canonical spelling"
-        let aliasesField = NSTextField(string: existing?.aliases.joined(separator: ", ") ?? "")
-        aliasesField.placeholderString = "Aliases, comma separated"
-        let localeField = NSTextField(string: existing?.localeIdentifier ?? "")
-        localeField.placeholderString = "Locale identifier (optional)"
-        let accessory = NSStackView(views: [canonicalField, aliasesField, localeField])
-        accessory.orientation = .vertical
-        accessory.spacing = 6
-        accessory.translatesAutoresizingMaskIntoConstraints = false
-        accessory.widthAnchor.constraint(equalToConstant: 360).isActive = true
-        alert.accessoryView = accessory
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            return
-        }
-        let aliases = aliasesField.stringValue
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        let locale = localeField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let entry = DictionaryEntry(
-            id: existing?.id ?? UUID(),
-            canonical: canonicalField.stringValue,
-            aliases: aliases,
-            localeIdentifier: locale.isEmpty ? nil : locale,
-            isEnabled: existing?.isEnabled ?? true
-        )
-        if let existing, let index = dictionaryEntries.firstIndex(where: { $0.id == existing.id }) {
-            dictionaryEntries[index] = entry
-        } else {
-            dictionaryEntries.append(entry)
-        }
-        persistDictionaryEntries()
-        dictionaryTable.reloadData()
-        previewSampleChanged()
+        previewLabel.stringValue = "Result: " + previewDictionary(sampleField.stringValue)
     }
 
     func setDictionaryStatus(_ message: String?) {
         dictionaryMessage.stringValue = message ?? ""
     }
 
-    private func persistDictionaryEntries() {
-        if let error = saveDictionary(DictionaryDocument(entries: dictionaryEntries)) {
+    private func persistDictionaryEntries(_ entries: [DictionaryEntry]) -> Bool {
+        do {
+            try DictionaryCompiler.validate(entries)
+        } catch {
+            dictionaryMessage.stringValue = String(describing: error)
+            return false
+        }
+        if let error = saveDictionary(DictionaryDocument(entries: entries)) {
             dictionaryEntries = committedDictionaryEntries
             dictionaryMessage.stringValue = error
+            return false
         } else {
+            dictionaryEntries = entries
             committedDictionaryEntries = dictionaryEntries
             dictionaryMessage.stringValue = "Saved."
+            return true
         }
     }
+}
+
+private final class DictionaryEditorStack: NSStackView {
+    override var isFlipped: Bool { true }
 }

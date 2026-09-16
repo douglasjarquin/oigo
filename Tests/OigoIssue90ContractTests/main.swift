@@ -28,9 +28,13 @@ private struct OigoIssue90ContractTests {
             ("multibuffer-audio-buffer-list", testMultiBufferAudioBufferList),
             ("canonical-format-is-mono", testCanonicalFormatIsMono),
             ("caf-writer-round-trip", testCAFWriterRoundTrip),
+            ("caf-reader-sample-exact-round-trip", testCAFReaderSampleExactRoundTrip),
             ("pipeline-stop-drains-accepted", testPipelineStopDrainsAccepted),
             ("pipeline-slow-writer-handoff", testPipelineSlowWriterHandoff),
             ("pipeline-overflow", testPipelineOverflow),
+            ("pipeline-oversized-sample-exact", testPipelineOversizedSampleExact),
+            ("pipeline-oversized-overflow", testPipelineOversizedOverflow),
+            ("canonical-range-bounds", testCanonicalRangeBounds),
             ("pipeline-writer-failure-vs-speech", testWriterFailureVersusSpeech),
             ("pipeline-stale-generation", testStaleGeneration),
             ("pipeline-start-stop-cycles", testStartStopCycles),
@@ -294,6 +298,55 @@ private struct OigoIssue90ContractTests {
         }
     }
 
+    private static func testCAFReaderSampleExactRoundTrip() throws {
+        let root = try temporaryDirectory()
+        defer { cleanup(root) }
+        let store = try SessionStore(rootDirectory: root)
+        let session = try store.createSession(now: Date(timeIntervalSince1970: 9_001))
+        let format = try requiredFormat(AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1))
+        let samples: [Float] = (0..<187_412).map { Float(($0 % 2_048) - 1_024) / 1_024 }
+        let writer = try CAFWriter(descriptor: store.createAudioFileDescriptor(for: session), format: format)
+        defer { writer.close() }
+        try samples.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else {
+                throw ContractFailure(message: "round-trip fixture has no samples")
+            }
+            try writer.writeCanonicalMono(samples: baseAddress, frameCount: samples.count)
+        }
+        writer.close()
+
+        let independentReader = try AVAudioFile(forReading: session.audioURL)
+        guard independentReader.length == AVAudioFramePosition(samples.count) else {
+            throw ContractFailure(message: "CAFWriter fixture does not contain 187412 frames")
+        }
+        for requestedFrames: AVAudioFrameCount in [4_096, 200_000] {
+            let reader = try CAFReader(descriptor: store.openAudioFileDescriptor(for: session))
+            defer { reader.close() }
+            let declaredFrames = try reader.frameLength()
+            guard declaredFrames == Int64(samples.count) else {
+                throw ContractFailure(message: "CAFReader reported an incorrect file length")
+            }
+            var offset = 0
+            while offset < samples.count {
+                guard let buffer = try reader.read(frameCount: requestedFrames) else {
+                    throw ContractFailure(message: "CAFReader returned nil at frame \(offset) of \(declaredFrames) valid frames")
+                }
+                let count = min(Int(requestedFrames), samples.count - offset)
+                try assertCanonical(buffer, sampleRate: 44_100, frames: AVAudioFrameCount(count))
+                try assertSamples(
+                    buffer, equalTo: Array(samples[offset..<(offset + count)]), tolerance: 0,
+                    note: "CAFReader must preserve every Float32 sample including the final short read"
+                )
+                offset += count
+            }
+            let eof = try reader.read(frameCount: requestedFrames)
+            let repeatedEOF = try reader.read(frameCount: requestedFrames)
+            guard eof == nil, repeatedEOF == nil else {
+                throw ContractFailure(message: "CAFReader did not stay at EOF after all samples were read")
+            }
+        }
+    }
+
     private static func testPipelineStopDrainsAccepted() throws {
         let writer = ScriptedWriter()
         let pipeline = try makePipeline(writer: writer, generation: 1, capacity: 8)
@@ -364,6 +417,98 @@ private struct OigoIssue90ContractTests {
         }
         guard writer.failures.contains(CapturePipelineFailure.overflow.rawValue) else {
             throw ContractFailure(message: "overflow did not report audio_pipeline_overflow")
+        }
+    }
+
+    private static func testPipelineOversizedSampleExact() throws {
+        for interleaved in [false, true] {
+            for frames in [4_410, 4_800, 8_192, 8_193] {
+                let sampleRate = frames == 4_800 ? 48_000.0 : 44_100.0
+                let format = try requiredFormat(AVAudioFormat(
+                    commonFormat: .pcmFormatFloat32, sampleRate: sampleRate,
+                    channels: 2, interleaved: interleaved
+                ))
+                let writer = ScriptedWriter()
+                let speech = SpeechSink()
+                let adapter = try CanonicalMonoAdapter(sourceFormat: format, selectedChannel: 1)
+                let pipeline = CapturePipeline(
+                    generation: 90, adapter: adapter, writer: writer,
+                    onBuffer: { speech.consume($0) },
+                    onFinish: {}, onInterruption: { _ in },
+                    onFailure: { writer.failures.append($0) }, teardownHandler: {}
+                )
+                let source = try makeBuffer(format: format, frames: AVAudioFrameCount(frames)) { channel, frame in
+                    channel == 1 ? Float(frame) / 16_384 : -1
+                }
+                let result = pipeline.tryAccept(source, generation: 90)
+                pipeline.stopAndWait()
+                guard result == .accepted else {
+                    throw ContractFailure(message: "\(frames) frames rejected: \(result), \(writer.failures)")
+                }
+                let expected = (0..<frames).map { Float($0) / 16_384 }
+                let chunks = stride(from: 0, to: frames, by: 4_096).map { min(4_096, frames - $0) }
+                let speechSamples = speech.buffers.flatMap { buffer in
+                    buffer.pcmData.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+                }
+                guard writer.samples.flatMap({ $0 }) == expected,
+                      speechSamples == expected,
+                      writer.frameCounts == chunks, speech.buffers.map(\.frameCount) == chunks,
+                      speech.buffers.allSatisfy({ $0.sampleRate == sampleRate && $0.channelCount == 1 }),
+                      writer.failures.isEmpty, writer.closed else {
+                    throw ContractFailure(message: "split/tail lost samples for \(frames) frames, interleaved=\(interleaved)")
+                }
+            }
+        }
+    }
+
+    private static func testPipelineOversizedOverflow() throws {
+        for byteLimited in [false, true] {
+            let writer = ScriptedWriter()
+            writer.blockWrites = true
+            let adapter = try CanonicalMonoAdapter(sourceFormat: monoFormat(), selectedChannel: 0)
+            let pipeline = CapturePipeline(
+                generation: 90, adapter: adapter, writer: writer,
+                capacity: byteLimited ? 4 : 2, maxFrames: 4_096,
+                maxBytes: (byteLimited ? 4_410 : 8_192) * MemoryLayout<Float>.size,
+                onBuffer: { _ in }, onFinish: { writer.finished = true },
+                onInterruption: { _ in }, onFailure: { writer.failures.append($0) },
+                teardownHandler: {}
+            )
+            let prefix = try makeSineBuffer(frames: 4_410, seed: 90)
+            let accepted = pipeline.tryAccept(prefix, generation: 90)
+            let result = pipeline.tryAccept(try makeSineBuffer(frames: 4_800, seed: 91), generation: 90)
+            writer.unblock()
+            pipeline.stopAndWait()
+            guard accepted == .accepted, result == .overflow,
+                  writer.frameCounts == [4_096, 314],
+                  writer.failures == [CapturePipelineFailure.overflow.rawValue],
+                  !writer.finished, writer.closed else {
+                throw ContractFailure(message: "oversized overflow failed to preserve accepted prefix: \(accepted), \(result), \(writer.frameCounts), \(writer.failures)")
+            }
+        }
+    }
+
+    private static func testCanonicalRangeBounds() throws {
+        let format = try monoFormat()
+        let adapter = try CanonicalMonoAdapter(sourceFormat: format, selectedChannel: 0)
+        let source = try makeBuffer(format: format, frames: 8) { _, frame in Float(frame) }
+        let samples = UnsafeMutablePointer<Float>.allocate(capacity: 4)
+        defer { samples.deallocate() }
+        for (offset, count) in [(-1, 1), (9, 0), (7, 2), (0, -1), (0, 5)] {
+            do {
+                _ = try adapter.convert(source, into: samples, frameCapacity: 4, frameOffset: offset, frameCount: count)
+                throw ContractFailure(message: "invalid conversion range accepted: \(offset), \(count)")
+            } catch CanonicalMonoAdapterError.conversionFailed {
+                continue
+            }
+        }
+        let count = try adapter.convert(source, into: samples, frameCapacity: 4, frameOffset: 4)
+        guard count == 4, Array(UnsafeBufferPointer(start: samples, count: count)) == [4, 5, 6, 7] else {
+            throw ContractFailure(message: "range conversion did not preserve the tail")
+        }
+        let empty = try adapter.convert(source, into: samples, frameCapacity: 4, frameOffset: 8, frameCount: 0)
+        guard empty == 0 else {
+            throw ContractFailure(message: "empty range at end was not accepted")
         }
     }
 
@@ -1050,12 +1195,14 @@ private final class SpeechSink: @unchecked Sendable {
     var blockOnConsume = false
     private let gate = DispatchSemaphore(value: 0)
     private(set) var count = 0
+    private(set) var buffers: [AudioCaptureBuffer] = []
 
     func consume(_ buffer: AudioCaptureBuffer) {
         if blockOnConsume {
             gate.wait()
         }
         count += 1
+        buffers.append(buffer)
         if failOnBuffer == count {
             return
         }
