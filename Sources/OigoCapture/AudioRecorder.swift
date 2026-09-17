@@ -842,6 +842,20 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
                         return
                     }
                     recorder.controlQueue.async {
+                        let usable = recorder.callbackDeliveryGate.performExclusively {
+                            recorder.lock.lock()
+                            let currentEngine = recorder.engine
+                            let current = recorder.recordingFence.accepts(recordingGeneration)
+                            recorder.lock.unlock()
+                            guard current, let currentEngine else { return true }
+                            return Self.configurationRemainsUsable(
+                                isRunning: currentEngine.isRunning,
+                                inputFormat: currentEngine.inputNode.inputFormat(forBus: 0),
+                                outputFormat: currentEngine.inputNode.outputFormat(forBus: 0),
+                                captureFormat: sourceFormat
+                            )
+                        }
+                        guard !usable else { return }
                         recorder.handleInterruption(
                             "audio input configuration changed",
                             generation: recordingGeneration
@@ -1115,6 +1129,18 @@ public final class AudioRecorder: AudioCapturing, @unchecked Sendable {
             sampleRate: format.sampleRate,
             channelCount: format.channelCount
         )
+    }
+
+    @_spi(Testing)
+    public static func configurationRemainsUsable(
+        isRunning: Bool,
+        inputFormat: AVAudioFormat,
+        outputFormat: AVAudioFormat,
+        captureFormat: AVAudioFormat
+    ) -> Bool {
+        isRunning
+            && inputFormat.isEqual(captureFormat)
+            && outputFormat.isEqual(captureFormat)
     }
 
     @_spi(Testing)

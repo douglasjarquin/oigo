@@ -172,6 +172,8 @@ Hosted CI builds unsigned Release `Oigo.app` and does not sign or notarize.
 
 ## Verify
 
+For repeated local app installation with stable macOS permissions, use [the local development workflow](docs/local-development.md).
+
 ```zsh
 swift build
 swift build --product Oigo

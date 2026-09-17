@@ -22,6 +22,7 @@ private struct OigoIssue77ContractTests {
             ("target-contract explicit wrapper change fails closed", testExplicitWrapperChangeFailsClosed),
             ("target-contract hash collision fails closed", testHashCollisionFailsClosed),
             ("target-contract secure field veto", testSecureFieldVeto),
+            ("target-contract keyboard paste without AX text storage", testKeyboardPasteWithoutAXTextStorage),
             ("insertion-contract capture precedes microphone permission", testCapturePrecedesMicrophonePermission),
             ("insertion-contract dispatch is not verification", testDispatchIsNotVerification),
             ("insertion-contract dispatch failure retains clipboard", testDispatchFailureRetainsClipboard),
@@ -55,6 +56,60 @@ private struct OigoIssue77ContractTests {
             exit(1)
         }
         print("GREEN: all issue #77 contract scenarios")
+    }
+
+    private static func testKeyboardPasteWithoutAXTextStorage() throws {
+        let identity = InsertionTargetIdentity(role: "AXUnknown")
+        let capabilities = InsertionTargetCapabilities(
+            supportsValue: false, valueIsSettable: false,
+            supportsSelectedText: false, selectedTextIsSettable: false,
+            hasEnabledPasteCommand: true
+        )
+        func validate(
+            matches: Bool? = true, secure: Bool = false,
+            bundle: String = "com.example.custom-input",
+            expectedBundle: String = "com.example.custom-input",
+            token: UUID? = UUID(),
+            capabilities: InsertionTargetCapabilities = capabilities
+        ) -> TargetValidation {
+            let snapshot = InsertionTargetSnapshot(
+                frontmostProcessIdentifier: 42, bundleIdentifier: expectedBundle,
+                focusedElementIdentifier: nil, role: "AXUnknown", isSecureTextField: false,
+                identity: identity, capabilities: capabilities, captureToken: token
+            )
+            return TargetValidation.evaluate(
+                snapshot: snapshot, currentProcessIdentifier: 42,
+                currentBundleIdentifier: bundle, currentFocusedElementIdentifier: nil,
+                currentRole: "AXUnknown", currentIsSecureTextField: secure,
+                accessibilityTrusted: true, currentIdentity: identity,
+                identityMatch: matches, currentCapabilities: capabilities
+            )
+        }
+        guard validate() == .safe else {
+            throw ContractFailure(message: "focused input with an enabled Command-V was rejected because it has no AX text storage")
+        }
+        guard validate(matches: false) == .focusedElementChanged,
+              validate(matches: nil) == .ambiguousTarget,
+              validate(token: nil) == .unsupportedTarget,
+              validate(secure: true) == .secureTextField,
+              validate(bundle: "com.example.other") == .applicationChanged,
+              validate(bundle: "com.github.wez.wezterm", expectedBundle: "com.github.wez.wezterm") == .safe,
+              validate(capabilities: InsertionTargetCapabilities(
+                supportsValue: false, valueIsSettable: false,
+                supportsSelectedText: false, selectedTextIsSettable: false
+              )) == .unsupportedTarget,
+              validate(capabilities: InsertionTargetCapabilities(
+                supportsValue: false, valueIsSettable: false,
+                supportsSelectedText: false, selectedTextIsSettable: false,
+                isEnabled: false, hasEnabledPasteCommand: true
+              )) == .disabledTarget,
+              validate(capabilities: InsertionTargetCapabilities(
+                supportsValue: true, valueIsSettable: false,
+                supportsSelectedText: false, selectedTextIsSettable: false,
+                hasEnabledPasteCommand: true
+              )) == .readOnlyTarget else {
+            throw ContractFailure(message: "keyboard paste support bypassed a target safety check")
+        }
     }
 
     private static func testAlternateEditableRole() throws {

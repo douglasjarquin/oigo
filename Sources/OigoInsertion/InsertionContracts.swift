@@ -77,19 +77,22 @@ public struct InsertionTargetCapabilities: Equatable, Sendable {
     public let supportsSelectedText: Bool
     public let selectedTextIsSettable: Bool
     public let isEnabled: Bool?
+    public let hasEnabledPasteCommand: Bool
 
     public init(
         supportsValue: Bool,
         valueIsSettable: Bool,
         supportsSelectedText: Bool,
         selectedTextIsSettable: Bool,
-        isEnabled: Bool? = true
+        isEnabled: Bool? = true,
+        hasEnabledPasteCommand: Bool = false
     ) {
         self.supportsValue = supportsValue
         self.valueIsSettable = valueIsSettable
         self.supportsSelectedText = supportsSelectedText
         self.selectedTextIsSettable = selectedTextIsSettable
         self.isEnabled = isEnabled
+        self.hasEnabledPasteCommand = hasEnabledPasteCommand
     }
 
     public var isEditable: Bool {
@@ -253,6 +256,13 @@ public enum TargetValidation: Equatable, Sendable {
         }
         guard capabilities.isEnabled != false else {
             return .disabledTarget
+        }
+        if capabilities.hasEnabledPasteCommand,
+           snapshot.captureToken != nil,
+           identityMatch == true,
+           !capabilities.supportsValue,
+           !capabilities.supportsSelectedText {
+            return .safe
         }
         guard capabilities.supportsValue || capabilities.supportsSelectedText else {
             return .unsupportedTarget
