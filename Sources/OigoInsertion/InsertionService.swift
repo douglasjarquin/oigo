@@ -416,7 +416,9 @@ public final class AccessibilityTargetEnvironment: InsertionTargetEnvironment {
             accessibilityTrusted: true,
             currentIdentity: identity,
             identityMatch: identityMatch,
-            currentCapabilities: targetCapabilities(for: focused)
+            currentCapabilities: targetCapabilities(
+                for: focused, processIdentifier: application.processIdentifier
+            )
         )
     }
 
@@ -485,7 +487,10 @@ public final class AccessibilityTargetEnvironment: InsertionTargetEnvironment {
         )
     }
 
-    private func targetCapabilities(for element: AXUIElement) -> InsertionTargetCapabilities {
+    private func targetCapabilities(
+        for element: AXUIElement,
+        processIdentifier: Int32? = nil
+    ) -> InsertionTargetCapabilities {
         let attributes = attributeNames(for: element)
         let supportsValue = attributes.contains(kAXValueAttribute)
         let supportsSelectedText = attributes.contains(kAXSelectedTextAttribute)
@@ -495,8 +500,40 @@ public final class AccessibilityTargetEnvironment: InsertionTargetEnvironment {
             supportsSelectedText: supportsSelectedText,
             selectedTextIsSettable: supportsSelectedText
                 && isSettable(kAXSelectedTextAttribute, on: element),
-            isEnabled: boolAttribute(kAXEnabledAttribute, from: element)
+            isEnabled: boolAttribute(kAXEnabledAttribute, from: element),
+            hasEnabledPasteCommand: !supportsValue && !supportsSelectedText
+                && processIdentifier.map(hasEnabledPasteCommand) == true
         )
+    }
+
+    private func hasEnabledPasteCommand(for processIdentifier: Int32) -> Bool {
+        let application = AXUIElementCreateApplication(processIdentifier)
+        guard let menuBar = copyElement(kAXMenuBarAttribute, from: application) else {
+            return false
+        }
+        var level = [menuBar]
+        for _ in 0..<4 {
+            var children: [AXUIElement] = []
+            for element in level {
+                if stringAttribute(kAXMenuItemCmdCharAttribute, from: element)?.lowercased() == "v",
+                   boolAttribute(kAXEnabledAttribute, from: element) == true {
+                    var modifiers: CFTypeRef?
+                    if AXUIElementCopyAttributeValue(
+                        element, kAXMenuItemCmdModifiersAttribute as CFString, &modifiers
+                    ) == .success, (modifiers as? NSNumber)?.intValue == 0 {
+                        return true
+                    }
+                }
+                var value: CFTypeRef?
+                if AXUIElementCopyAttributeValue(
+                    element, kAXChildrenAttribute as CFString, &value
+                ) == .success, let elements = value as? [AXUIElement] {
+                    children.append(contentsOf: elements)
+                }
+            }
+            level = children
+        }
+        return false
     }
 
     private func attributeNames(for element: AXUIElement) -> Set<String> {

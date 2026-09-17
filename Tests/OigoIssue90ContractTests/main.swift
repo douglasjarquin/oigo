@@ -47,6 +47,7 @@ private struct OigoIssue90ContractTests {
             ("routed-input-invalid-format", testRoutedInputInvalidFormat),
             ("routed-input-invalid-channel", testRoutedInputInvalidChannel),
             ("recorder-startup-interruption", testRecorderStartupInterruption),
+            ("running-engine-configuration-notification", testRunningEngineConfigurationNotification),
             ("recorder-stop-after-overflow", testRecorderStopAfterOverflow),
             ("recorder-concurrent-terminalize", testRecorderConcurrentTerminalize)
         ]
@@ -815,6 +816,29 @@ private struct OigoIssue90ContractTests {
         } catch AudioRecorderError.selectedChannelUnavailable {
             print("ASSERTED: routed input typed-failure=selectedChannelUnavailable")
             return
+        }
+    }
+
+    private static func testRunningEngineConfigurationNotification() throws {
+        guard let capture = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1),
+              let otherRate = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1),
+              let stereo = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2) else {
+            throw ContractFailure(message: "could not create audio configurations")
+        }
+        let cases: [(Bool, AVAudioFormat, AVAudioFormat, Bool)] = [
+            (true, capture, capture, true),
+            (false, capture, capture, false),
+            (true, otherRate, capture, false),
+            (true, capture, otherRate, false),
+            (true, stereo, capture, false),
+            (true, capture, stereo, false)
+        ]
+        for (running, input, output, expected) in cases {
+            guard AudioRecorder.configurationRemainsUsable(
+                isRunning: running, inputFormat: input, outputFormat: output, captureFormat: capture
+            ) == expected else {
+                throw ContractFailure(message: "configuration notification must preserve a running, unchanged capture and interrupt stopped or changed audio")
+            }
         }
     }
 
